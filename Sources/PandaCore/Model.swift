@@ -139,7 +139,39 @@ public enum DockerAction: Sendable, Equatable {
     }
 }
 
+/// A `simctl` command for one runtime or one device. The identifier is checked, and the command has a fixed shape.
+/// The bulk forms of the delete command remove more than the list shows. They are never used.
+public enum SimulatorAction: Sendable, Equatable {
+    /// Deletes one runtime. Xcode shuts down the simulators that run on it, so the cleaner checks first.
+    case deleteRuntime(id: String)
+    /// Deletes one simulator device and its data.
+    case deleteDevice(udid: String)
+
+    /// The arguments after `simctl`, or nil when the identifier is not valid.
+    public var arguments: [String]? {
+        switch self {
+        case .deleteRuntime(let id): return Self.isUUID(id) ? ["runtime", "delete", id] : nil
+        case .deleteDevice(let udid): return Self.isUUID(udid) ? ["delete", udid] : nil
+        }
+    }
+
+    /// A runtime is a disk image that Xcode must unmount first, so it can take a while.
+    public var timeout: TimeInterval {
+        if case .deleteRuntime = self { return 300 }
+        return 60
+    }
+
+    static func isUUID(_ text: String) -> Bool {
+        text.range(of: "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                   options: .regularExpression) != nil
+    }
+}
+
 public enum Action: Sendable {
+    /// One simulator runtime or device. The cleaner checks the state again before it runs.
+    case simulator(SimulatorAction)
+    /// One Xcode archive. It must be `Archives/<date>/<name>.xcarchive` in the home folder.
+    case removeArchive(URL)
     /// Information only. Nothing can be deleted. The menu shows it as a line that cannot be chosen.
     case inform
     /// One Docker object. The cleaner checks the engine and the object again before it runs.

@@ -12,12 +12,15 @@ public final class Cleaner {
 
     /// Tells which apps run now. The cleaner asks again before each item.
     private let runningApps: RunningApps
+    /// Finds `simctl` at clean time. Tests give a fake one.
+    private let simctl: () -> Simctl?
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
-                runningApps: RunningApps = .system) {
+                runningApps: RunningApps = .system, simctl: (() -> Simctl?)? = nil) {
         self.guardian = guardian
         self.runningApps = runningApps
+        self.simctl = simctl ?? { Shell.resolve("xcrun").map { Simctl(xcrun: $0) } }
         self.remaining = remaining
         self.dockerEngine = dockerEngine ?? {
             DockerEngine.detect(dockerPath: Shell.resolve("docker"), home: URL(fileURLWithPath: guardian.home))
@@ -72,6 +75,12 @@ public final class Cleaner {
 
             case .docker(let action):
                 runDocker(action, finding: finding, into: &report)
+
+            case .simulator(let action):
+                runSimulator(action, finding: finding, into: &report)
+
+            case .removeArchive(let url):
+                removeArchive(url, finding: finding, into: &report)
 
             case .inform:
                 skip(finding, "this item is information only", &report)
@@ -144,6 +153,66 @@ public final class Cleaner {
         Log.info("clean \(finding.id): removed through docker, estimate \(finding.bytes), left \(left), freed \(freed)")
     }
 
+    // MARK: Xcode
+
+    private func runSimulator(_ action: SimulatorAction, finding: Finding, into report: inout CleanReport) {
+        guard let arguments = action.arguments else {
+            skip(finding, "the simulator identifier is not valid", &report); return
+        }
+        guard let simctl = simctl() else { skip(finding, "Xcode tools were not found", &report); return }
+
+        // Read the state again. It can change after the scan.
+        guard let devices = simctl.devices() else { skip(finding, "could not read the simulators", &report); return }
+        switch action {
+        case .deleteRuntime(let id):
+            guard let runtimes = simctl.runtimes(), let runtime = runtimes.first(where: { $0.id == id }) else {
+                skip(finding, "the runtime is already gone", &report); return
+            }
+            guard runtime.deletable, runtime.kind != "Bundled with Xcode" else {
+                skip(finding, "Xcode cannot remove this runtime", &report); return
+            }
+            // Xcode shuts down a running simulator when its runtime is deleted. We do not allow that.
+            if devices.contains(where: { $0.runtimeIdentifier == runtime.runtimeIdentifier && $0.isActive }) {
+                skip(finding, "a simulator that uses this runtime is running", &report); return
+            }
+        case .deleteDevice(let udid):
+            guard let device = devices.first(where: { $0.udid == udid }) else {
+                skip(finding, "the simulator is already gone", &report); return
+            }
+            guard device.isAvailable == true, !device.isActive else {
+                skip(finding, "the simulator is running or not usable", &report); return
+            }
+        }
+
+        let result = simctl.run(arguments, timeout: action.timeout)
+        guard result.status == 0, !result.timedOut else {
+            report.failed.append("\(finding.title): simctl did not remove it")
+            return
+        }
+        let left = remaining?(finding) ?? 0
+        let freed = max(0, finding.bytes - left)
+        report.freed += freed
+        report.removed += 1
+        Log.info("clean \(finding.id): removed through simctl, estimate \(finding.bytes), left \(left), freed \(freed)")
+    }
+
+    /// An archive is `Archives/<date>/<name>.xcarchive` in the home folder. Nothing else is accepted.
+    private func removeArchive(_ url: URL, finding: Finding, into report: inout CleanReport) {
+        guard XcodeArchives.isArchive(url, home: URL(fileURLWithPath: guardian.home)) else {
+            skip(finding, "not an Xcode archive in the archives folder", &report); return
+        }
+        if let reason = guardian.check(url) { skip(finding, "\(reason)", &report); return }
+        do {
+            try FileManager.default.removeItem(at: url)
+            report.freed += finding.bytes
+            report.removed += 1
+            Log.info("clean \(finding.id): removed archive \(finding.bytes) bytes — \(url.path)")
+        } catch {
+            Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            report.failed.append("\(url.path): \(error.localizedDescription)")
+        }
+    }
+
     private func skip(_ finding: Finding, _ reason: String, _ report: inout CleanReport) {
         Log.warn("skip \(finding.id): \(reason) — \(finding.location)")
         report.skipped.append("\(finding.location): \(reason)")
@@ -197,6 +266,9 @@ public final class Cleaner {
             case .success(let engine):
                 result = engine.run(command.arguments, timeout: command.timeout)
             }
+        } else if command.toolName == "xcrun" {
+            guard let simctl = simctl() else { skip(finding, "xcrun not found", &report); return }
+            result = Shell.run(simctl.xcrun, command.arguments, timeout: command.timeout)
         } else {
             guard let tool = Shell.resolve(command.toolName) else {
                 skip(finding, "\(command.toolName) not found", &report); return

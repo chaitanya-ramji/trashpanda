@@ -1,0 +1,83 @@
+import Foundation
+
+/// The words of the dialog that asks the user to confirm one delete.
+/// It lives in the core, so that tests can check the wording and the default button of each kind.
+public struct Confirmation: Equatable, Sendable {
+    public let title: String
+    public let body: String
+    /// Text under the body. When nil, the dialog uses `defaultFooter`.
+    public let footer: String?
+    /// Text of the confirm button. When nil, it says "Free up <size>".
+    public let confirmTitle: String?
+    /// When true, the first (default) button keeps the item, so the Return key cannot delete it.
+    public let cancelIsDefault: Bool
+
+    public static let defaultFooter =
+        "Your code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
+
+    /// What kind of thing the item is decides how careful the dialog is.
+    public enum Kind: Equatable, Sendable {
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive
+    }
+
+    public static func kind(of f: Finding) -> Kind {
+        switch f.action {
+        case .docker(.removeContainer): return .container
+        case .docker(.removeVolume): return .volume
+        case .simulator(.deleteRuntime): return .simulatorRuntime
+        case .simulator(.deleteDevice): return .simulatorDevice
+        case .removeArchive: return .archive
+        default: return .ordinary
+        }
+    }
+
+    public static func forOne(_ f: Finding, staleDays: Int, now: Date = Date()) -> Confirmation {
+        let detail = "\(f.title)\n\(f.location)"
+        switch kind(of: f) {
+        case .volume:
+            return Confirmation(
+                title: "Delete this volume?", body: detail,
+                footer: "Databases and files inside a volume are lost for good. If it holds a database, export it first. This can't be undone.",
+                confirmTitle: "Delete volume", cancelIsDefault: true)
+        case .container:
+            return Confirmation(
+                title: "Remove this container?", body: "\(detail)\n\(f.rebuild.label).",
+                footer: "A container can hold data that is stored nowhere else. This can't be undone.",
+                confirmTitle: "Remove", cancelIsDefault: false)
+        case .simulatorDevice:
+            return Confirmation(
+                title: "Delete this simulator?", body: detail,
+                footer: "Apps and data inside it are deleted. You can create a new simulator in Xcode. This can't be undone.",
+                confirmTitle: "Delete simulator", cancelIsDefault: true)
+        case .simulatorRuntime:
+            return Confirmation(
+                title: "Remove this simulator runtime?", body: detail,
+                footer: "Simulators that use it stop working. You can download it again in Xcode Settings. This can't be undone.",
+                confirmTitle: "Remove runtime", cancelIsDefault: false)
+        case .archive:
+            return Confirmation(
+                title: "Delete this archive?", body: detail,
+                footer: "An archive holds the symbol files (dSYMs) that you need to read crash reports of a build that you shipped. This can't be undone.",
+                confirmTitle: "Delete archive", cancelIsDefault: true)
+        case .ordinary:
+            var text = "\(f.title)\n\(f.rebuild.label)."
+            if case .removeArtifact = f.action, f.tier == .review, let d = f.lastActivity {
+                let days = max(0, Int(now.timeIntervalSince(d) / 86_400))
+                if days < staleDays { text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")." }
+            }
+            return Confirmation(title: "Free up \(sizeText(f.bytes))?", body: text, footer: nil,
+                                confirmTitle: nil, cancelIsDefault: false)
+        }
+    }
+
+    /// The same words as the menu uses.
+    static func sizeText(_ bytes: Int64) -> String {
+        let v = Double(max(0, bytes))
+        if v >= 1e12 { return String(format: "%.1f TB", v / 1e12) }
+        if v >= 1e10 { return String(format: "%.0f GB", v / 1e9) }
+        if v >= 1e9 { return String(format: "%.1f GB", v / 1e9) }
+        if v >= 1e6 { return String(format: "%.0f MB", v / 1e6) }
+        if v >= 1e3 { return String(format: "%.0f KB", v / 1e3) }
+        return "0 KB"
+    }
+}

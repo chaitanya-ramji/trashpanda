@@ -79,6 +79,17 @@ No test may use a real Docker engine. Docker tests use a fake `docker` tool.
 - A remote engine must always give no items and no commands except `context inspect`.
 - To add a case, add a fixture file or build one with `DockerJSON`.
 
+## Test Xcode and simulator features
+
+No test may use a real simulator, runtime, or archive. Simulator tests use a fake `xcrun`.
+
+- Make your test class a subclass of `SimctlTestCase`. It hides the real `xcrun`.
+- Make the fake with `FakeSimctl` (in `Tests/PandaCoreTests/FakeSimctl.swift`). It answers `simctl runtime list -j` and `simctl list devices -j` from fixture files in `Tests/PandaCoreTests/Fixtures/simctl`.
+- The fake serves one answer before a delete command and another one after it. Use this to test the measured result.
+- Check `fake.deletes` to prove which delete commands ran. Check `fake.unexpected` to prove that nothing else ran.
+- Archives are plain folders. Test them in a `Sandbox` home folder.
+- The fixtures follow the key names that the real `simctl` uses. We could not read a real list on a Mac that has runtimes, so if you have one, compare `xcrun simctl runtime list -j` with the fixtures and tell us what differs.
+
 ## Safety rules for every change
 
 A pull request must follow these rules. A reviewer checks them.

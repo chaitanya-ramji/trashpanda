@@ -16,6 +16,20 @@ enum DemoData {
             return Finding(id: "c", ecosystem: .docker, title: "Stopped container · old-db",
                            location: "\(place) · image postgres:17 · Exited (0) 4 months ago", bytes: 217_000,
                            tier: .review, rebuild: .recreate, action: .docker(.removeContainer(id: "0123456789ab")))
+        case "runtime":
+            return Finding(id: "r", ecosystem: .swift, title: "Simulator runtime · iOS 17.5",
+                           location: "Xcode simulators · build 21F79 · last used 126 days ago · 3 simulators run on it",
+                           bytes: 7_000_000_000, tier: .review, rebuild: .download,
+                           action: .simulator(.deleteRuntime(id: "11111111-1111-1111-1111-111111111111")))
+        case "device":
+            return Finding(id: "d", ecosystem: .swift, title: "Simulator · iPhone 15 (iOS 17.5)",
+                           location: "Xcode simulators · not started for 303 days", bytes: 800_000_000, tier: .review,
+                           rebuild: .recreate, action: .simulator(.deleteDevice(udid: "22222222-2222-2222-2222-222222222222")))
+        case "archive":
+            return Finding(id: "a", ecosystem: .swift, title: "Archive · MyApp 5-1-26, 10.00 AM",
+                           location: "~/Library/Developer/Xcode/Archives/2026-05-01/MyApp 5-1-26, 10.00 AM.xcarchive · archived 192 days ago",
+                           bytes: 1_800_000_000, tier: .review, rebuild: .recreate,
+                           action: .removeArchive(URL(fileURLWithPath: "/tmp/none.xcarchive")))
         case "safe":
             return Finding(id: "s", ecosystem: .javascript, title: "node_modules · storefront",
                            location: "~/Projects/storefront/node_modules", bytes: 1_300_000_000, tier: .safe,
@@ -48,6 +62,18 @@ enum DemoData {
             item("10", .python, "Virtual environment · pipeline", 716_000_000, .review, .minutes, last: ago(9)),
             item("11", .go, "Go build cache", 650_000_000, .safe, .minutes),
             item("12", .docker, "Build cache", 568_000_000, .safe, .minutes, place: dk),
+            item("21", .swift, "Simulator runtime · iOS 17.5", 7_000_000_000, .review, .download,
+                 place: "Xcode simulators", action: .simulator(.deleteRuntime(id: "11111111-1111-1111-1111-111111111111"))),
+            item("22", .swift, "Simulator runtime · watchOS 10.5", 3_200_000_000, .review, .download,
+                 place: "Xcode simulators", action: .simulator(.deleteRuntime(id: "44444444-4444-4444-4444-444444444444"))),
+            item("23", .swift, "Simulator · iPhone 15 (iOS 17.5)", 800_000_000, .review, .recreate,
+                 place: "Xcode simulators", action: .simulator(.deleteDevice(udid: "22222222-2222-2222-2222-222222222222"))),
+            item("24", .swift, "Archive · MyApp 5-1-26", 1_800_000_000, .review, .recreate,
+                 place: "~/Library/Developer/Xcode/Archives", action: .removeArchive(URL(fileURLWithPath: "/tmp/none.xcarchive"))),
+            item("25", .swift, "iOS 27.0 runtime · newest, kept", 9_000_000_000, .review, .download,
+                 place: "Xcode simulators", action: .inform),
+            item("26", .swift, "iOS 18.2 runtime · in use", 8_000_000_000, .review, .download,
+                 place: "Xcode simulators", action: .inform),
             item("14", .docker, "Untagged images", 150_000_000, .safe, .minutes, place: dk),
             item("15", .docker, "Image · web-api:latest", 290_000_000, .review, .download, place: dk),
             item("16", .docker, "Stopped container · old-db", 1_200_000, .review, .recreate, place: dk),

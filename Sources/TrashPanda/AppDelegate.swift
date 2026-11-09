@@ -328,34 +328,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    /// The words of the dialog for one item. Something that cannot be rebuilt gets its own words.
-    /// "Your tools will rebuild it" would be wrong for a container or a volume.
+    /// The words of the dialog for one item. They come from the core, where tests check them.
     private func dialog(for f: Finding) -> FindingBox {
-        switch f.rebuild {
-        case .never:
-            return FindingBox(
-                [f], title: "Delete this volume?", body: singleBody(f),
-                footer: "Databases and files inside a volume are lost for good. If it holds a database, export it first. This can't be undone.",
-                confirmTitle: "Delete volume", cancelIsDefault: true)
-        case .recreate:
-            return FindingBox(
-                [f], title: "Remove this container?", body: singleBody(f),
-                footer: "A container can hold data that is stored nowhere else. This can't be undone.",
-                confirmTitle: "Remove")
-        default:
-            return FindingBox([f], title: "Free up \(Format.bytes(f.bytes))?", body: singleBody(f))
-        }
-    }
-
-    private func singleBody(_ f: Finding) -> String {
-        // A volume's warning is in the footer. We do not say the same thing twice.
-        var text = f.rebuild == .never ? "\(f.title)\n\(f.location)"
-            : f.rebuild == .recreate ? "\(f.title)\n\(f.location)\n\(f.rebuild.label)."
-            : "\(f.title)\n\(f.rebuild.label)."
-        if isProject(f), f.tier == .review, let days = daysSinceActivity(f), days < scanner.config.staleDays {
-            text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")."
-        }
-        return text
+        let c = Confirmation.forOne(f, staleDays: scanner.config.staleDays)
+        return FindingBox([f], title: c.title, body: c.body, footer: c.footer, confirmTitle: c.confirmTitle,
+                          cancelIsDefault: c.cancelIsDefault)
     }
 
     /// Only a project folder has "last worked on". A Docker image has "on this Mac for".

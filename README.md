@@ -33,7 +33,7 @@ Trash Panda looks in two places:
 
 | Language or tool | Global caches | Project folders |
 | --- | --- | --- |
-| Swift, Obj-C, Xcode | Build data, simulator files, Swift packages, CocoaPods | `.build`, `Pods` |
+| Swift, Obj-C, Xcode | Build data, simulator caches, Swift packages, CocoaPods. Review: simulator runtimes, old simulators, archives. | `.build`, `Pods` |
 | JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright | `node_modules`, `.next`, `.nuxt`, `.turbo` |
 | Python | pip, uv, pre-commit, Poetry, Hugging Face, PyTorch | `.venv`, `.tox`, `.nox` |
 | Java, Kotlin | Gradle, Maven, Android, Kotlin/Native, JetBrains | `target`, `build`, `.gradle` |
@@ -76,6 +76,8 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app counts only space that a delete frees. A file with more than one hard link frees no space.
 - For Homebrew, the app asks `brew` what it would remove. Homebrew keeps its own index files, and the app does not count them.
 - The app asks the owning tool to clean its own data when it can. It runs fixed commands only.
+- Xcode deletes a simulator runtime by shutting down the simulators on it, so the app refuses a runtime that has a running simulator. It keeps the newest runtime of each platform and any runtime used in the last 30 days. It never deletes a running simulator. It never uses the bulk forms of the simulator delete commands.
+- An Xcode archive holds the symbol files that you need to read crash reports of a build that you shipped. The app lists each archive by itself, never in the one-click clean, and the default button of its dialog keeps it.
 - Docker volumes can hold databases. The app removes a volume only when no container uses it and it is a local volume. Each volume needs its own confirmation, and the default button keeps it. A volume in use is shown but cannot be removed.
 - Docker Desktop keeps all its data in one disk image file. The app shows the size that the file really uses, next to the size of the data inside. It never changes the file. Lowering the disk limit in Docker Desktop deletes the file and all containers and images, so the app never suggests it.
 - The app never prunes all Docker images. It removes a named image only by its exact name, never forced.
@@ -209,7 +211,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Roadmap: keep the checkboxes correct ([#39](https://github.com/chaitanya-ramji/trashpanda/issues/39))
 
 ### Next: v0.4 Xcode, app and browser caches
-- [ ] Xcode: old simulator runtimes, devices, and archives (review) ([#27](https://github.com/chaitanya-ramji/trashpanda/issues/27))
+- [x] Xcode: old simulator runtimes, devices, and archives (review) ([#27](https://github.com/chaitanya-ramji/trashpanda/issues/27))
 - [ ] Xcode: iOS device support files, one item for each iOS version ([#41](https://github.com/chaitanya-ramji/trashpanda/issues/41))
 - [ ] Clean stale app update downloads ([#13](https://github.com/chaitanya-ramji/trashpanda/issues/13))
 - [ ] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))

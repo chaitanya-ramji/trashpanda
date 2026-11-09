@@ -1,0 +1,155 @@
+{
+  "devices": {
+    "com.apple.CoreSimulator.SimRuntime.iOS-17-5": [
+      {
+        "udid": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+        "name": "iPhone 15",
+        "state": "Shutdown",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/dddddddd-dddd-dddd-dddd-dddddddddddd/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/dddddddd-dddd-dddd-dddd-dddddddddddd",
+        "dataPathSize": 800000000,
+        "lastBootedAt": "2026-01-10T10:00:00Z"
+      },
+      {
+        "udid": "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "name": "iPhone 15 Pro",
+        "state": "Booted",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "dataPathSize": 1200000000,
+        "lastBootedAt": "2026-11-09T09:00:00Z"
+      },
+      {
+        "udid": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        "name": "iPad Air",
+        "state": "Shutdown",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/ffffffff-ffff-ffff-ffff-ffffffffffff/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/ffffffff-ffff-ffff-ffff-ffffffffffff",
+        "dataPathSize": 5000000
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+      {
+        "udid": "11111111-1111-1111-1111-111111111111",
+        "name": "iPhone 16",
+        "state": "Shutdown",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/11111111-1111-1111-1111-111111111111/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/11111111-1111-1111-1111-111111111111",
+        "dataPathSize": 900000000,
+        "lastBootedAt": "2026-11-05T10:00:00Z"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
+      {
+        "udid": "22222222-2222-2222-2222-222222222222",
+        "name": "iPhone 17",
+        "state": "Shutdown",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/22222222-2222-2222-2222-222222222222/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/22222222-2222-2222-2222-222222222222",
+        "dataPathSize": 400000000,
+        "lastBootedAt": "2026-11-08T10:00:00Z"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.watchOS-10-5": [
+      {
+        "udid": "33333333-3333-3333-3333-333333333333",
+        "name": "Apple Watch",
+        "state": "Shutdown",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/33333333-3333-3333-3333-333333333333/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/33333333-3333-3333-3333-333333333333",
+        "dataPathSize": 300000000
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-17-0": [
+      {
+        "udid": "44444444-4444-4444-4444-444444444444",
+        "name": "iPhone SE",
+        "state": "Shutdown",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/44444444-4444-4444-4444-444444444444/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/44444444-4444-4444-4444-444444444444",
+        "lastBootedAt": "2025-12-01T10:00:00Z"
+      },
+      {
+        "udid": "55555555-5555-5555-5555-555555555555",
+        "name": "iPhone 13",
+        "state": "Shutdown",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "/etc",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/55555555-5555-5555-5555-555555555555"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-16-4": [
+      {
+        "udid": "66666666-6666-6666-6666-666666666666",
+        "name": "iPhone 14",
+        "state": "Shutdown",
+        "isAvailable": false,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/66666666-6666-6666-6666-666666666666/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/66666666-6666-6666-6666-666666666666",
+        "dataPathSize": 300000000,
+        "availabilityError": "runtime profile not found"
+      },
+      {
+        "udid": "77777777-7777-7777-7777-777777777777",
+        "name": "iPhone 14 Plus",
+        "state": "Shutdown",
+        "isAvailable": false,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/77777777-7777-7777-7777-777777777777/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/77777777-7777-7777-7777-777777777777",
+        "dataPathSize": 100000000,
+        "availabilityError": "runtime profile not found"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+      {
+        "udid": "88888888-8888-8888-8888-888888888888",
+        "name": "Old Booted",
+        "state": "Booted",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/88888888-8888-8888-8888-888888888888/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/88888888-8888-8888-8888-888888888888",
+        "dataPathSize": 50000000,
+        "lastBootedAt": "2025-01-01T10:00:00Z"
+      },
+      {
+        "udid": "99999999-9999-9999-9999-999999999999",
+        "name": "Stuck Booting",
+        "state": "Booting",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/99999999-9999-9999-9999-999999999999/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/99999999-9999-9999-9999-999999999999",
+        "dataPathSize": 50000000
+      },
+      {
+        "udid": "00000000-0000-0000-0000-000000000000",
+        "name": "Slow Shutdown",
+        "state": "Shutting Down",
+        "isAvailable": true,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone",
+        "dataPath": "__HOME__/Library/Developer/CoreSimulator/Devices/00000000-0000-0000-0000-000000000000/data",
+        "logPath": "__HOME__/Library/Logs/CoreSimulator/00000000-0000-0000-0000-000000000000",
+        "dataPathSize": 50000000,
+        "lastBootedAt": "2025-01-01T10:00:00Z"
+      }
+    ]
+  }
+}

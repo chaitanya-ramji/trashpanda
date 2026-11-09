@@ -605,6 +605,12 @@ final class DockerVolumeTests: DockerTestCase {
             ("--volumes", #"--volumes"#),
             ("image prune with -a or --all", #"image["\s,]+prune["\s,]+[^\n]*("-a"|"--all"|\s-a\b)"#),
             ("container prune", #"container["\s,]+prune"#),
+            // The bulk forms of the simulator tools. Each removes more than the list shows.
+            ("simctl delete all", #"delete["\s,]+all["\s,\]]"#),
+            ("simctl runtime delete --outdated", #"--outdated"#),
+            ("simctl runtime delete --unusable", #"--unusable"#),
+            ("simctl runtime delete --notUsedSinceDays", #"--notUsedSinceDays"#),
+            ("simctl erase", #"["\s,]erase["\s,\]]"#),
         ]
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)

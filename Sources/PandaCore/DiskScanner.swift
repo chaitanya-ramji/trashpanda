@@ -80,14 +80,17 @@ public final class DiskScanner {
     /// Path of the docker tool. Tests set it to a fake tool. The default finds the real one.
     private let dockerOverride: String?
     private let isSocket: (String) -> Bool
+    /// Path of `xcrun`. Tests set it to a fake tool. The default finds the real one.
+    private let xcrunOverride: String?
     /// The current time. Tests set a fixed time, so that ages do not change from day to day.
     private let now: () -> Date
 
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
                 isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
-                now: @escaping () -> Date = Date.init) {
+                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil) {
         self.now = now
+        self.xcrunOverride = xcrunPath
         self.home = home
         self.config = config
         self.guardian = PathGuard(home: home, keep: config.keep)
@@ -111,6 +114,7 @@ public final class DiskScanner {
         var jobs: [() -> Void] = [
             { add(self.scanCaches()) },
             { add(self.scanProjects()) },
+            { add(self.scanArchives()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -153,6 +157,18 @@ public final class DiskScanner {
             case .removeVolume(let name):
                 return inventory.volumes.contains { $0.name == name } ? finding.bytes : 0
             }
+        case .removeArchive(let url):
+            return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url) : 0
+        case .simulator(let action):
+            guard let simctl = simctl() else { return finding.bytes }
+            switch action {
+            case .deleteRuntime(let id):
+                guard let runtimes = simctl.runtimes() else { return finding.bytes }
+                return runtimes.contains { $0.id == id } ? finding.bytes : 0
+            case .deleteDevice(let udid):
+                guard let devices = simctl.devices() else { return finding.bytes }
+                return devices.contains { $0.udid == udid } ? finding.bytes : 0
+            }
         case .inform:
             return finding.bytes
         case .owner(let command):
@@ -160,7 +176,7 @@ public final class DiskScanner {
             case .brewCleanup: return brewReclaimableBytes()
             case .dockerBuilderPrune: return dockerBuildCacheBytes()
             case .dockerImagePrune: return danglingImageBytes()
-            case .simctlDeleteUnavailable: return scanSimulators().first?.bytes ?? 0
+            case .simctlDeleteUnavailable: return scanSimulators().first { $0.id == "xcode.sim.unavailable" }?.bytes ?? 0
             case .uvCacheClean:
                 return FileManager.default.fileExists(atPath: finding.location)
                     ? Sizer.size(of: URL(fileURLWithPath: finding.location)) : 0
@@ -190,26 +206,110 @@ public final class DiskScanner {
 
     // MARK: Owner-tool items
 
+    // MARK: Xcode: simulators, runtimes, and archives
+
+    /// `simctl`, or nil when this Mac has no full Xcode. A Mac with only the command line tools has no simulators,
+    /// and calling `xcrun` there can open an install window.
+    func simctl() -> Simctl? {
+        if let xcrunOverride { return Simctl(xcrun: xcrunOverride) }
+        let developer = Shell.run("/usr/bin/xcode-select", ["-p"], timeout: 5, quiet: true).stdout
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard developer.contains(".app/Contents/Developer"), let xcrun = Shell.resolve("xcrun") else { return nil }
+        return Simctl(xcrun: xcrun)
+    }
+
+    /// Simulator data is in the home folder. We read a size only from there.
+    private func isDeviceFolder(_ path: String) -> Bool {
+        let root = home.resolvingSymlinksInPath().path + "/Library/Developer/CoreSimulator/Devices/"
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().path.hasPrefix(root)
+    }
+
+    private func dataBytes(of d: SimDevice) -> Int64 {
+        if let bytes = d.dataBytes { return bytes }
+        guard let path = d.dataPath, isDeviceFolder(path) else { return 0 }
+        return Sizer.size(of: URL(fileURLWithPath: path))
+    }
+
     func scanSimulators() -> [Finding] {
-        let devices = home.appendingPathComponent("Library/Developer/CoreSimulator/Devices", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: devices.path),
-              let xcrun = Shell.resolve("xcrun") else { return [] }
-        let r = Shell.run(xcrun, ["simctl", "list", "devices", "unavailable", "-j"], timeout: 20)
-        guard r.status == 0,
-              let json = try? JSONSerialization.jsonObject(with: Data(r.stdout.utf8)) as? [String: Any],
-              let groups = json["devices"] as? [String: [[String: Any]]] else { return [] }
-        var bytes: Int64 = 0
-        for (_, list) in groups {
-            for device in list {
-                if let udid = device["udid"] as? String, udid.range(of: "^[0-9A-Fa-f-]{36}$", options: .regularExpression) != nil {
-                    bytes += Sizer.size(of: devices.appendingPathComponent(udid))
-                }
+        guard let simctl = simctl() else { return [] }
+        let devices = simctl.devices() ?? []
+        let runtimes = simctl.runtimes() ?? []
+        let place = "Xcode simulators"
+        let limit = TimeInterval(config.staleDays) * 86_400
+        let current = now()
+        var out: [Finding] = []
+
+        func days(since date: Date) -> Int { max(0, Int(current.timeIntervalSince(date) / 86_400)) }
+        func used(_ date: Date?) -> String { date.map { "last used \(days(since: $0)) days ago" } ?? "never used" }
+
+        // 1. Simulators whose runtime is gone. Apple's own command removes them. Safe.
+        let unavailable = devices.filter { $0.isAvailable == false }
+        let unavailableBytes = unavailable.reduce(Int64(0)) { $0 + dataBytes(of: $1) }
+        if unavailableBytes > 0 {
+            out.append(Finding(id: "xcode.sim.unavailable", ecosystem: .swift, title: "Unavailable simulators",
+                               location: place, bytes: unavailableBytes, tier: .safe, rebuild: .seconds,
+                               action: .owner(.simctlDeleteUnavailable)))
+        }
+
+        // 2. Runtimes. Keep the newest of each platform, and any runtime that is in use.
+        var newest: [String: SimRuntime] = [:]
+        for r in runtimes where newest[r.platform].map({ r.isNewer(than: $0) }) ?? true { newest[r.platform] = r }
+
+        for r in runtimes where r.isRemovableKind {
+            let its = devices.filter { $0.runtimeIdentifier == r.runtimeIdentifier }
+            let running = its.contains { $0.isActive }
+            let recent = its.contains { $0.lastBootedAt.map { current.timeIntervalSince($0) < limit } ?? false }
+                || (r.lastUsedAt.map { current.timeIntervalSince($0) < limit } ?? false)
+            let base = "\(place) · build \(r.build) · \(used(r.lastUsedAt))"
+
+            if newest[r.platform]?.id == r.id {
+                out.append(Finding(id: "xcode.runtime.info:\(r.id)", ecosystem: .swift,
+                                   title: "\(r.displayName) runtime · newest, kept", location: base, bytes: r.sizeBytes,
+                                   tier: .review, rebuild: .download, action: .inform))
+            } else if running || recent {
+                let why = running ? "a simulator is running" : "used in the last \(config.staleDays) days"
+                out.append(Finding(id: "xcode.runtime.info:\(r.id)", ecosystem: .swift,
+                                   title: "\(r.displayName) runtime · in use", location: "\(base) · \(why)",
+                                   bytes: r.sizeBytes, tier: .review, rebuild: .download, action: .inform))
+            } else {
+                let count = its.count
+                out.append(Finding(id: "xcode.runtime:\(r.id)", ecosystem: .swift,
+                                   title: "Simulator runtime · \(r.displayName)",
+                                   location: "\(base) · \(count == 1 ? "1 simulator runs" : "\(count) simulators run") on it",
+                                   bytes: r.sizeBytes, tier: .review, rebuild: .download,
+                                   action: .simulator(.deleteRuntime(id: r.id)), lastActivity: r.lastUsedAt,
+                                   owner: Catalog.xcodeOrSimulator))
             }
         }
-        guard bytes > 0 else { return [] }
-        return [Finding(id: "xcode.sim.unavailable", ecosystem: .swift, title: "Unavailable simulators",
-                        location: devices.path, bytes: bytes, tier: .safe, rebuild: .seconds,
-                        action: .owner(.simctlDeleteUnavailable))]
+
+        // 3. Devices that nobody has started for a long time. A running device is never offered.
+        for d in devices where d.isAvailable == true && d.state == "Shutdown" {
+            if let started = d.lastBootedAt, current.timeIntervalSince(started) < limit { continue }
+            let bytes = dataBytes(of: d)
+            guard bytes > 0 else { continue }
+            let runtimeName = runtimes.first { $0.runtimeIdentifier == d.runtimeIdentifier }?.displayName
+                ?? d.runtimeIdentifier.split(separator: ".").last.map { $0.replacingOccurrences(of: "-", with: " ") } ?? ""
+            let when = d.lastBootedAt.map { "not started for \(days(since: $0)) days" } ?? "never started"
+            out.append(Finding(id: "xcode.device:\(d.udid)", ecosystem: .swift,
+                               title: "Simulator · \(d.name) (\(runtimeName))", location: "\(place) · \(when)",
+                               bytes: bytes, tier: .review, rebuild: .recreate,
+                               action: .simulator(.deleteDevice(udid: d.udid)), lastActivity: d.lastBootedAt,
+                               owner: Catalog.xcodeOrSimulator))
+        }
+        return out
+    }
+
+    /// The archives of apps that were built for release. They are review items, one by one.
+    func scanArchives() -> [Finding] {
+        XcodeArchives.list(home: home).compactMap { a in
+            guard a.bytes > 0, guardian.check(a.url) == nil else { return nil }
+            let rel = a.url.path.replacingOccurrences(of: XcodeArchives.root(home: home).path + "/", with: "")
+            let age = a.modified.map { "archived \(max(0, Int(now().timeIntervalSince($0) / 86_400))) days ago" } ?? "age unknown"
+            return Finding(id: "xcode.archive:\(rel)", ecosystem: .swift, title: "Archive · \(a.name)",
+                           location: "\((a.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath) · \(age)",
+                           bytes: a.bytes, tier: .review, rebuild: .recreate,
+                           action: .removeArchive(a.url), lastActivity: a.modified, owner: Catalog.xcode)
+        }
     }
 
     /// Homebrew keeps its own index (`api`) and Ruby cache (`bootsnap`) in the cache folder.
