@@ -54,7 +54,7 @@ Trash Panda looks in two places:
 | Elixir, Erlang | Hex packages, rebar3 | `_build`, `deps`, `.elixir_ls` |
 | Zig | Global cache | `.zig-cache`, `zig-out` |
 | Homebrew | Downloads and old versions | None |
-| Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera): cache, code cache, and GPU caches. Firefox: `cache2` and `startupCache`. | None |
+| Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera): cache, code cache, and GPU caches. Firefox: `cache2` and `startupCache`. Review: Service Worker storage. | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |
 | Docker | Build cache, untagged images (safe). Stopped containers, old unused images, and unused volumes (review). | None |
 
@@ -76,7 +76,7 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app always shows a list and asks you before it deletes.
 - A project folder counts only when a marker file is next to it. For example, `node_modules` needs `package.json`.
 - The app skips a project when a running process uses it.
-- For a browser, the app removes only eight named cache folders inside each profile (`Default` or `Profile N`). It never touches cookies, logins, history, local storage, IndexedDB, extensions, preferences, sessions, or Service Worker storage. Firefox gets two folders (`cache2` and `startupCache`) in `Library/Caches`, and its profile folder is never touched. A browser that is open is skipped.
+- For a browser, the app removes only eight named cache folders inside each profile (`Default` or `Profile N`). It never touches cookies, logins, history, local storage, IndexedDB, extensions, preferences, sessions, or Service Worker storage. Service Worker storage (the files of websites that work offline) is its own review item. It is never in the one-click clean, and the default button of its dialog keeps it. Firefox gets two folders (`cache2` and `startupCache`) in `Library/Caches`, and its profile folder is never touched. A browser that is open is skipped.
 - The app removes an update download only when it is older than 7 days, and it reads the age again when you confirm. It touches only the `Installation` and `PersistentDownloads` folders of an app, never the rest of its cache. It refuses a cache folder that is a link.
 - The app does not clean a cache while the app that uses it runs. For example, Xcode build data waits until you quit Xcode. The menu shows which app to quit, and the cleaner checks again before each item.
 - The app marks a project as review when someone changed it in the last 30 days. You can change this limit (see Settings).
@@ -229,7 +229,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))
 - [x] Browser caches: Firefox ([#15](https://github.com/chaitanya-ramji/trashpanda/issues/15))
 - [x] Do not clean an app while it runs ([#16](https://github.com/chaitanya-ramji/trashpanda/issues/16))
-- [ ] Browser Service Worker storage (review only) ([#17](https://github.com/chaitanya-ramji/trashpanda/issues/17))
+- [x] Browser Service Worker storage (review only) ([#17](https://github.com/chaitanya-ramji/trashpanda/issues/17))
 - [ ] Old test browser downloads: Cypress, Playwright, Puppeteer, Chrome for Testing ([#18](https://github.com/chaitanya-ramji/trashpanda/issues/18))
 - [ ] Electron and node-gyp download caches ([#19](https://github.com/chaitanya-ramji/trashpanda/issues/19))
 
@@ -240,6 +240,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Show the Trash size and offer to empty it ([#23](https://github.com/chaitanya-ramji/trashpanda/issues/23))
 - [ ] Old installers in Downloads (DMG, PKG, ZIP) ([#24](https://github.com/chaitanya-ramji/trashpanda/issues/24))
 - [ ] Docker: say when freed space is not back on the Mac yet ([#40](https://github.com/chaitanya-ramji/trashpanda/issues/40))
+- [ ] Service Worker storage: show each website by name ([#44](https://github.com/chaitanya-ramji/trashpanda/issues/44))
 - [x] Menu: show the full split of reclaimable data as an interactive bar ([#42](https://github.com/chaitanya-ramji/trashpanda/issues/42))
 
 ### Later: v0.6 Old tools

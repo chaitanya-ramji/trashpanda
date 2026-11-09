@@ -61,6 +61,10 @@ public enum BrowserCaches {
         name.range(of: #"^[A-Za-z0-9]{8}\.[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil && !name.contains("..")
     }
 
+    /// The one folder of Service Worker storage that we offer to clean: `Service Worker/CacheStorage` in a Chromium profile.
+    /// Offline web apps keep their files there. Its siblings `Database` and `ScriptCache` are never touched.
+    static let serviceWorkerPath = ["Service Worker", "CacheStorage"]
+
     public static func browser(id: String) -> Browser? { browsers.first { $0.id == id } }
 
     /// `Default`, `Profile 1`, `Profile 12`. Not `Guest Profile`, not `System Profile`.
@@ -81,6 +85,49 @@ public enum BrowserCaches {
                     && b.isProfileName(parts[r.count]) && b.cacheNames.contains(parts[r.count + 1])
             }
         }
+    }
+
+    /// True for `<root>/<profile>/Service Worker/CacheStorage` of a Chromium browser, and for nothing else.
+    public static func isServiceWorkerShape(relative: String) -> Bool {
+        let parts = relative.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard !parts.contains(""), !parts.contains("."), !parts.contains("..") else { return false }
+        return browsers.contains { b in
+            b.kind == .chromium && b.roots.contains { root in
+                let r = root.split(separator: "/").map(String.init)
+                return parts.count == r.count + 3 && Array(parts.prefix(r.count)) == r && b.isProfileName(parts[r.count])
+                    && Array(parts.suffix(2)) == serviceWorkerPath
+            }
+        }
+    }
+
+    /// A folder that the path guard may allow inside Application Support: a cache folder, or Service Worker storage.
+    public static func isCleanableShape(relative: String) -> Bool {
+        isCacheShape(relative: relative) || isServiceWorkerShape(relative: relative)
+    }
+
+    /// The `Service Worker/CacheStorage` folders of a browser, now. A link is never followed.
+    public static func serviceWorkerTargets(of browser: Browser, home: URL) -> [URL] {
+        guard browser.kind == .chromium else { return [] }
+        let fm = FileManager.default
+        func isDirectory(_ url: URL) -> Bool {
+            (try? fm.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeDirectory
+        }
+        var out: [URL] = []
+        for root in browser.roots {
+            let rootURL = home.appendingPathComponent(root, isDirectory: true)
+            guard isDirectory(rootURL), UpdateDownloads.isPlainPath(rootURL) else { continue }
+            for profile in ((try? fm.contentsOfDirectory(atPath: rootURL.path)) ?? []).sorted() where browser.isProfileName(profile) {
+                let url = serviceWorkerPath.reduce(rootURL.appendingPathComponent(profile, isDirectory: true)) {
+                    $0.appendingPathComponent($1, isDirectory: true)
+                }
+                if isDirectory(url) { out.append(url) }
+            }
+        }
+        return out
+    }
+
+    public static func serviceWorkerBytes(of browser: Browser, home: URL) -> Int64 {
+        serviceWorkerTargets(of: browser, home: home).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
     }
 
     /// The folders of a browser that we may clean, now. A link is never followed.
@@ -107,6 +154,14 @@ public enum BrowserCaches {
 
     public static func bytes(of browser: Browser, home: URL) -> Int64 {
         targets(of: browser, home: home).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+    }
+
+    /// True when `url` is one of the Service Worker storage folders of this browser.
+    static func isServiceWorkerTarget(_ url: URL, of browser: Browser, home: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        let prefix = home.standardizedFileURL.path + "/"
+        guard path.hasPrefix(prefix), isServiceWorkerShape(relative: String(path.dropFirst(prefix.count))) else { return false }
+        return browser.roots.contains { path.hasPrefix(prefix + $0 + "/") }
     }
 
     /// True when `url` is one of the folders that we may clean for this browser.

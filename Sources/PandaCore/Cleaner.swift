@@ -88,6 +88,9 @@ public final class Cleaner {
             case .removeBrowserCaches(let id):
                 removeBrowserCaches(id, finding: finding, into: &report)
 
+            case .removeServiceWorkerStorage(let id):
+                removeServiceWorkerStorage(id, finding: finding, into: &report)
+
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
 
@@ -220,6 +223,34 @@ public final class Cleaner {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
         }
+    }
+
+    /// The `Service Worker/CacheStorage` folders of one browser. Nothing else of the profile is touched.
+    private func removeServiceWorkerStorage(_ id: String, finding: Finding, into report: inout CleanReport) {
+        guard let browser = BrowserCaches.browser(id: id) else { skip(finding, "unknown browser", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for url in BrowserCaches.serviceWorkerTargets(of: browser, home: home) {
+            guard BrowserCaches.isServiceWorkerTarget(url, of: browser, home: home), UpdateDownloads.isPlainPath(url) else {
+                report.skipped.append("\(url.path): not Service Worker storage of the browser"); continue
+            }
+            if let reason = guardian.check(url) {
+                Log.warn("skip \(url.path): \(reason)")
+                report.skipped.append("\(url.path): \(reason)"); continue
+            }
+            let size = Sizer.size(of: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) Service Worker folders, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
     }
 
     /// The caches of one browser. We find the folders again now, from a fixed list of names. Nothing else is touched.

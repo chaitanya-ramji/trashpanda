@@ -220,7 +220,10 @@ final class BrowserCachesTests: XCTestCase {
         for p in neverTouch("Default") {
             let url = box.home.appendingPathComponent(p)
             XCTAssertNotNil(g.check(url), "\(p) must be refused")
-            XCTAssertNotNil(g.check(url.deletingLastPathComponent()), "\(url.deletingLastPathComponent().lastPathComponent) must be refused")
+            // The parent of "Service Worker/CacheStorage/x" is Service Worker storage. It is the one allowed review target.
+            if url.deletingLastPathComponent().lastPathComponent != "CacheStorage" {
+                XCTAssertNotNil(g.check(url.deletingLastPathComponent()), "\(url.deletingLastPathComponent().lastPathComponent) must be refused")
+            }
         }
         for refused in ["\(support)/Default", "\(support)", "Library/Application Support/Arc", "Library/Application Support",
                         "\(support)/Default/GPUCache/data_0", "\(support)/Guest Profile/GPUCache", "\(support)/Default/GPUCache2",

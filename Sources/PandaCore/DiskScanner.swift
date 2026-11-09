@@ -122,6 +122,7 @@ public final class DiskScanner {
             { add(self.scanDeviceSupport()) },
             { add(self.scanUpdateDownloads()) },
             { add(self.scanBrowserCaches()) },
+            { add(self.scanServiceWorkerStorage()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -166,6 +167,8 @@ public final class DiskScanner {
             }
         case .removeBrowserCaches(let id):
             return BrowserCaches.browser(id: id).map { BrowserCaches.bytes(of: $0, home: home) } ?? finding.bytes
+        case .removeServiceWorkerStorage(let id):
+            return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .removeUpdateDownloads(let url):
             return UpdateDownloads.staleBytes(in: url, now: now())
         case .removeArchive(let url), .removeDeviceSupport(let url):
@@ -325,6 +328,19 @@ public final class DiskScanner {
                            location: "\(b.roots.map { "~/" + $0 }.joined(separator: " and ")) · pages load again the first time",
                            bytes: bytes, tier: .safe, rebuild: .download,
                            action: .removeBrowserCaches(browserID: b.id), owner: b.owner)
+        }
+    }
+
+    /// Service Worker storage of Chromium browsers. Offline web apps keep their files there, so this is a review item.
+    func scanServiceWorkerStorage() -> [Finding] {
+        BrowserCaches.browsers.filter { $0.kind == .chromium }.compactMap { b in
+            let targets = BrowserCaches.serviceWorkerTargets(of: b, home: home).filter { guardian.check($0) == nil }
+            let bytes = targets.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+            guard bytes > 0 else { return nil }
+            return Finding(id: "browser.sw:\(b.id)", ecosystem: .browsers, title: "Service Worker storage · \(b.name)",
+                           location: "\(b.roots.map { "~/" + $0 }.first ?? "") · saved files of websites that work offline",
+                           bytes: bytes, tier: .review, rebuild: .download,
+                           action: .removeServiceWorkerStorage(browserID: b.id), owner: b.owner)
         }
     }
 
