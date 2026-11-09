@@ -35,6 +35,7 @@ Trash Panda looks in two places:
 | PHP | Composer | `vendor` |
 | Ruby | Bundler | None |
 | Dart, Flutter | Pub packages, analysis cache | `.dart_tool`, Flutter `build` |
+| Elixir, Erlang | Hex packages, rebar3 | `_build`, `deps`, `.elixir_ls` |
 | Homebrew | Downloads and old versions | None |
 | Docker | Build cache | None |
 
@@ -165,7 +166,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 
 ### Now: v0.2 Dart, Elixir, Zig
 - [x] Add Dart and Flutter support ([#1](https://github.com/chaitanya-ramji/trashpanda/issues/1))
-- [ ] Add Elixir and Erlang support ([#2](https://github.com/chaitanya-ramji/trashpanda/issues/2))
+- [x] Add Elixir and Erlang support ([#2](https://github.com/chaitanya-ramji/trashpanda/issues/2))
 - [ ] Add Zig support ([#3](https://github.com/chaitanya-ramji/trashpanda/issues/3))
 - [ ] Let the user set the stale limit ([#4](https://github.com/chaitanya-ramji/trashpanda/issues/4))
 - [ ] Add a screenshot of the menu to the README ([#5](https://github.com/chaitanya-ramji/trashpanda/issues/5))

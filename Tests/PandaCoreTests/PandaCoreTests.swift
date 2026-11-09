@@ -353,3 +353,55 @@ final class DartTests: XCTestCase {
         XCTAssertNotNil(g.check(box.home.appendingPathComponent(".pub-cache/global_packages/melos")))
     }
 }
+
+// MARK: - Elixir and Erlang (#2)
+
+final class ElixirTests: XCTestCase {
+    private func projects(_ box: Sandbox) -> [Finding] {
+        ProjectScanner(home: box.home, roots: [box.home.appendingPathComponent("Developer")],
+                       guardian: PathGuard(home: box.home), activeDirectories: []).scan()
+    }
+
+    func testFindsMixProjectFolders() throws {
+        let box = try Sandbox()
+        try box.file("Developer/api/mix.exs", bytes: 10)
+        try box.file("Developer/api/_build/dev/lib/a.beam", bytes: 20_000)
+        try box.file("Developer/api/deps/plug/mix.exs", bytes: 20_000)
+        try box.file("Developer/api/.elixir_ls/build/x", bytes: 20_000)
+        box.ageProject("Developer/api", days: 90)
+        let found = projects(box)
+        XCTAssertEqual(Set(found.map { URL(fileURLWithPath: $0.location).lastPathComponent }),
+                       ["_build", "deps", ".elixir_ls"])
+        XCTAssertTrue(found.allSatisfy { $0.ecosystem == .elixir && $0.tier == .safe })
+    }
+
+    func testErlangRebarProjectUsesBuildFolder() throws {
+        let box = try Sandbox()
+        try box.file("Developer/erl/rebar.config", bytes: 10)
+        try box.file("Developer/erl/_build/default/x.beam", bytes: 20_000)
+        XCTAssertEqual(projects(box).count, 1)
+    }
+
+    func testMarkerIsRequired() throws {
+        let box = try Sandbox()
+        try box.file("Developer/loose/_build/x", bytes: 20_000)
+        try box.file("Developer/loose/deps/x", bytes: 20_000)
+        XCTAssertTrue(projects(box).isEmpty)
+    }
+
+    func testGlobalCachesAndProtectedTools() throws {
+        let box = try Sandbox()
+        try box.file(".hex/packages/hexpm/a.tar", bytes: 20_000)
+        try box.file(".cache/rebar3/hex/x", bytes: 20_000)
+        try box.file(".mix/archives/phx_new/ebin/x.beam", bytes: 100)
+        try box.file(".hex/hex.config", bytes: 100)
+
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false)
+        let ids = Set(scanner.scanCaches().map(\.id))
+        XCTAssertEqual(ids, ["hex.packages:.hex/packages", "rebar3.cache:.cache/rebar3"])
+
+        let g = PathGuard(home: box.home)
+        XCTAssertEqual(g.check(box.home.appendingPathComponent(".mix/archives/phx_new")), .protectedData(".mix"))
+        XCTAssertEqual(g.check(box.home.appendingPathComponent(".hex/hex.config")), .protectedData(".hex/hex.config"))
+    }
+}

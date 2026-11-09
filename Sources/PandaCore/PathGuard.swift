@@ -38,6 +38,8 @@ public struct PathGuard: Sendable {
         ".yarn/berry", ".local/share/jupyter", "Library/Jupyter",
         // Installed Dart tools. Deleting them breaks the commands that the user installed.
         ".pub-cache/bin", ".pub-cache/global_packages",
+        // Installed Elixir archives (such as phx_new) and the Hex login.
+        ".mix", ".hex/hex.config",
     ]
 
     static let criticalExact: Set<String> = [

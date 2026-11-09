@@ -27,7 +27,7 @@ public enum Rebuild: Sendable {
 
 /// Language or tool group. Phase 1 groups ship now. Phase 2 groups are planned.
 public enum Ecosystem: String, CaseIterable, Sendable {
-    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, homebrew, docker
+    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, homebrew, docker
 
     public var name: String {
         switch self {
@@ -42,6 +42,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .php: return "PHP"
         case .ruby: return "Ruby"
         case .dart: return "Dart & Flutter"
+        case .elixir: return "Elixir & Erlang"
         case .homebrew: return "Homebrew"
         case .docker: return "Docker"
         }

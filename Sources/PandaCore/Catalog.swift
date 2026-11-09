@@ -140,6 +140,12 @@ enum Catalog {
                   paths: [".pub-cache/git"], tier: .review, rebuild: .download),
         CacheSpec(id: "dart.analysis", title: "Dart analysis cache", ecosystem: .dart,
                   paths: [".dartServer/.analysis-driver"], tier: .safe, rebuild: .minutes),
+
+        // Elixir and Erlang. Never touch ~/.mix (installed archives) or ~/.hex/hex.config (see PathGuard).
+        CacheSpec(id: "hex.packages", title: "Hex package cache", ecosystem: .elixir,
+                  paths: [".hex/packages"], tier: .safe, rebuild: .download),
+        CacheSpec(id: "rebar3.cache", title: "rebar3 cache", ecosystem: .elixir,
+                  paths: [".cache/rebar3"], tier: .safe, rebuild: .download),
     ]
 
     // MARK: Project build outputs
@@ -188,6 +194,11 @@ enum Catalog {
                      inner: [".last_build_id", "app", "ios", "web", "macos", "linux", "windows",
                              "flutter_assets", "unit_test_assets", "cache", "test_cache"],
                      .dart, "Flutter build output"),
+
+        // Elixir and Erlang
+        ArtifactRule(["_build"], markers: ["mix.exs", "rebar.config"], .elixir, "Compiled output"),
+        ArtifactRule(["deps"], markers: ["mix.exs"], .elixir, "Dependencies", rebuild: .download),
+        ArtifactRule([".elixir_ls"], markers: ["mix.exs"], .elixir, "Language server cache"),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
