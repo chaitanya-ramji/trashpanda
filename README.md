@@ -47,9 +47,9 @@ Trash Panda looks in two places:
 | Elixir, Erlang | Hex packages, rebar3 | `_build`, `deps`, `.elixir_ls` |
 | Zig | Global cache | `.zig-cache`, `zig-out` |
 | Homebrew | Downloads and old versions | None |
-| Docker | Build cache, untagged images, stopped containers (review) | None |
+| Docker | Build cache, untagged images, stopped containers and old unused images (review) | None |
 
-Trash Panda does **not** touch your Docker volumes, documents, or app data. It removes Docker images only when they are untagged and no container uses them.
+Trash Panda does **not** touch your Docker volumes, documents, or app data. It removes a Docker image only when no container uses it, running or stopped. An old named image is a review item.
 
 ## Safe and Review
 
@@ -75,6 +75,7 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app counts only space that a delete frees. A file with more than one hard link frees no space.
 - For Homebrew, the app asks `brew` what it would remove. Homebrew keeps its own index files, and the app does not count them.
 - The app asks the owning tool to clean its own data when it can. It runs fixed commands only.
+- The app never prunes all Docker images. It removes a named image only by its exact name, never forced.
 - Docker runs on a local engine only (OrbStack, Docker Desktop, Colima, or Rancher Desktop). The app refuses remote engines and unknown sockets. It ignores `DOCKER_HOST` and `DOCKER_CONTEXT`.
 
 ## Install
@@ -152,7 +153,9 @@ Settings are plain text files. Each file has one path on each line. A line that 
 The `settings` file has one option now:
 
 ```
-# A project that changed within this many days is a review item. Use a whole number from 1 to 3650.
+# A project that changed within this many days is a review item.
+# A Docker image is listed only when it has been on this Mac for this many days.
+# Use a whole number from 1 to 3650.
 stale_days = 30
 ```
 
@@ -196,7 +199,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Docker: act only on a local engine ([#6](https://github.com/chaitanya-ramji/trashpanda/issues/6))
 - [x] Docker: remove dangling images ([#7](https://github.com/chaitanya-ramji/trashpanda/issues/7))
 - [x] Docker: remove stopped containers ([#8](https://github.com/chaitanya-ramji/trashpanda/issues/8))
-- [ ] Docker: remove unused images older than N days ([#9](https://github.com/chaitanya-ramji/trashpanda/issues/9))
+- [x] Docker: remove unused images older than N days ([#9](https://github.com/chaitanya-ramji/trashpanda/issues/9))
 - [ ] Docker: show volumes and remove dangling ones ([#10](https://github.com/chaitanya-ramji/trashpanda/issues/10))
 - [x] Docker: test with a fake docker tool ([#11](https://github.com/chaitanya-ramji/trashpanda/issues/11))
 - [ ] Docker: explain a VM disk that does not shrink ([#12](https://github.com/chaitanya-ramji/trashpanda/issues/12))

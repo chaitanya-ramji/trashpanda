@@ -233,7 +233,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             footer: cannotRebuild ? "A container can hold data that is stored nowhere else. This can't be undone." : nil,
             confirmTitle: cannotRebuild ? "Remove" : nil)
         var tip = "\(f.location)\n\(f.rebuild.label)"
-        if let days = daysSinceActivity(f) { tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")" }
+        if isProject(f), let days = daysSinceActivity(f) {
+            tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")"
+        }
         item.toolTip = tip
         return item
     }
@@ -242,10 +244,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var text = f.rebuild == .recreate
             ? "\(f.title)\n\(f.location)\n\(f.rebuild.label)."
             : "\(f.title)\n\(f.rebuild.label)."
-        if f.tier == .review, let days = daysSinceActivity(f), days < scanner.config.staleDays {
+        if isProject(f), f.tier == .review, let days = daysSinceActivity(f), days < scanner.config.staleDays {
             text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")."
         }
         return text
+    }
+
+    /// Only a project folder has "last worked on". A Docker image has "on this Mac for".
+    private func isProject(_ f: Finding) -> Bool {
+        if case .removeArtifact = f.action { return true }
+        return false
     }
 
     private func daysSinceActivity(_ f: Finding) -> Int? {

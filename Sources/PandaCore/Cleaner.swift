@@ -93,6 +93,13 @@ public final class Cleaner {
             guard container.isStopped else {
                 skip(finding, "the container is not stopped (\(container.state))", &report); return
             }
+        case .removeImage(let refs):
+            let entries = current.images.filter { refs.contains("\($0.repository):\($0.tag)") }
+            guard !entries.isEmpty else { skip(finding, "the image is already gone", &report); return }
+            // A container may use the image now, or Docker may not say (-1). Then we leave it.
+            guard entries.allSatisfy({ $0.containers == 0 }) else {
+                skip(finding, "a container uses this image", &report); return
+            }
         }
 
         let result = engine.run(arguments, timeout: action.timeout)

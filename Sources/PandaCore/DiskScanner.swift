@@ -80,10 +80,14 @@ public final class DiskScanner {
     /// Path of the docker tool. Tests set it to a fake tool. The default finds the real one.
     private let dockerOverride: String?
     private let isSocket: (String) -> Bool
+    /// The current time. Tests set a fixed time, so that ages do not change from day to day.
+    private let now: () -> Date
 
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
-                isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket) {
+                isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
+                now: @escaping () -> Date = Date.init) {
+        self.now = now
         self.home = home
         self.config = config
         self.guardian = PathGuard(home: home, keep: config.keep)
@@ -142,6 +146,9 @@ public final class DiskScanner {
             switch action {
             case .removeContainer(let id):
                 return inventory.containers.contains { $0.id == id } ? finding.bytes : 0
+            case .removeImage(let refs):
+                let left = inventory.images.contains { refs.contains("\($0.repository):\($0.tag)") }
+                return left ? finding.bytes : 0
             }
         case .owner(let command):
             switch command {
@@ -256,6 +263,28 @@ public final class DiskScanner {
                                bytes: c.writableBytes, tier: .review, rebuild: .recreate,
                                action: .docker(.removeContainer(id: c.id))))
         }
+
+        // Named images that no container uses and that have been on this Mac for a long time.
+        // The age is the time since the image arrived here. The build date can be years older.
+        let groups = inventory.unusedNamedImages
+        if !groups.isEmpty {
+            let arrived = engine.tagTimes(ofImages: groups.map(\.id))
+            let limit = TimeInterval(config.staleDays) * 86_400
+            for g in groups {
+                // An image of unknown age is left out. We never guess. The build date is no help,
+                // because an image that was built years ago can have arrived here last week.
+                guard let since = arrived[g.id] else { continue }
+                let age = now().timeIntervalSince(since)
+                guard age >= limit else { continue }
+                let days = Int(age / 86_400)
+                let extra = g.refs.count > 1 ? " (+\(g.refs.count - 1) more names)" : ""
+                out.append(Finding(id: "docker.image:\(g.id.dropFirst(7).prefix(12))", ecosystem: .docker,
+                                   title: "Image · \(g.refs[0])\(extra)",
+                                   location: "\(place) · on this Mac for \(days) days",
+                                   bytes: g.uniqueBytes, tier: .review, rebuild: .download,
+                                   action: .docker(.removeImage(refs: g.refs)), lastActivity: since))
+            }
+        }
         return out
     }
 
@@ -337,7 +366,8 @@ public final class DiskScanner {
         roots = roots.filter { seen.insert($0.resolvingSymlinksInPath().path).inserted }
 
         let scanner = ProjectScanner(home: home, roots: roots, guardian: guardian,
-                                     activeDirectories: Shell.activeDirectories(), staleDays: config.staleDays)
+                                     activeDirectories: Shell.activeDirectories(),
+                                     now: now(), staleDays: config.staleDays)
         return scanner.scan()
     }
 

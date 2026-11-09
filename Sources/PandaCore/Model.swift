@@ -97,16 +97,31 @@ public enum OwnerCommand: String, Sendable, CaseIterable {
 /// We never use -f (force) or -v (volumes), so Docker itself refuses to remove something that is in use.
 public enum DockerAction: Sendable, Equatable {
     case removeContainer(id: String)
+    /// Removes an image by all of its `repository:tag` names. Never forced.
+    case removeImage(refs: [String])
 
     /// The arguments, or nil when the identifier is not valid. A name can hold any text.
     /// We use the hex identifier, and we accept nothing else.
     public var arguments: [String]? {
         switch self {
         case .removeContainer(let id): return Self.isHexID(id) ? ["container", "rm", id] : nil
+        case .removeImage(let refs):
+            guard !refs.isEmpty, refs.count <= 20, refs.allSatisfy(Self.isImageRef) else { return nil }
+            return ["image", "rm"] + refs
         }
     }
 
     public var timeout: TimeInterval { 60 }
+
+    /// `name:tag`. It starts with a letter or a digit, so it can never look like a flag.
+    static func isImageRef(_ ref: String) -> Bool {
+        ref.range(of: "^[a-z0-9]([a-z0-9._/:-]*[a-z0-9])?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+                  options: .regularExpression) != nil
+    }
+
+    static func isImageID(_ id: String) -> Bool {
+        id.range(of: "^sha256:[0-9a-f]{64}$", options: .regularExpression) != nil
+    }
 
     static func isHexID(_ id: String) -> Bool {
         id.range(of: "^[0-9a-f]{12,64}$", options: .regularExpression) != nil

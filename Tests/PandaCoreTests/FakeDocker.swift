@@ -40,12 +40,13 @@ final class FakeDocker {
 
     /// The full form. `context` is the text that `docker context inspect` prints.
     init(box: Sandbox, context: String, inventory: String = "{}", inventoryAfter: String? = nil,
-         summary: String = FakeDocker.buildCacheOnly) throws {
+         summary: String = FakeDocker.buildCacheOnly, tagTimes: String = "") throws {
         path = box.home.appendingPathComponent("bin/docker").path
         logPath = box.home.appendingPathComponent("docker-calls.log").path
         let dir = (path as NSString).deletingLastPathComponent
         let files = ["context": dir + "/context.json", "before": dir + "/inventory-before.json",
-                     "after": dir + "/inventory-after.json", "summary": dir + "/summary.jsonl"]
+                     "after": dir + "/inventory-after.json", "summary": dir + "/summary.jsonl",
+                     "tagtimes": dir + "/tagtimes.txt"]
         let marker = dir + "/changed"
         let script = """
         #!/bin/bash
@@ -57,6 +58,7 @@ final class FakeDocker {
             if [ -f "\(marker)" ]; then cat "\(files["after"]!)"; else cat "\(files["before"]!)"; fi
             exit 0;;
           *"system df"*) cat "\(files["summary"]!)"; exit 0;;
+          *"image inspect"*) cat "\(files["tagtimes"]!)"; exit 0;;
           *"builder prune"*|*"image prune"*|*"image rm "*|*"container rm "*|*"volume rm "*) touch "\(marker)"; exit 0;;
         esac
         echo "UNEXPECTED $*" >> "\(logPath)"
@@ -67,27 +69,32 @@ final class FakeDocker {
         try inventory.write(toFile: files["before"]!, atomically: true, encoding: .utf8)
         try (inventoryAfter ?? inventory).write(toFile: files["after"]!, atomically: true, encoding: .utf8)
         try summary.write(toFile: files["summary"]!, atomically: true, encoding: .utf8)
+        try tagTimes.write(toFile: files["tagtimes"]!, atomically: true, encoding: .utf8)
         try script.write(toFile: path, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
     }
 
     /// A one-line context. Most tests use this.
     convenience init(box: Sandbox, contextName: String, host: String, inventory: String = "{}",
-                     inventoryAfter: String? = nil, summary: String = FakeDocker.buildCacheOnly) throws {
+                     inventoryAfter: String? = nil, summary: String = FakeDocker.buildCacheOnly,
+                     tagTimes: String = "") throws {
         let context = #"[{"Name":"\#(contextName)","Endpoints":{"docker":{"Host":"\#(host)"}}}]"#
-        try self.init(box: box, context: context, inventory: inventory, inventoryAfter: inventoryAfter, summary: summary)
+        try self.init(box: box, context: context, inventory: inventory, inventoryAfter: inventoryAfter,
+                      summary: summary, tagTimes: tagTimes)
     }
 
     /// A context and inventory from fixture files. The local context points to the sandbox socket.
     convenience init(box: Sandbox, contextFixture: String, inventoryFixture: String,
-                     summaryFixture: String? = nil, inventoryAfterFixture: String? = nil) throws {
+                     summaryFixture: String? = nil, inventoryAfterFixture: String? = nil,
+                     tagTimesFixture: String? = nil) throws {
         let socket = box.home.appendingPathComponent(".orbstack/run/docker.sock").path
         let context = try FakeDocker.fixture(contextFixture).replacingOccurrences(of: "__SOCKET__", with: socket)
         try self.init(box: box, context: context,
                       inventory: try FakeDocker.fixture(inventoryFixture),
                       inventoryAfter: try inventoryAfterFixture.map { try FakeDocker.fixture($0) },
                       summary: try summaryFixture.map { try FakeDocker.fixture($0, ext: "jsonl") }
-                          ?? FakeDocker.buildCacheOnly)
+                          ?? FakeDocker.buildCacheOnly,
+                      tagTimes: try tagTimesFixture.map { try FakeDocker.fixture($0, ext: "txt") } ?? "")
     }
 
     /// Changes what the engine reports from now on. Use it to test a change after the scan.
@@ -168,7 +175,7 @@ final class DockerFixtureTests: DockerTestCase {
 
     func testFixturesHaveTheShapeOfRealDockerOutput() throws {
         let inventory = try XCTUnwrap(DockerInventory.parse(try FakeDocker.fixture("inventory-full")))
-        XCTAssertEqual(inventory.images.count, 7)
+        XCTAssertEqual(inventory.images.count, 13)
         XCTAssertEqual(inventory.danglingImages.count, 2)
         let empty = try XCTUnwrap(DockerInventory.parse(try FakeDocker.fixture("inventory-empty")))
         XCTAssertTrue(empty.images.isEmpty)
@@ -297,5 +304,154 @@ final class DockerContainerTests: DockerTestCase {
                                   dockerPath: fake.path, isSocket: { _ in true })
         XCTAssertTrue(containers(scanner).isEmpty)
         XCTAssertEqual(fake.calls, ["context inspect"])
+    }
+}
+
+// MARK: - Docker: unused images older than N days (#9)
+
+final class DockerOldImageTests: DockerTestCase {
+    /// The fixtures were written for this day. A fixed clock keeps the ages the same on every run.
+    private let now = ISO8601DateFormatter().date(from: "2026-11-09T12:00:00Z")!
+    private var socket: (Sandbox) -> String { { $0.home.path + "/.orbstack/run/docker.sock" } }
+
+    private func setup(_ box: Sandbox, staleDays: Int = 30, after: String? = nil) throws -> (FakeDocker, DiskScanner) {
+        let fake = try FakeDocker(box: box, contextFixture: "context-local", inventoryFixture: "inventory-full",
+                                  summaryFixture: "summary-full", tagTimesFixture: "tagtimes-full")
+        if let after {
+            try after.write(toFile: (fake.path as NSString).deletingLastPathComponent + "/inventory-after.json",
+                            atomically: true, encoding: .utf8)
+        }
+        let scanner = DiskScanner(home: box.home, config: Config(staleDays: staleDays), useOwnerTools: false,
+                                  dockerPath: fake.path, isSocket: { _ in true }, now: { [now] in now })
+        return (fake, scanner)
+    }
+
+    private func images(_ s: DiskScanner) -> [Finding] { s.scanDocker().filter { $0.id.hasPrefix("docker.image:") } }
+
+    private func inventory(removing refs: Set<String>) throws -> String {
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try FakeDocker.fixture("inventory-full").utf8)) as? [String: Any])
+        root["Images"] = (root["Images"] as? [[String: Any]] ?? []).filter {
+            !refs.contains("\($0["Repository"] as? String ?? ""):\($0["Tag"] as? String ?? "")")
+        }
+        return String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+    }
+
+    func testOnlyOldUnusedNamedImagesAppear() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box)
+        let found = images(scanner)
+
+        XCTAssertEqual(Set(found.map(\.title)), ["Image · web-api:latest", "Image · legacy-tool:1.0 (+1 more names)"])
+        XCTAssertTrue(found.allSatisfy { $0.tier == .review && $0.rebuild == .download && $0.ecosystem == .docker })
+        XCTAssertTrue(fake.unexpected.isEmpty)
+
+        let web = try XCTUnwrap(found.first { $0.title.contains("web-api") })
+        XCTAssertEqual(web.bytes, 289_600_000, "The unique size, which is what removal frees")
+        XCTAssertTrue(web.location.contains("on this Mac for 126 days"), web.location)
+        XCTAssertTrue(web.location.hasPrefix("Docker engine: OrbStack"))
+    }
+
+    func testWhatIsLeftOutAndWhy() throws {
+        let box = try Sandbox()
+        let titles = try images(setup(box).1).map(\.title).joined(separator: " | ")
+        XCTAssertFalse(titles.contains("postgres"), "A running container uses it")
+        XCTAssertFalse(titles.contains("redis"), "A container uses it")
+        XCTAssertFalse(titles.contains("batch-job"), "A STOPPED container uses it. That still counts.")
+        XCTAssertFalse(titles.contains("cache-builder"), "On this Mac for 3 days only")
+        XCTAssertFalse(titles.contains("base-image"), "Built 2 years ago, but it arrived 4 days ago")
+        XCTAssertFalse(titles.contains("tools:x"), "Docker did not say how many containers use it")
+        XCTAssertFalse(titles.contains("mystery"), "Its age on this Mac is unknown. We never guess.")
+    }
+
+    func testTheLimitComesFromTheSetting() throws {
+        let box = try Sandbox()
+        XCTAssertEqual(try images(setup(box, staleDays: 200).1).count, 0, "126 days is not old when the limit is 200")
+        XCTAssertEqual(try images(setup(box, staleDays: 100).1).count, 2)
+        XCTAssertEqual(try images(setup(box, staleDays: 5).1).count, 2, "base-image is 4 days on this Mac: not old enough")
+        XCTAssertEqual(try images(setup(box, staleDays: 4).1).count, 3, "base-image counts now. cache-builder (3 days) does not.")
+    }
+
+    func testCleaningOneImageUsesAnExactNameAndMeasuresTheResult() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box, after: try inventory(removing: ["web-api:latest"]))
+        let target = try XCTUnwrap(images(scanner).first { $0.title.contains("web-api") })
+
+        let report = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
+                             dockerEngine: { scanner.dockerEngine() }).clean([target])
+
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(report.freed, 289_600_000)
+        let removals = fake.calls.filter { $0.contains("image rm") }
+        XCTAssertEqual(removals, ["--host unix://\(socket(box)) image rm web-api:latest"])
+        XCTAssertFalse(fake.calls.contains { $0.contains("prune") || $0.contains(" -a") || $0.contains("--all") },
+                       "Never prune all images: \(fake.calls)")
+        XCTAssertFalse(removals[0].contains(" -f"), "Never force")
+    }
+
+    func testAnImageWithTwoNamesIsRemovedByBothNames() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box, after: try inventory(removing: ["legacy-tool:1.0", "legacy-tool:latest"]))
+        let target = try XCTUnwrap(images(scanner).first { $0.title.contains("legacy-tool") })
+        let report = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
+                             dockerEngine: { scanner.dockerEngine() }).clean([target])
+
+        XCTAssertEqual(report.freed, 200_000_000, "Counted once, not once for each name")
+        XCTAssertEqual(fake.calls.filter { $0.contains("image rm") },
+                       ["--host unix://\(socket(box)) image rm legacy-tool:1.0 legacy-tool:latest"])
+    }
+
+    func testAnImageThatBecomesUsedAfterTheScanIsSkipped() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box)
+        let target = try XCTUnwrap(images(scanner).first { $0.title.contains("web-api") })
+
+        // Between the scan and the clean, a container starts to use the image.
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try FakeDocker.fixture("inventory-full").utf8)) as? [String: Any])
+        root["Images"] = (root["Images"] as? [[String: Any]] ?? []).map { item in
+            var item = item
+            if item["Repository"] as? String == "web-api" { item["Containers"] = "1" }
+            return item
+        }
+        try fake.setInventory(String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self))
+
+        let report = Cleaner(guardian: scanner.guardian, dockerEngine: { scanner.dockerEngine() }).clean([target])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertTrue(report.skipped.joined().contains("a container uses this image"))
+        XCTAssertFalse(fake.calls.contains { $0.contains("image rm") })
+    }
+
+    func testBadNamesGiveNoCommand() {
+        for bad in [["-f"], ["--all"], ["web-api"], [":latest"], ["web-api:"], ["a b:c"], ["x:y; rm -rf /"],
+                    ["UPPER:tag"], ["web-api:latest\n--force"], [], ["ok:1", "-f"], Array(repeating: "a:b", count: 21)] {
+            XCTAssertNil(DockerAction.removeImage(refs: bad).arguments, "\(bad)")
+        }
+        XCTAssertEqual(DockerAction.removeImage(refs: ["postgis/postgis:16-3.4"]).arguments,
+                       ["image", "rm", "postgis/postgis:16-3.4"])
+        XCTAssertNotNil(DockerAction.removeImage(refs: ["localhost:5000/team/app:1.2.3"]).arguments)
+    }
+
+    func testDatesAreReadInBothFormats() {
+        XCTAssertEqual(DockerInventory.parseDate("2026-10-23 14:21:40 +0530 IST"),
+                       ISO8601DateFormatter().date(from: "2026-10-23T08:51:40Z"), "A zone name with a T (IST) works")
+        XCTAssertEqual(DockerInventory.parseDate("2026-10-23 14:21:40 -0700 PST"),
+                       ISO8601DateFormatter().date(from: "2026-10-23T21:21:40Z"))
+        XCTAssertEqual(DockerInventory.parseDate("2026-10-31T03:45:57.348516651Z"),
+                       ISO8601DateFormatter().date(from: "2026-10-31T03:45:57Z"))
+        XCTAssertNil(DockerInventory.parseDate("0001-01-01T00:00:00Z"), "Docker's 'not set'")
+        XCTAssertNil(DockerInventory.parseDate(""))
+        XCTAssertNil(DockerInventory.parseDate("yesterday"))
+    }
+
+    /// The fix for a risk in #7: a count that Docker does not give must never mean "unused".
+    func testAnUnknownContainerCountIsNeverUnused() throws {
+        let json = DockerJSON.inventory(images: [
+            DockerJSON.image("<none>", "<none>", containers: 0, unique: "120MB")
+                .replacingOccurrences(of: "\"Containers\":\"0\"", with: "\"Containers\":\"N/A\""),
+        ])
+        let inventory = try XCTUnwrap(DockerInventory.parse(json))
+        XCTAssertEqual(inventory.images.first?.containers, -1)
+        XCTAssertTrue(inventory.danglingImages.isEmpty, "Unknown count: the dangling image is left alone")
     }
 }

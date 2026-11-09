@@ -3,7 +3,7 @@
     {
       "Repository": "postgres",
       "Tag": "17-alpine",
-      "ID": "sha256:00000000000000000000000000000000000000000000000010ba8cde12dcbe98",
+      "ID": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
       "Size": "414MB",
       "SharedSize": "0B",
       "UniqueSize": "399.4MB",
@@ -15,7 +15,7 @@
     {
       "Repository": "redis",
       "Tag": "7",
-      "ID": "sha256:0000000000000000000000000000000000000000000000007532bcce0e301641",
+      "ID": "sha256:0202020202020202020202020202020202020202020202020202020202020202",
       "Size": "74MB",
       "SharedSize": "0B",
       "UniqueSize": "60MB",
@@ -27,7 +27,7 @@
     {
       "Repository": "web-api",
       "Tag": "latest",
-      "ID": "sha256:0000000000000000000000000000000000000000000000003727269d729bba01",
+      "ID": "sha256:0303030303030303030303030303030303030303030303030303030303030303",
       "Size": "290MB",
       "SharedSize": "0B",
       "UniqueSize": "289.6MB",
@@ -39,7 +39,7 @@
     {
       "Repository": "cache-builder",
       "Tag": "dev",
-      "ID": "sha256:00000000000000000000000000000000000000000000000069a7657ed38757ac",
+      "ID": "sha256:0404040404040404040404040404040404040404040404040404040404040404",
       "Size": "90MB",
       "SharedSize": "0B",
       "UniqueSize": "85MB",
@@ -51,7 +51,7 @@
     {
       "Repository": "<none>",
       "Tag": "<none>",
-      "ID": "sha256:00000000000000000000000000000000000000000000000024ead22f8c5eb019",
+      "ID": "sha256:0505050505050505050505050505050505050505050505050505050505050505",
       "Size": "130MB",
       "SharedSize": "0B",
       "UniqueSize": "120MB",
@@ -63,7 +63,7 @@
     {
       "Repository": "<none>",
       "Tag": "<none>",
-      "ID": "sha256:00000000000000000000000000000000000000000000000045f284e402296a04",
+      "ID": "sha256:0606060606060606060606060606060606060606060606060606060606060606",
       "Size": "35MB",
       "SharedSize": "0B",
       "UniqueSize": "30.5MB",
@@ -75,11 +75,83 @@
     {
       "Repository": "<none>",
       "Tag": "<none>",
-      "ID": "sha256:000000000000000000000000000000000000000000000000576c23f9dfef1443",
+      "ID": "sha256:0707070707070707070707070707070707070707070707070707070707070707",
       "Size": "910MB",
       "SharedSize": "0B",
       "UniqueSize": "900MB",
       "Containers": "1",
+      "CreatedSince": "5 months ago",
+      "CreatedAt": "2026-06-01 09:00:00 +0530 IST",
+      "Digest": "<none>"
+    },
+    {
+      "Repository": "legacy-tool",
+      "Tag": "1.0",
+      "ID": "sha256:0808080808080808080808080808080808080808080808080808080808080808",
+      "Size": "210MB",
+      "SharedSize": "0B",
+      "UniqueSize": "200MB",
+      "Containers": "0",
+      "CreatedSince": "6 months ago",
+      "CreatedAt": "2026-05-01 09:00:00 +0530 IST",
+      "Digest": "<none>"
+    },
+    {
+      "Repository": "legacy-tool",
+      "Tag": "latest",
+      "ID": "sha256:0808080808080808080808080808080808080808080808080808080808080808",
+      "Size": "210MB",
+      "SharedSize": "0B",
+      "UniqueSize": "200MB",
+      "Containers": "0",
+      "CreatedSince": "6 months ago",
+      "CreatedAt": "2026-05-01 09:00:00 +0530 IST",
+      "Digest": "<none>"
+    },
+    {
+      "Repository": "base-image",
+      "Tag": "3",
+      "ID": "sha256:0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+      "Size": "75MB",
+      "SharedSize": "0B",
+      "UniqueSize": "70MB",
+      "Containers": "0",
+      "CreatedSince": "2 years ago",
+      "CreatedAt": "2024-10-14 10:59:58 +0530 IST",
+      "Digest": "<none>"
+    },
+    {
+      "Repository": "batch-job",
+      "Tag": "v2",
+      "ID": "sha256:0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "Size": "155MB",
+      "SharedSize": "0B",
+      "UniqueSize": "150MB",
+      "Containers": "1",
+      "CreatedSince": "6 months ago",
+      "CreatedAt": "2026-05-01 09:00:00 +0530 IST",
+      "Digest": "<none>"
+    },
+    {
+      "Repository": "tools",
+      "Tag": "x",
+      "ID": "sha256:0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+      "Size": "95MB",
+      "SharedSize": "0B",
+      "UniqueSize": "90MB",
+      "Containers": "N/A",
+      "CreatedSince": "6 months ago",
+      "CreatedAt": "2026-05-01 09:00:00 +0530 IST",
+      "Digest": "<none>"
+    },
+    {
+      "Repository": "mystery",
+      "Tag": "1",
+      "ID": "sha256:0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+      "Size": "60MB",
+      "SharedSize": "0B",
+      "UniqueSize": "55MB",
+      "Containers": "0",
       "CreatedSince": "5 months ago",
       "CreatedAt": "2026-06-01 09:00:00 +0530 IST",
       "Digest": "<none>"
@@ -142,7 +214,7 @@
     },
     {
       "ID": "d4d4d4d4d4d4d4d4",
-      "Image": "<none>",
+      "Image": "batch-job:v2",
       "Names": "temp-run",
       "State": "exited",
       "Status": "Exited (1) 5 months ago",

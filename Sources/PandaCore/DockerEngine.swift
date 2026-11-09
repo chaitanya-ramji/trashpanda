@@ -76,6 +76,23 @@ public struct DockerEngine: Sendable, Equatable {
         return inventory
     }
 
+    /// When each image came to this Mac (the last time a name was set on it). The build date can be years older.
+    /// An image that is missing from the answer has an unknown age.
+    public func tagTimes(ofImages ids: [String]) -> [String: Date] {
+        let valid = ids.filter(DockerAction.isImageID).prefix(200)
+        guard !valid.isEmpty else { return [:] }
+        let r = run(["image", "inspect", "--format", "{{.ID}} {{json .Metadata.LastTagTime}}"] + valid, timeout: 30)
+        guard r.status == 0 else { return [:] }
+        var times: [String: Date] = [:]
+        for line in r.stdout.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let date = DockerInventory.parseDate(parts[1].replacingOccurrences(of: "\"", with: ""))
+            else { continue }
+            times[parts[0]] = date
+        }
+        return times
+    }
+
     // MARK: Known local engines
 
     /// Returns the name of a known local engine, or nil. A socket in any other place is refused,
