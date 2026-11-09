@@ -308,3 +308,48 @@ final class EndToEndTests: XCTestCase {
         XCTAssertTrue(log.contains("clean done"))
     }
 }
+
+// MARK: - Dart and Flutter (#1)
+
+final class DartTests: XCTestCase {
+    private func projects(_ box: Sandbox) -> [Finding] {
+        ProjectScanner(home: box.home, roots: [box.home.appendingPathComponent("Developer")],
+                       guardian: PathGuard(home: box.home), activeDirectories: []).scan()
+    }
+
+    func testFindsDartToolAndFlutterBuild() throws {
+        let box = try Sandbox()
+        try box.file("Developer/app/pubspec.yaml", bytes: 10)
+        try box.file("Developer/app/.dart_tool/package_config.json", bytes: 20_000)
+        try box.file("Developer/app/build/.last_build_id", bytes: 20_000)
+        box.ageProject("Developer/app", days: 90)
+        let found = projects(box)
+        XCTAssertEqual(Set(found.map { URL(fileURLWithPath: $0.location).lastPathComponent }), [".dart_tool", "build"])
+        XCTAssertTrue(found.allSatisfy { $0.ecosystem == .dart && $0.tier == .safe })
+    }
+
+    func testMarkerAndBuildContentAreRequired() throws {
+        let box = try Sandbox()
+        try box.file("Developer/nopubspec/.dart_tool/x", bytes: 20_000)
+        try box.file("Developer/plain/pubspec.yaml", bytes: 10)
+        try box.file("Developer/plain/build/notes.txt", bytes: 20_000)   // a build folder with no Flutter output
+        XCTAssertTrue(projects(box).isEmpty)
+    }
+
+    func testGlobalCachesAndProtectedTools() throws {
+        let box = try Sandbox()
+        try box.file(".pub-cache/hosted/pub.dev/a/lib.dart", bytes: 20_000)
+        try box.file(".pub-cache/bin/melos", bytes: 100)
+        try box.file(".pub-cache/global_packages/melos/pubspec.lock", bytes: 100)
+        try box.file(".dartServer/.analysis-driver/index", bytes: 20_000)
+
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false)
+        let found = Dictionary(uniqueKeysWithValues: scanner.scanCaches().map { ($0.id, $0) })
+        XCTAssertEqual(found["dart.pub.hosted:.pub-cache/hosted"]?.tier, .review)
+        XCTAssertEqual(found["dart.analysis:.dartServer/.analysis-driver"]?.tier, .safe)
+
+        let g = PathGuard(home: box.home)
+        XCTAssertEqual(g.check(box.home.appendingPathComponent(".pub-cache/bin/melos")), .protectedData(".pub-cache/bin"))
+        XCTAssertNotNil(g.check(box.home.appendingPathComponent(".pub-cache/global_packages/melos")))
+    }
+}

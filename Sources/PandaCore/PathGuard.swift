@@ -36,6 +36,8 @@ public struct PathGuard: Sendable {
         ".ssh", ".gnupg", ".aws", ".kube", ".docker", ".orbstack", ".config",
         // Package manager stores that hold the only copy of some data.
         ".yarn/berry", ".local/share/jupyter", "Library/Jupyter",
+        // Installed Dart tools. Deleting them breaks the commands that the user installed.
+        ".pub-cache/bin", ".pub-cache/global_packages",
     ]
 
     static let criticalExact: Set<String> = [

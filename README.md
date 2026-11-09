@@ -34,6 +34,7 @@ Trash Panda looks in two places:
 | Rust | Cargo registry and git files | `target` |
 | PHP | Composer | `vendor` |
 | Ruby | Bundler | None |
+| Dart, Flutter | Pub packages, analysis cache | `.dart_tool`, Flutter `build` |
 | Homebrew | Downloads and old versions | None |
 | Docker | Build cache | None |
 
@@ -163,7 +164,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Spinner, new icon, and a DMG release (not notarized)
 
 ### Now: v0.2 Dart, Elixir, Zig
-- [ ] Add Dart and Flutter support ([#1](https://github.com/chaitanya-ramji/trashpanda/issues/1))
+- [x] Add Dart and Flutter support ([#1](https://github.com/chaitanya-ramji/trashpanda/issues/1))
 - [ ] Add Elixir and Erlang support ([#2](https://github.com/chaitanya-ramji/trashpanda/issues/2))
 - [ ] Add Zig support ([#3](https://github.com/chaitanya-ramji/trashpanda/issues/3))
 - [ ] Let the user set the stale limit ([#4](https://github.com/chaitanya-ramji/trashpanda/issues/4))

@@ -132,6 +132,14 @@ enum Catalog {
         // Ruby
         CacheSpec(id: "bundler.cache", title: "Bundler cache", ecosystem: .ruby,
                   paths: [".bundle/cache"], tier: .safe, rebuild: .download),
+
+        // Dart and Flutter. Never touch .pub-cache/bin or global_packages (see PathGuard).
+        CacheSpec(id: "dart.pub.hosted", title: "Dart package cache", ecosystem: .dart,
+                  paths: [".pub-cache/hosted"], tier: .review, rebuild: .download),
+        CacheSpec(id: "dart.pub.git", title: "Dart git packages", ecosystem: .dart,
+                  paths: [".pub-cache/git"], tier: .review, rebuild: .download),
+        CacheSpec(id: "dart.analysis", title: "Dart analysis cache", ecosystem: .dart,
+                  paths: [".dartServer/.analysis-driver"], tier: .safe, rebuild: .minutes),
     ]
 
     // MARK: Project build outputs
@@ -173,6 +181,13 @@ enum Catalog {
         // Swift and Obj-C
         ArtifactRule([".build"], markers: ["Package.swift"], .swift, "Swift package build"),
         ArtifactRule(["Pods"], markers: ["Podfile"], .swift, "CocoaPods"),
+
+        // Dart and Flutter. The Flutter build folder needs a known output file or folder inside.
+        ArtifactRule([".dart_tool"], markers: ["pubspec.yaml"], .dart, "Dart tool cache", rebuild: .seconds),
+        ArtifactRule(["build"], markers: ["pubspec.yaml"],
+                     inner: [".last_build_id", "app", "ios", "web", "macos", "linux", "windows",
+                             "flutter_assets", "unit_test_assets", "cache", "test_cache"],
+                     .dart, "Flutter build output"),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
