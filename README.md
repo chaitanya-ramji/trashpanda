@@ -47,7 +47,7 @@ Trash Panda does **not** touch your images, volumes, documents, or app data.
 Each item has a tier.
 
 - **Safe.** The item is cheap to get back. The "Reclaim" button deletes only safe items.
-- **Review.** The item is costly to get back, or someone changed the project in the last 30 days. You must choose each review item.
+- **Review.** The item is costly to get back, or someone changed the project in the last 30 days (you can change the limit). You must choose each review item.
 
 The menu shows the cost to get an item back. The cost is seconds, minutes, or a new download.
 
@@ -58,7 +58,7 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app always shows a list and asks you before it deletes.
 - A project folder counts only when a marker file is next to it. For example, `node_modules` needs `package.json`.
 - The app skips a project when a running process uses it.
-- The app marks a project as review when someone changed it in the last 30 days.
+- The app marks a project as review when someone changed it in the last 30 days. You can change this limit (see Settings).
 - Python virtual environments are always review items.
 - The app never follows symbolic links.
 - The app never deletes outside your home folder.
@@ -138,6 +138,16 @@ Settings are plain text files. Each file has one path on each line. A line that 
 
 - `~/.config/trashpanda/keep` lists paths that the app never touches.
 - `~/.config/trashpanda/roots` lists more folders to search for projects.
+- `~/.config/trashpanda/settings` holds options as `name = value` lines.
+
+The `settings` file has one option now:
+
+```
+# A project that changed within this many days is a review item. Use a whole number from 1 to 3650.
+stale_days = 30
+```
+
+If the value is not valid, the app uses 30 and writes a warning to the log.
 
 The app searches these folders by default: `Developer`, `dev`, `Projects`, `Code`, `GitHub`, `Repos`, `Workspace`, `Development`, `src`, `work`, and `www`.
 
@@ -170,7 +180,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Add Dart and Flutter support ([#1](https://github.com/chaitanya-ramji/trashpanda/issues/1))
 - [x] Add Elixir and Erlang support ([#2](https://github.com/chaitanya-ramji/trashpanda/issues/2))
 - [x] Add Zig support ([#3](https://github.com/chaitanya-ramji/trashpanda/issues/3))
-- [ ] Let the user set the stale limit ([#4](https://github.com/chaitanya-ramji/trashpanda/issues/4))
+- [x] Let the user set the stale limit ([#4](https://github.com/chaitanya-ramji/trashpanda/issues/4))
 - [ ] Add a screenshot of the menu to the README ([#5](https://github.com/chaitanya-ramji/trashpanda/issues/5))
 
 ### Next: v0.3 Docker

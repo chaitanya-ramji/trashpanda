@@ -210,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func singleBody(_ f: Finding) -> String {
         var text = "\(f.title)\n\(f.rebuild.label)."
-        if f.tier == .review, let days = daysSinceActivity(f), days < ProjectScanner.defaultStaleDays {
+        if f.tier == .review, let days = daysSinceActivity(f), days < scanner.config.staleDays {
             text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")."
         }
         return text

@@ -98,7 +98,7 @@ Trash Panda solves both faults. It shows the space that you can get back. It sho
 | R17 | A Homebrew cask installs the app. | `brew install --cask trashpanda` installs and opens the app. |
 | R18 | A low-disk alert exists. | The app shows a notification when free space is below a set limit. The user can turn it off. |
 | R19 | The user can choose a delete mode. | The user chooses between permanent delete and move to Trash. |
-| R20 | The user can set the stale limit. | The default is 30 days. The user can change it. |
+| R20 | The user can set the stale limit. Built in v0.2. | The default is 30 days. The user can change it with `stale_days` in `~/.config/trashpanda/settings`. |
 | R21 | The menu shows the age of each project. | The tooltip shows the days since the last change. |
 
 ### 6.3 Future (P2). Phase 2 and Phase 3.

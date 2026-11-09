@@ -1,27 +1,65 @@
 import Foundation
 
-/// User settings from ~/.config/trashpanda. Both files hold one path per line.
-/// `keep` lists paths that we never touch. `roots` adds project folders to search.
+/// User settings from ~/.config/trashpanda.
+/// `keep` and `roots` hold one path per line. `keep` lists paths that we never touch.
+/// `roots` adds project folders to search.
+/// `settings` holds lines such as `stale_days = 30`.
 public struct Config: Sendable {
     public var keep: [String]
     public var roots: [String]
+    /// A project that someone changed within this many days is a review item.
+    public var staleDays: Int
+
+    public static let defaultStaleDays = 30
+    public static let staleDaysRange = 1...3650
 
     public static func load(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Config {
+        func read(_ name: String) -> String? {
+            try? String(contentsOf: home.appendingPathComponent(".config/trashpanda/\(name)"), encoding: .utf8)
+        }
         func lines(_ name: String) -> [String] {
-            let url = home.appendingPathComponent(".config/trashpanda/\(name)")
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+            guard let text = read(name) else { return [] }
             return text.split(separator: "\n").compactMap { raw in
                 let line = raw.trimmingCharacters(in: .whitespaces)
                 guard !line.isEmpty, !line.hasPrefix("#") else { return nil }
                 return line.hasPrefix("~") ? home.path + line.dropFirst() : line
             }
         }
-        return Config(keep: lines("keep"), roots: lines("roots"))
+        let parsed = parseSettings(read("settings") ?? "")
+        for warning in parsed.warnings { Log.warn("settings: \(warning)") }
+        Log.info("stale limit: \(parsed.staleDays) days\(parsed.fromFile ? " (from settings file)" : " (default)")")
+        return Config(keep: lines("keep"), roots: lines("roots"), staleDays: parsed.staleDays)
     }
 
-    public init(keep: [String] = [], roots: [String] = []) {
+    /// Reads `key = value` lines. A bad value gives a warning and the default.
+    static func parseSettings(_ text: String) -> (staleDays: Int, fromFile: Bool, warnings: [String]) {
+        var staleDays = defaultStaleDays
+        var fromFile = false
+        var warnings: [String] = []
+        for raw in text.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+            let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2 else { warnings.append("ignored line \"\(line)\""); continue }
+            switch parts[0] {
+            case "stale_days":
+                if let value = Int(parts[1]), staleDaysRange.contains(value) {
+                    staleDays = value
+                    fromFile = true
+                } else {
+                    warnings.append("stale_days \"\(parts[1])\" is not a whole number from \(staleDaysRange.lowerBound) to \(staleDaysRange.upperBound). Using \(defaultStaleDays).")
+                }
+            default:
+                warnings.append("unknown setting \"\(parts[0])\"")
+            }
+        }
+        return (staleDays, fromFile, warnings)
+    }
+
+    public init(keep: [String] = [], roots: [String] = [], staleDays: Int = Config.defaultStaleDays) {
         self.keep = keep
         self.roots = roots
+        self.staleDays = staleDays
     }
 }
 
@@ -256,7 +294,7 @@ public final class DiskScanner {
         roots = roots.filter { seen.insert($0.resolvingSymlinksInPath().path).inserted }
 
         let scanner = ProjectScanner(home: home, roots: roots, guardian: guardian,
-                                     activeDirectories: Shell.activeDirectories())
+                                     activeDirectories: Shell.activeDirectories(), staleDays: config.staleDays)
         return scanner.scan()
     }
 

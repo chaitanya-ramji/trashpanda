@@ -12,7 +12,7 @@ public struct ProjectScanner {
     /// Working directories of running processes. A project in use is never listed.
     public let activeDirectories: [String]
 
-    public static let defaultStaleDays = 30
+    public static let defaultStaleDays = Config.defaultStaleDays
 
     public init(home: URL, roots: [URL], guardian: PathGuard, activeDirectories: [String],
                 now: Date = Date(), staleDays: Int = ProjectScanner.defaultStaleDays, maxDepth: Int = 6) {

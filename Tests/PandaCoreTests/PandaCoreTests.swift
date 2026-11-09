@@ -611,3 +611,68 @@ final class DockerEngineTests: XCTestCase {
 private extension Result where Failure == DockerRefusal {
     var failureReason: DockerRefusal? { if case .failure(let e) = self { return e } else { return nil } }
 }
+
+// MARK: - Stale limit setting (#4)
+
+final class StaleLimitTests: XCTestCase {
+    func testValidValuesAreRead() {
+        XCTAssertEqual(Config.parseSettings("stale_days = 7").staleDays, 7)
+        XCTAssertEqual(Config.parseSettings("stale_days=90\n").staleDays, 90)
+        XCTAssertEqual(Config.parseSettings("# comment\n\n  stale_days =  365  \n").staleDays, 365)
+        let parsed = Config.parseSettings("stale_days = 7")
+        XCTAssertTrue(parsed.fromFile)
+        XCTAssertTrue(parsed.warnings.isEmpty)
+    }
+
+    func testBadValuesFallBackToThirtyWithAWarning() {
+        for bad in ["abc", "0", "-5", "7.5", "99999", "", "7 days"] {
+            let parsed = Config.parseSettings("stale_days = \(bad)")
+            XCTAssertEqual(parsed.staleDays, 30, "\"\(bad)\" falls back")
+            XCTAssertFalse(parsed.fromFile)
+            XCTAssertEqual(parsed.warnings.count, 1, "\"\(bad)\" warns once")
+        }
+        XCTAssertEqual(Config.parseSettings("").staleDays, 30)
+        XCTAssertEqual(Config.parseSettings("unknown = 1").warnings.count, 1)
+        XCTAssertEqual(Config.parseSettings("no equals sign").warnings.count, 1)
+    }
+
+    func testLimitChangesTheTierOfAProject() throws {
+        let box = try Sandbox()
+        try box.file("Developer/app/package.json", bytes: 10)
+        try box.file("Developer/app/node_modules/x/i.js", bytes: 50_000)
+        box.ageProject("Developer/app", days: 20)           // changed 20 days ago
+
+        func tier(staleDays: Int) -> Tier? {
+            DiskScanner(home: box.home, config: Config(staleDays: staleDays), useOwnerTools: false)
+                .scanProjects().first?.tier
+        }
+        XCTAssertEqual(tier(staleDays: 30), .review, "20 days is recent when the limit is 30")
+        XCTAssertEqual(tier(staleDays: 15), .safe, "20 days is stale when the limit is 15")
+        XCTAssertEqual(tier(staleDays: 90), .review)
+    }
+
+    func testFileIsLoadedAndTheLogShowsTheValue() throws {
+        let box = try Sandbox()
+        Log.fileURL = box.home.appendingPathComponent("log.txt")
+        defer { Log.fileURL = TestLog.url }
+
+        try box.file(".config/trashpanda/settings", bytes: 0)
+        try "stale_days = 12\n".write(to: box.home.appendingPathComponent(".config/trashpanda/settings"),
+                                      atomically: true, encoding: .utf8)
+        XCTAssertEqual(Config.load(home: box.home).staleDays, 12)
+
+        try "stale_days = banana\n".write(to: box.home.appendingPathComponent(".config/trashpanda/settings"),
+                                          atomically: true, encoding: .utf8)
+        XCTAssertEqual(Config.load(home: box.home).staleDays, 30)
+
+        let log = try String(contentsOf: Log.fileURL, encoding: .utf8)
+        XCTAssertTrue(log.contains("stale limit: 12 days (from settings file)"))
+        XCTAssertTrue(log.contains("WARN  settings: stale_days \"banana\""))
+        XCTAssertTrue(log.contains("stale limit: 30 days (default)"))
+    }
+
+    func testMissingFileUsesTheDefault() throws {
+        let box = try Sandbox()
+        XCTAssertEqual(Config.load(home: box.home).staleDays, 30)
+    }
+}
