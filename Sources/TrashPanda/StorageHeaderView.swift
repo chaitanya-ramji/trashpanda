@@ -75,10 +75,11 @@ final class StorageHeaderView: NSView {
         let total = Double(disk.total)
         let other = max(0, disk.used - reclaimable - reviewable)
         let parts: [(Int64, NSColor)] = [
-            (other, NSColor.systemGray.withAlphaComponent(0.55)),
+            // Used space is clearly darker than free space, in light and dark mode.
+            (other, NSColor.labelColor.withAlphaComponent(0.38)),
             (reviewable, NSColor.systemYellow),
             (reclaimable, NSColor.systemOrange),
-            (disk.free, NSColor.separatorColor),
+            (disk.free, NSColor.labelColor.withAlphaComponent(0.10)),
         ]
 
         NSGraphicsContext.saveGraphicsState()

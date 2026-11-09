@@ -29,6 +29,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var spinnerTimer: Timer?
     private var spinnerStep = 0
     private let panda = PandaArt.menuBarIcon()
+    /// `--demo light` or `--demo dark` shows made-up data and opens the menu. It never scans or deletes.
+    private let demoStyle: String? = {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--demo") else { return nil }
+        return i + 1 < args.count ? args[i + 1] : "light"
+    }()
 
     private var activity: Activity { cleaning ? .cleaning : (scanning ? .scanning : .idle) }
 
@@ -40,6 +46,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.imagePosition = .imageLeading
         menu.delegate = self
         statusItem.menu = menu
+        if let style = demoStyle {
+            menu.appearance = NSAppearance(named: style == "dark" ? .darkAqua : .aqua)
+            result = DemoData.result()
+            disk = result!.disk
+            refreshStatusItem()
+            rebuildMenu()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                self?.statusItem.button?.performClick(nil)
+            }
+            return
+        }
         refreshStatusItem()
         rebuildMenu()
         scan()
@@ -47,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        disk = DiskUsage.current()
+        if demoStyle == nil { disk = DiskUsage.current() }
         refreshStatusItem()
         if let last = result?.date, Date().timeIntervalSince(last) > 30 * 60 { scan() }
         rebuildMenu()
@@ -56,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Scan
 
     private func scan() {
-        guard !scanning, !cleaning else { return }
+        guard demoStyle == nil, !scanning, !cleaning else { return }
         scanning = true
         busyChanged()
         let scanner = self.scanner
@@ -275,7 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// One short dialog. It says what happens and that it cannot be undone. Nothing more.
     @objc private func confirmAndClean(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? FindingBox, !cleaning else { return }
+        guard let box = sender.representedObject as? FindingBox, !cleaning, demoStyle == nil else { return }
         let total = box.findings.reduce(Int64(0)) { $0 + $1.bytes }
 
         let alert = NSAlert()
