@@ -85,6 +85,9 @@ public final class Cleaner {
             case .removeDeviceSupport(let url):
                 removeDeviceSupport(url, finding: finding, into: &report)
 
+            case .removeUpdateDownloads(let url):
+                removeUpdateDownloads(url, finding: finding, into: &report)
+
             case .inform:
                 skip(finding, "this item is information only", &report)
             }
@@ -214,6 +217,34 @@ public final class Cleaner {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
         }
+    }
+
+    /// The old update files of one app. We look at the age again now, so that an update that started after the scan stays.
+    /// Only the children of two folders can go. Nothing else in the cache of the app is touched.
+    private func removeUpdateDownloads(_ sparkle: URL, finding: Finding, into report: inout CleanReport) {
+        guard UpdateDownloads.isSparkleFolder(sparkle, home: URL(fileURLWithPath: guardian.home)),
+              UpdateDownloads.isPlainPath(sparkle) else {
+            skip(finding, "not the update folder of an app", &report); return
+        }
+        var removed = 0, failures = 0
+        for item in UpdateDownloads.staleItems(in: sparkle, now: Date()) {
+            if let reason = guardian.check(item) {
+                Log.warn("skip child \(item.path): \(reason)")
+                report.skipped.append("\(item.path): \(reason)"); continue
+            }
+            let size = Sizer.size(of: item)
+            do {
+                try FileManager.default.removeItem(at: item)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(item.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) old update items, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.location): \(failures) items stayed") }
     }
 
     /// One folder of device support files, `<platform> DeviceSupport/<name>` in the Xcode folder. Nothing else is accepted.

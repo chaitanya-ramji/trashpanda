@@ -33,7 +33,7 @@ public enum Rebuild: Sendable {
 
 /// Language or tool group. Phase 1 groups ship now. Phase 2 groups are planned.
 public enum Ecosystem: String, CaseIterable, Sendable {
-    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker
+    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps
 
     /// A short name for places with little room, such as the legend of the bar.
     public var shortName: String {
@@ -53,6 +53,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .zig: return "Zig"
         case .homebrew: return "Homebrew"
         case .docker: return "Docker"
+        case .apps: return "Updates"
         }
     }
 
@@ -73,6 +74,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .zig: return "Zig"
         case .homebrew: return "Homebrew"
         case .docker: return "Docker"
+        case .apps: return "App update downloads"
         }
     }
 }
@@ -193,6 +195,8 @@ public enum Action: Sendable {
     case simulator(SimulatorAction)
     /// One Xcode archive. It must be `Archives/<date>/<name>.xcarchive` in the home folder.
     case removeArchive(URL)
+    /// The Sparkle folder of an app. The cleaner removes the old update files in it, and nothing else.
+    case removeUpdateDownloads(URL)
     /// One folder of device support files. It must be `<platform> DeviceSupport/<name>` in the Xcode folder.
     case removeDeviceSupport(URL)
     /// Information only. Nothing can be deleted. The menu shows it as a line that cannot be chosen.

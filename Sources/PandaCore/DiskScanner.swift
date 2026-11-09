@@ -84,12 +84,16 @@ public final class DiskScanner {
     private let xcrunOverride: String?
     /// The current time. Tests set a fixed time, so that ages do not change from day to day.
     private let now: () -> Date
+    /// The name of an installed app. Tests give their own.
+    private let appName: (String) -> String?
 
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
                 isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
-                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil) {
+                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil,
+                appName: @escaping (String) -> String? = UpdateDownloads.systemAppName(for:)) {
         self.now = now
+        self.appName = appName
         self.xcrunOverride = xcrunPath
         self.home = home
         self.config = config
@@ -116,6 +120,7 @@ public final class DiskScanner {
             { add(self.scanProjects()) },
             { add(self.scanArchives()) },
             { add(self.scanDeviceSupport()) },
+            { add(self.scanUpdateDownloads()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -158,6 +163,8 @@ public final class DiskScanner {
             case .removeVolume(let name):
                 return inventory.volumes.contains { $0.name == name } ? finding.bytes : 0
             }
+        case .removeUpdateDownloads(let url):
+            return UpdateDownloads.staleBytes(in: url, now: now())
         case .removeArchive(let url), .removeDeviceSupport(let url):
             return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url) : 0
         case .simulator(let action):
@@ -300,6 +307,25 @@ public final class DiskScanner {
         return out
     }
 
+    /// A path with `~` for the home folder of this scanner. It does not use the home folder of the user who runs the test.
+    private func tilde(_ path: String) -> String {
+        path.hasPrefix(home.path + "/") ? "~" + path.dropFirst(home.path.count) : path
+    }
+
+    /// Old update files that apps leave behind. One item for each app. The app that owns them must be closed.
+    func scanUpdateDownloads() -> [Finding] {
+        UpdateDownloads.list(home: home, now: now()).compactMap { app in
+            guard guardian.check(app.url) == nil else { return nil }
+            let name = appName(app.bundleID) ?? app.bundleID
+            let shown = tilde(app.url.deletingLastPathComponent().path)
+            return Finding(id: "app.updates:\(app.bundleID)", ecosystem: .apps, title: "Old update downloads · \(name)",
+                           location: "\(shown) · older than \(UpdateDownloads.minimumAgeDays) days",
+                           bytes: app.staleBytes, tier: .safe, rebuild: .download,
+                           action: .removeUpdateDownloads(app.url),
+                           owner: AppOwner(name: name, bundleIDs: [app.bundleID]))
+        }
+    }
+
     /// Device support files, one item for each OS version. The newest version of each device model is kept.
     func scanDeviceSupport() -> [Finding] {
         let folders = DeviceSupport.list(home: home).filter { $0.bytes > 0 }
@@ -329,7 +355,7 @@ public final class DiskScanner {
             let rel = a.url.path.replacingOccurrences(of: XcodeArchives.root(home: home).path + "/", with: "")
             let age = a.modified.map { "archived \(max(0, Int(now().timeIntervalSince($0) / 86_400))) days ago" } ?? "age unknown"
             return Finding(id: "xcode.archive:\(rel)", ecosystem: .swift, title: "Archive · \(a.name)",
-                           location: "\((a.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath) · \(age)",
+                           location: "\(tilde(a.url.deletingLastPathComponent().path)) · \(age)",
                            bytes: a.bytes, tier: .review, rebuild: .recreate,
                            action: .removeArchive(a.url), lastActivity: a.modified, owner: Catalog.xcode)
         }
