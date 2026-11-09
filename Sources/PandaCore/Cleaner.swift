@@ -7,10 +7,16 @@ public final class Cleaner {
     public let guardian: PathGuard
     /// Measures what is left of an item after the clean. Without it, owner commands report the estimate.
     private let remaining: ((Finding) -> Int64)?
+    /// Finds the Docker engine at clean time. The engine can change after the scan.
+    private let dockerEngine: () -> Result<DockerEngine, DockerRefusal>
 
-    public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil) {
+    public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
+                dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil) {
         self.guardian = guardian
         self.remaining = remaining
+        self.dockerEngine = dockerEngine ?? {
+            DockerEngine.detect(dockerPath: Shell.resolve("docker"), home: URL(fileURLWithPath: guardian.home))
+        }
     }
 
     public func clean(_ findings: [Finding], progress: ((String) -> Void)? = nil) -> CleanReport {
@@ -98,10 +104,21 @@ public final class Cleaner {
     }
 
     private func runOwner(_ command: OwnerCommand, finding: Finding, into report: inout CleanReport) {
-        guard let tool = Shell.resolve(command.toolName) else {
-            skip(finding, "\(command.toolName) not found", &report); return
+        let result: ShellResult
+        if command.toolName == "docker" {
+            // Docker runs only on a local engine that we check again right now.
+            switch dockerEngine() {
+            case .failure(let why):
+                skip(finding, "Docker: \(why)", &report); return
+            case .success(let engine):
+                result = engine.run(command.arguments, timeout: command.timeout)
+            }
+        } else {
+            guard let tool = Shell.resolve(command.toolName) else {
+                skip(finding, "\(command.toolName) not found", &report); return
+            }
+            result = Shell.run(tool, command.arguments, timeout: command.timeout)
         }
-        let result = Shell.run(tool, command.arguments, timeout: command.timeout)
         guard result.status == 0, !result.timedOut else {
             report.failed.append("\(finding.title): \(command.toolName) failed")
             return

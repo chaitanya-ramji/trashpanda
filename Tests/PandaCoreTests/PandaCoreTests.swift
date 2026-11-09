@@ -1,9 +1,15 @@
 import XCTest
 @testable import PandaCore
 
+enum TestLog {
+    static let url = FileManager.default.temporaryDirectory.appendingPathComponent("trashpanda-tests.log")
+    static let configure: Void = { Log.fileURL = url }()
+}
+
 final class Sandbox {
     let home: URL
     init() throws {
+        _ = TestLog.configure
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("panda-\(UUID().uuidString)")
         let raw = base.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: raw, withIntermediateDirectories: true)
@@ -276,6 +282,7 @@ final class EndToEndTests: XCTestCase {
     func testScanCleanRescanAndLog() throws {
         let box = try Sandbox()
         Log.fileURL = box.home.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+        defer { Log.fileURL = TestLog.url }
 
         try box.file(".npm/_cacache/content/blob", bytes: 3_000_000)
         try box.file("Developer/old/package.json", bytes: 10)
@@ -447,4 +454,160 @@ final class ZigTests: XCTestCase {
         XCTAssertEqual(found.map(\.id), ["zig.global:.cache/zig"])
         XCTAssertEqual(found.first?.tier, .safe)
     }
+}
+
+// MARK: - Docker: act only on a local engine (#6)
+
+/// A fake docker tool. It records every call, so a test can prove what ran.
+final class FakeDocker {
+    let path: String
+    private let logPath: String
+
+    init(box: Sandbox, contextName: String, host: String) throws {
+        path = box.home.appendingPathComponent("bin/docker").path
+        logPath = box.home.appendingPathComponent("docker-calls.log").path
+        let script = """
+        #!/bin/bash
+        echo "$*" >> "\(logPath)"
+        echo "ENV DOCKER_HOST=${DOCKER_HOST:-} DOCKER_CONTEXT=${DOCKER_CONTEXT:-}" >> "\(logPath)"
+        if [ "$1" = "context" ] && [ "$2" = "inspect" ]; then
+          echo '[{"Name":"\(contextName)","Endpoints":{"docker":{"Host":"\(host)"}}}]'
+          exit 0
+        fi
+        case "$*" in
+          *"system df"*) echo '{"Type":"Build Cache","Reclaimable":"2.5GB (100%)"}'; exit 0;;
+          *"builder prune"*) exit 0;;
+        esac
+        exit 1
+        """
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
+                                                withIntermediateDirectories: true)
+        try script.write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+    }
+
+    var calls: [String] {
+        ((try? String(contentsOfFile: logPath, encoding: .utf8)) ?? "")
+            .split(separator: "\n").map(String.init).filter { !$0.hasPrefix("ENV ") }
+    }
+    var environments: [String] {
+        ((try? String(contentsOfFile: logPath, encoding: .utf8)) ?? "")
+            .split(separator: "\n").map(String.init).filter { $0.hasPrefix("ENV ") }
+    }
+}
+
+final class DockerEngineTests: XCTestCase {
+    private func scanner(_ box: Sandbox, _ fake: FakeDocker, socketExists: Bool = true) -> DiskScanner {
+        DiskScanner(home: box.home, config: Config(), useOwnerTools: false,
+                    dockerPath: fake.path, isSocket: { _ in socketExists })
+    }
+
+    func testLocalOrbStackEngineIsUsedWithExplicitHost() throws {
+        let box = try Sandbox()
+        let socket = box.home.appendingPathComponent(".orbstack/run/docker.sock").path
+        let fake = try FakeDocker(box: box, contextName: "orbstack", host: "unix://\(socket)")
+        let found = scanner(box, fake).scanDocker()
+
+        XCTAssertEqual(found.map(\.id), ["docker.buildcache"])
+        XCTAssertEqual(found.first?.bytes, 2_500_000_000)
+        XCTAssertEqual(found.first?.location, "Docker engine: OrbStack")
+        XCTAssertTrue(fake.calls.contains("--host unix://\(socket) system df --format {{json .}}"),
+                      "Every command names the engine: \(fake.calls)")
+    }
+
+    func testRemoteEnginesGetNoCommandsAtAll() throws {
+        for host in ["tcp://prod.example.com:2375", "ssh://deploy@prod.example.com", "npipe:////./pipe/docker_engine"] {
+            let box = try Sandbox()
+            let fake = try FakeDocker(box: box, contextName: "prod", host: host)
+            let s = scanner(box, fake)
+
+            XCTAssertTrue(s.scanDocker().isEmpty, "Nothing is listed for \(host)")
+            XCTAssertEqual(fake.calls, ["context inspect"], "Only the context is read for \(host)")
+
+            // The cleaner must refuse too, even with a finding that the scan never made.
+            let item = Finding(id: "docker.buildcache", ecosystem: .docker, title: "Build cache",
+                               location: "Docker engine: x", bytes: 1_000_000_000, tier: .safe, rebuild: .minutes,
+                               action: .owner(.dockerBuilderPrune))
+            let cleaner = Cleaner(guardian: PathGuard(home: box.home), dockerEngine: { s.dockerEngine() })
+            let report = cleaner.clean([item])
+            XCTAssertEqual(report.removed, 0)
+            XCTAssertEqual(report.freed, 0)
+            XCTAssertFalse(fake.calls.contains { $0.contains("prune") }, "Nothing is deleted on \(host)")
+        }
+    }
+
+    func testEnvironmentCannotRedirectTheEngine() throws {
+        let box = try Sandbox()
+        let socket = box.home.appendingPathComponent(".orbstack/run/docker.sock").path
+        let fake = try FakeDocker(box: box, contextName: "orbstack", host: "unix://\(socket)")
+        setenv("DOCKER_HOST", "tcp://prod.example.com:2375", 1)
+        setenv("DOCKER_CONTEXT", "prod", 1)
+        defer { unsetenv("DOCKER_HOST"); unsetenv("DOCKER_CONTEXT") }
+
+        _ = scanner(box, fake).scanDocker()
+
+        XCTAssertFalse(fake.environments.isEmpty)
+        XCTAssertTrue(fake.environments.allSatisfy { $0 == "ENV DOCKER_HOST= DOCKER_CONTEXT=" },
+                      "The tool never sees the variables: \(fake.environments)")
+    }
+
+    func testUnknownAndForeignSocketsAreRefused() throws {
+        let box = try Sandbox()
+        let other = "/Users/someone-else/.orbstack/run/docker.sock"
+        for socket in ["/tmp/ssh-tunnel.sock", other, "\(box.home.path)/.orbstack/run/../../x.sock",
+                       "\(box.home.path)/.colima/a/b/docker.sock", "relative/docker.sock"] {
+            let fake = try FakeDocker(box: box, contextName: "x", host: "unix://\(socket)")
+            let result = DockerEngine.detect(dockerPath: fake.path, home: box.home, isSocket: { _ in true })
+            if case .success = result { XCTFail("Accepted \(socket)") }
+        }
+    }
+
+    func testKnownLocalEnginesAreAccepted() throws {
+        let box = try Sandbox()
+        let h = box.home.path
+        let cases: [(String, String)] = [
+            ("\(h)/.orbstack/run/docker.sock", "OrbStack"),
+            ("\(h)/.docker/run/docker.sock", "Docker Desktop"),
+            ("\(h)/.colima/default/docker.sock", "Colima"),
+            ("\(h)/.rd/docker.sock", "Rancher Desktop"),
+            ("/var/run/docker.sock", "Docker"),
+        ]
+        for (socket, kind) in cases {
+            let fake = try FakeDocker(box: box, contextName: "ctx", host: "unix://\(socket)")
+            let result = DockerEngine.detect(dockerPath: fake.path, home: box.home, isSocket: { _ in true })
+            guard case .success(let engine) = result else { return XCTFail("Refused \(socket)") }
+            XCTAssertEqual(engine.kind, kind)
+        }
+    }
+
+    func testStoppedEngineRunsNothingMore() throws {
+        let box = try Sandbox()
+        let socket = box.home.appendingPathComponent(".orbstack/run/docker.sock").path
+        let fake = try FakeDocker(box: box, contextName: "orbstack", host: "unix://\(socket)")
+        XCTAssertTrue(scanner(box, fake, socketExists: false).scanDocker().isEmpty)
+        XCTAssertEqual(fake.calls, ["context inspect"])
+    }
+
+    func testNoDockerInstalled() throws {
+        let box = try Sandbox()
+        XCTAssertEqual(DockerEngine.detect(dockerPath: nil, home: box.home).failureReason, .noDocker)
+    }
+
+    func testCleanRunsPruneOnTheCheckedEngineOnly() throws {
+        let box = try Sandbox()
+        let socket = box.home.appendingPathComponent(".orbstack/run/docker.sock").path
+        let fake = try FakeDocker(box: box, contextName: "orbstack", host: "unix://\(socket)")
+        let s = scanner(box, fake)
+        let finding = try XCTUnwrap(s.scanDocker().first)
+
+        let cleaner = Cleaner(guardian: PathGuard(home: box.home), remaining: { _ in 0 },
+                              dockerEngine: { s.dockerEngine() })
+        let report = cleaner.clean([finding])
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertTrue(fake.calls.contains("--host unix://\(socket) builder prune -f"))
+    }
+}
+
+private extension Result where Failure == DockerRefusal {
+    var failureReason: DockerRefusal? { if case .failure(let e) = self { return e } else { return nil } }
 }

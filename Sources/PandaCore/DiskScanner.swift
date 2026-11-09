@@ -39,13 +39,24 @@ public final class DiskScanner {
 
     /// When false, the scan never runs brew, docker, go, uv, or xcrun. Tests use this.
     public let useOwnerTools: Bool
+    /// Path of the docker tool. Tests set it to a fake tool. The default finds the real one.
+    private let dockerOverride: String?
+    private let isSocket: (String) -> Bool
 
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
-                useOwnerTools: Bool = true) {
+                useOwnerTools: Bool = true, dockerPath: String? = nil,
+                isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket) {
         self.home = home
         self.config = config
         self.guardian = PathGuard(home: home, keep: config.keep)
         self.useOwnerTools = useOwnerTools
+        self.dockerOverride = dockerPath
+        self.isSocket = isSocket
+    }
+
+    /// The local Docker engine, or the reason that the app does not use Docker.
+    public func dockerEngine() -> Result<DockerEngine, DockerRefusal> {
+        DockerEngine.detect(dockerPath: dockerOverride ?? Shell.resolve("docker"), home: home, isSocket: isSocket)
     }
 
     public func scan() -> ScanResult {
@@ -170,16 +181,21 @@ public final class DiskScanner {
     }
 
     func scanDocker() -> [Finding] {
-        let bytes = dockerBuildCacheBytes()
+        guard case .success(let engine) = dockerEngine() else { return [] }
+        let bytes = dockerBuildCacheBytes(engine)
         guard bytes > 0 else { return [] }
         return [Finding(id: "docker.buildcache", ecosystem: .docker, title: "Build cache",
-                        location: "Docker engine", bytes: bytes, tier: .safe, rebuild: .minutes,
+                        location: "Docker engine: \(engine.kind)", bytes: bytes, tier: .safe, rebuild: .minutes,
                         action: .owner(.dockerBuilderPrune))]
     }
 
     func dockerBuildCacheBytes() -> Int64 {
-        guard let docker = Shell.resolve("docker") else { return 0 }
-        let r = Shell.run(docker, ["system", "df", "--format", "{{json .}}"], timeout: 8)
+        guard case .success(let engine) = dockerEngine() else { return 0 }
+        return dockerBuildCacheBytes(engine)
+    }
+
+    private func dockerBuildCacheBytes(_ engine: DockerEngine) -> Int64 {
+        let r = engine.run(["system", "df", "--format", "{{json .}}"], timeout: 8)
         guard r.status == 0 else { return 0 }
         for line in r.stdout.split(separator: "\n") {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],

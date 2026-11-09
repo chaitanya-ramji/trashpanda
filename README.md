@@ -66,6 +66,7 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app counts only space that a delete frees. A file with more than one hard link frees no space.
 - For Homebrew, the app asks `brew` what it would remove. Homebrew keeps its own index files, and the app does not count them.
 - The app asks the owning tool to clean its own data when it can. It runs fixed commands only.
+- Docker runs on a local engine only (OrbStack, Docker Desktop, Colima, or Rancher Desktop). The app refuses remote engines and unknown sockets. It ignores `DOCKER_HOST` and `DOCKER_CONTEXT`.
 
 ## Install
 
@@ -173,7 +174,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Add a screenshot of the menu to the README ([#5](https://github.com/chaitanya-ramji/trashpanda/issues/5))
 
 ### Next: v0.3 Docker
-- [ ] Docker: act only on a local engine ([#6](https://github.com/chaitanya-ramji/trashpanda/issues/6))
+- [x] Docker: act only on a local engine ([#6](https://github.com/chaitanya-ramji/trashpanda/issues/6))
 - [ ] Docker: remove dangling images ([#7](https://github.com/chaitanya-ramji/trashpanda/issues/7))
 - [ ] Docker: remove stopped containers ([#8](https://github.com/chaitanya-ramji/trashpanda/issues/8))
 - [ ] Docker: remove unused images older than N days ([#9](https://github.com/chaitanya-ramji/trashpanda/issues/9))

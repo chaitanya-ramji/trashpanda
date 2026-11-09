@@ -29,9 +29,16 @@ public enum Shell {
     }
 
     /// Runs a command and logs it. The log has the command, the exit code, the time, and the end of stderr.
-    public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30) -> ShellResult {
+    public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
+                           unsetEnv: [String] = []) -> ShellResult {
+        Shell.run(path, args, timeout: timeout, unsetEnvironment: unsetEnv)
+    }
+
+    /// Same as `run`. `unsetEnvironment` lists variables to remove from the command environment.
+    public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
+                           unsetEnvironment: [String]) -> ShellResult {
         let started = Date()
-        let result = execute(path, args, timeout: timeout)
+        let result = execute(path, args, timeout: timeout, unset: unsetEnvironment)
         let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
         var line = "run \((path as NSString).lastPathComponent) \(args.joined(separator: " ")) -> exit \(result.status) in \(seconds)s"
         if result.timedOut { line += " TIMED OUT" }
@@ -41,7 +48,8 @@ public enum Shell {
         return result
     }
 
-    private static func execute(_ path: String, _ args: [String], timeout: TimeInterval) -> ShellResult {
+    private static func execute(_ path: String, _ args: [String], timeout: TimeInterval,
+                                unset: [String] = []) -> ShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
@@ -49,6 +57,7 @@ public enum Shell {
         env["PATH"] = searchDirs.joined(separator: ":")
         env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
         env["HOMEBREW_NO_ANALYTICS"] = "1"
+        for key in unset { env.removeValue(forKey: key) }
         process.environment = env
         let out = Pipe(), err = Pipe()
         process.standardOutput = out

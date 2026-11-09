@@ -168,6 +168,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func submenu(for ecosystem: Ecosystem, items: [Finding]) -> NSMenu {
         let sub = NSMenu()
+        if ecosystem == .docker, let engine = items.first?.location, engine.hasPrefix("Docker engine: ") {
+            sub.addItem(disabled(engine.replacingOccurrences(of: "Docker engine: ", with: "Engine: ") + " (local)"))
+            sub.addItem(.separator())
+        }
         let safe = items.filter { $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
         let review = items.filter { $0.tier == .review }.sorted { $0.bytes > $1.bytes }
 
