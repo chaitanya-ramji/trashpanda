@@ -405,3 +405,46 @@ final class ElixirTests: XCTestCase {
         XCTAssertEqual(g.check(box.home.appendingPathComponent(".hex/hex.config")), .protectedData(".hex/hex.config"))
     }
 }
+
+// MARK: - Zig (#3)
+
+final class ZigTests: XCTestCase {
+    private func projects(_ box: Sandbox) -> [Finding] {
+        ProjectScanner(home: box.home, roots: [box.home.appendingPathComponent("Developer")],
+                       guardian: PathGuard(home: box.home), activeDirectories: []).scan()
+    }
+
+    func testFindsCacheAndOutput() throws {
+        let box = try Sandbox()
+        try box.file("Developer/lib/build.zig", bytes: 10)
+        try box.file("Developer/lib/.zig-cache/o/x", bytes: 20_000)
+        try box.file("Developer/lib/zig-out/bin/app", bytes: 20_000)
+        box.ageProject("Developer/lib", days: 90)
+        let found = projects(box)
+        XCTAssertEqual(Set(found.map { URL(fileURLWithPath: $0.location).lastPathComponent }), [".zig-cache", "zig-out"])
+        XCTAssertTrue(found.allSatisfy { $0.ecosystem == .zig && $0.tier == .safe })
+    }
+
+    func testOldCacheNameAlsoWorks() throws {
+        let box = try Sandbox()
+        try box.file("Developer/old/build.zig", bytes: 10)
+        try box.file("Developer/old/zig-cache/o/x", bytes: 20_000)
+        XCTAssertEqual(projects(box).count, 1)
+    }
+
+    func testBuildZigIsRequired() throws {
+        let box = try Sandbox()
+        try box.file("Developer/other/zig-out/bin/app", bytes: 20_000)
+        try box.file("Developer/other/.zig-cache/o/x", bytes: 20_000)
+        XCTAssertTrue(projects(box).isEmpty)
+    }
+
+    func testGlobalCache() throws {
+        let box = try Sandbox()
+        try box.file(".cache/zig/h/x", bytes: 20_000)
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false)
+        let found = scanner.scanCaches()
+        XCTAssertEqual(found.map(\.id), ["zig.global:.cache/zig"])
+        XCTAssertEqual(found.first?.tier, .safe)
+    }
+}

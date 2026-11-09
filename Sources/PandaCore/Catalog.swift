@@ -146,6 +146,10 @@ enum Catalog {
                   paths: [".hex/packages"], tier: .safe, rebuild: .download),
         CacheSpec(id: "rebar3.cache", title: "rebar3 cache", ecosystem: .elixir,
                   paths: [".cache/rebar3"], tier: .safe, rebuild: .download),
+
+        // Zig
+        CacheSpec(id: "zig.global", title: "Zig global cache", ecosystem: .zig,
+                  paths: [".cache/zig"], tier: .safe, rebuild: .minutes),
     ]
 
     // MARK: Project build outputs
@@ -199,6 +203,10 @@ enum Catalog {
         ArtifactRule(["_build"], markers: ["mix.exs", "rebar.config"], .elixir, "Compiled output"),
         ArtifactRule(["deps"], markers: ["mix.exs"], .elixir, "Dependencies", rebuild: .download),
         ArtifactRule([".elixir_ls"], markers: ["mix.exs"], .elixir, "Language server cache"),
+
+        // Zig
+        ArtifactRule([".zig-cache", "zig-cache"], markers: ["build.zig"], .zig, "Build cache"),
+        ArtifactRule(["zig-out"], markers: ["build.zig"], .zig, "Build output"),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
