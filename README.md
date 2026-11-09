@@ -41,7 +41,7 @@ Trash Panda looks in two places:
 | Language or tool | Global caches | Project folders |
 | --- | --- | --- |
 | Swift, Obj-C, Xcode | Build data, simulator caches, Swift packages, CocoaPods. Review: simulator runtimes, old simulators, archives, device support files (one item for each OS version; the newest of each device model is kept). | `.build`, `Pods` |
-| JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright (old browser versions) | `node_modules`, `.next`, `.nuxt`, `.turbo` |
+| JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright (old browser versions), Electron and node-gyp downloads | `node_modules`, `.next`, `.nuxt`, `.turbo` |
 | Python | pip, uv, pre-commit, Poetry, Hugging Face, PyTorch | `.venv`, `.tox`, `.nox` |
 | Java, Kotlin | Gradle, Maven, Android, Kotlin/Native, JetBrains | `target`, `build`, `.gradle` |
 | C#, .NET | NuGet | `obj`, `bin`, `.vs` |
@@ -231,7 +231,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Do not clean an app while it runs ([#16](https://github.com/chaitanya-ramji/trashpanda/issues/16))
 - [x] Browser Service Worker storage (review only) ([#17](https://github.com/chaitanya-ramji/trashpanda/issues/17))
 - [x] Old test browser downloads: Cypress, Playwright, Puppeteer, Chrome for Testing ([#18](https://github.com/chaitanya-ramji/trashpanda/issues/18))
-- [ ] Electron and node-gyp download caches ([#19](https://github.com/chaitanya-ramji/trashpanda/issues/19))
+- [x] Electron and node-gyp download caches ([#19](https://github.com/chaitanya-ramji/trashpanda/issues/19))
 
 ### Later: v0.5 Insight
 - [ ] Cache explorer: show the largest folders in Library/Caches ([#20](https://github.com/chaitanya-ramji/trashpanda/issues/20))
