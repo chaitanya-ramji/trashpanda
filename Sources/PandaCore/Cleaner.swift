@@ -10,9 +10,14 @@ public final class Cleaner {
     /// Finds the Docker engine at clean time. The engine can change after the scan.
     private let dockerEngine: () -> Result<DockerEngine, DockerRefusal>
 
+    /// Tells which apps run now. The cleaner asks again before each item.
+    private let runningApps: RunningApps
+
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
-                dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil) {
+                dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
+                runningApps: RunningApps = .system) {
         self.guardian = guardian
+        self.runningApps = runningApps
         self.remaining = remaining
         self.dockerEngine = dockerEngine ?? {
             DockerEngine.detect(dockerPath: Shell.resolve("docker"), home: URL(fileURLWithPath: guardian.home))
@@ -31,6 +36,20 @@ public final class Cleaner {
 
         for finding in findings {
             progress?(finding.title)
+
+            // Nothing is cleaned while the app that uses it runs. We look again for each item,
+            // because the user can start the app while the clean runs.
+            if let owner = finding.owner {
+                let running = runningApps.take().running(owner)
+                if !running.isEmpty {
+                    let names = running.joined(separator: " and ")
+                    Log.warn("skip \(finding.id): \(names) is running")
+                    report.skipped.append("\(finding.location): \(names) is running. Quit it and try again.")
+                    for name in running where !report.blockedApps.contains(name) { report.blockedApps.append(name) }
+                    continue
+                }
+            }
+
             switch finding.action {
             case .removeContents(let dir):
                 removeContents(of: dir, finding: finding, into: &report)

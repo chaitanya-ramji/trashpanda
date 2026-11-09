@@ -57,9 +57,10 @@ Most languages need data only. Open `Sources/PandaCore/Catalog.swift`.
 
 1. Add a case to `Ecosystem` in `Model.swift`. Give it a short name.
 2. Add rows to `Catalog.caches` for global caches. Paths start in the home folder.
-3. Add rows to `Catalog.artifacts` for build folders inside projects. Each row needs a marker file.
-4. Add a test in `Tests/PandaCoreTests`.
-5. Add the language to the table in `README.md`.
+3. If an app uses a cache (an IDE, for example), give the row an `owner`. The cleaner then skips the row while the app runs. A test fails if an Xcode cache has no owner.
+4. Add rows to `Catalog.artifacts` for build folders inside projects. Each row needs a marker file.
+5. Add a test in `Tests/PandaCoreTests`.
+6. Add the language to the table in `README.md`.
 
 A marker file is a file that proves the folder is a project of that language. For example, `Cargo.toml` proves that `target` is a Rust build folder. Never match a folder by name alone.
 

@@ -8,6 +8,8 @@ struct CacheSpec {
     let paths: [String]
     let tier: Tier
     let rebuild: Rebuild
+    /// The app that uses this folder. Nothing is cleaned while it runs.
+    var owner: AppOwner? = nil
 }
 
 /// A build output folder inside a project. We find it only when a marker file sits next to it.
@@ -46,20 +48,31 @@ struct ArtifactRule {
 /// The cache locations follow public tool documentation and the Mole project (see NOTICE).
 enum Catalog {
 
+    // MARK: Apps that use a cache. We do not clean a cache while its app runs.
+
+    static let xcode = AppOwner(name: "Xcode", bundleIDs: ["com.apple.dt.Xcode"], processNames: ["xcodebuild"])
+    static let xcodeOrSimulator = AppOwner(name: "Xcode or Simulator",
+                                           bundleIDs: ["com.apple.dt.Xcode", "com.apple.iphonesimulator"],
+                                           processNames: ["xcodebuild"])
+    static let jetbrains = AppOwner(name: "a JetBrains IDE",
+                                    bundleIDs: ["com.jetbrains.*", "com.google.android.studio*"])
+    static let dartEditors = AppOwner(name: "your editor",
+                                      bundleIDs: ["com.google.android.studio*", "com.jetbrains.*", "com.microsoft.VSCode*"])
+
     // MARK: Global caches
 
     static let caches: [CacheSpec] = [
         // Swift, Obj-C and Xcode
         CacheSpec(id: "xcode.derived", title: "Xcode build data", ecosystem: .swift,
-                  paths: ["Library/Developer/Xcode/DerivedData"], tier: .safe, rebuild: .minutes),
+                  paths: ["Library/Developer/Xcode/DerivedData"], tier: .safe, rebuild: .minutes, owner: Catalog.xcode),
         CacheSpec(id: "xcode.docs", title: "Xcode documentation cache", ecosystem: .swift,
-                  paths: ["Library/Developer/Xcode/DocumentationCache"], tier: .safe, rebuild: .seconds),
+                  paths: ["Library/Developer/Xcode/DocumentationCache"], tier: .safe, rebuild: .seconds, owner: Catalog.xcode),
         CacheSpec(id: "xcode.simcache", title: "Simulator caches", ecosystem: .swift,
-                  paths: ["Library/Developer/CoreSimulator/Caches"], tier: .safe, rebuild: .seconds),
+                  paths: ["Library/Developer/CoreSimulator/Caches"], tier: .safe, rebuild: .seconds, owner: Catalog.xcodeOrSimulator),
         CacheSpec(id: "xcode.devsupport", title: "iOS device support files", ecosystem: .swift,
-                  paths: ["Library/Developer/Xcode/iOS DeviceSupport"], tier: .review, rebuild: .minutes),
+                  paths: ["Library/Developer/Xcode/iOS DeviceSupport"], tier: .review, rebuild: .minutes, owner: Catalog.xcode),
         CacheSpec(id: "swiftpm.cache", title: "Swift package cache", ecosystem: .swift,
-                  paths: ["Library/Caches/org.swift.swiftpm"], tier: .safe, rebuild: .download),
+                  paths: ["Library/Caches/org.swift.swiftpm"], tier: .safe, rebuild: .download, owner: Catalog.xcode),
         CacheSpec(id: "cocoapods.cache", title: "CocoaPods cache", ecosystem: .swift,
                   paths: ["Library/Caches/CocoaPods"], tier: .safe, rebuild: .download),
 
@@ -97,7 +110,7 @@ enum Catalog {
         CacheSpec(id: "konan", title: "Kotlin/Native dependencies", ecosystem: .jvm,
                   paths: [".konan/dependencies"], tier: .review, rebuild: .download),
         CacheSpec(id: "jetbrains.cache", title: "JetBrains IDE caches", ecosystem: .jvm,
-                  paths: ["Library/Caches/JetBrains"], tier: .review, rebuild: .minutes),
+                  paths: ["Library/Caches/JetBrains"], tier: .review, rebuild: .minutes, owner: Catalog.jetbrains),
 
         // C# and .NET
         CacheSpec(id: "nuget.http", title: "NuGet download cache", ecosystem: .dotnet,
@@ -139,7 +152,7 @@ enum Catalog {
         CacheSpec(id: "dart.pub.git", title: "Dart git packages", ecosystem: .dart,
                   paths: [".pub-cache/git"], tier: .review, rebuild: .download),
         CacheSpec(id: "dart.analysis", title: "Dart analysis cache", ecosystem: .dart,
-                  paths: [".dartServer/.analysis-driver"], tier: .safe, rebuild: .minutes),
+                  paths: [".dartServer/.analysis-driver"], tier: .safe, rebuild: .minutes, owner: Catalog.dartEditors),
 
         // Elixir and Erlang. Never touch ~/.mix (installed archives) or ~/.hex/hex.config (see PathGuard).
         CacheSpec(id: "hex.packages", title: "Hex package cache", ecosystem: .elixir,

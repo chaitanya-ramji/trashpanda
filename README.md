@@ -67,6 +67,7 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app always shows a list and asks you before it deletes.
 - A project folder counts only when a marker file is next to it. For example, `node_modules` needs `package.json`.
 - The app skips a project when a running process uses it.
+- The app does not clean a cache while the app that uses it runs. For example, Xcode build data waits until you quit Xcode. The menu shows which app to quit, and the cleaner checks again before each item.
 - The app marks a project as review when someone changed it in the last 30 days. You can change this limit (see Settings).
 - Python virtual environments are always review items.
 - The app never follows symbolic links.
@@ -211,7 +212,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Clean stale app update downloads ([#13](https://github.com/chaitanya-ramji/trashpanda/issues/13))
 - [ ] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))
 - [ ] Browser caches: Firefox ([#15](https://github.com/chaitanya-ramji/trashpanda/issues/15))
-- [ ] Do not clean an app while it runs ([#16](https://github.com/chaitanya-ramji/trashpanda/issues/16))
+- [x] Do not clean an app while it runs ([#16](https://github.com/chaitanya-ramji/trashpanda/issues/16))
 - [ ] Browser Service Worker storage (review only) ([#17](https://github.com/chaitanya-ramji/trashpanda/issues/17))
 - [ ] Old test browser downloads: Cypress, Playwright, Puppeteer, Chrome for Testing ([#18](https://github.com/chaitanya-ramji/trashpanda/issues/18))
 - [ ] Electron and node-gyp download caches ([#19](https://github.com/chaitanya-ramji/trashpanda/issues/19))

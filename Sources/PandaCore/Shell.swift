@@ -34,15 +34,16 @@ public enum Shell {
 
     /// Runs a command and logs it. The log has the command, the exit code, the time, and the end of stderr.
     public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
-                           unsetEnv: [String] = []) -> ShellResult {
-        Shell.run(path, args, timeout: timeout, unsetEnvironment: unsetEnv)
+                           unsetEnv: [String] = [], quiet: Bool = false) -> ShellResult {
+        Shell.run(path, args, timeout: timeout, unsetEnvironment: unsetEnv, quiet: quiet)
     }
 
     /// Same as `run`. `unsetEnvironment` lists variables to remove from the command environment.
     public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
-                           unsetEnvironment: [String]) -> ShellResult {
+                           unsetEnvironment: [String], quiet: Bool = false) -> ShellResult {
         let started = Date()
         let result = execute(path, args, timeout: timeout, unset: unsetEnvironment)
+        if quiet && result.status == 0 { return result }
         let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
         var line = "run \((path as NSString).lastPathComponent) \(args.joined(separator: " ")) -> exit \(result.status) in \(seconds)s"
         if result.timedOut { line += " TIMED OUT" }

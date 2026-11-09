@@ -182,7 +182,7 @@ public final class DiskScanner {
                 guard bytes > 0 else { continue }
                 out.append(Finding(id: "\(spec.id):\(rel)", ecosystem: spec.ecosystem, title: spec.title,
                                    location: url.path, bytes: bytes, tier: spec.tier, rebuild: spec.rebuild,
-                                   action: .removeContents(url)))
+                                   action: .removeContents(url), owner: spec.owner))
             }
         }
         return out

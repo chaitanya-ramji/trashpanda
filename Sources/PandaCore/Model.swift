@@ -166,6 +166,8 @@ public struct Finding: Identifiable, Sendable {
     public let note: String?
     /// A page that explains the item. The menu offers it as a link.
     public let helpURL: URL?
+    /// The app that uses this item. The item is not cleaned while the app runs.
+    public let owner: AppOwner?
 
     /// False for an information line. It has no action, so it is not part of any total.
     public var isActionable: Bool {
@@ -175,9 +177,10 @@ public struct Finding: Identifiable, Sendable {
 
     public init(id: String, ecosystem: Ecosystem, title: String, location: String, bytes: Int64,
                 tier: Tier, rebuild: Rebuild, action: Action, lastActivity: Date? = nil,
-                note: String? = nil, helpURL: URL? = nil) {
+                note: String? = nil, helpURL: URL? = nil, owner: AppOwner? = nil) {
         self.note = note
         self.helpURL = helpURL
+        self.owner = owner
         self.id = id
         self.ecosystem = ecosystem
         self.title = title
@@ -235,5 +238,7 @@ public struct CleanReport: Sendable {
     public var removed = 0
     public var skipped: [String] = []
     public var failed: [String] = []
+    /// Apps that were running, so that their items were skipped. The user must quit them.
+    public var blockedApps: [String] = []
     public init() {}
 }

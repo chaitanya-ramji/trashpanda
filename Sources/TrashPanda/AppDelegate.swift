@@ -39,6 +39,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var spinnerTimer: Timer?
     private var spinnerStep = 0
     private let panda = PandaArt.menuBarIcon()
+    /// What runs now. The menu reads it each time it is built, so that "quit Xcode" is always up to date.
+    private var running = RunningSnapshot(apps: [])
+    private lazy var runningApps: RunningApps = {
+        // Demo mode pretends that Xcode runs, so that a screenshot can show a blocked item.
+        guard demoStyle != nil else { return .system }
+        return RunningApps { RunningSnapshot(apps: [RunningApp(bundleID: "com.apple.dt.Xcode", name: "Xcode")]) }
+    }()
     /// `--demo light` or `--demo dark` shows made-up data and opens the menu. It never scans or deletes.
     private let demoDialog: String? = {
         let args = CommandLine.arguments
@@ -151,28 +158,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Menu
 
+    /// The programs that block this item right now. An empty list means that it can be cleaned.
+    private func blockers(_ f: Finding) -> [String] {
+        f.owner.map { running.running($0) } ?? []
+    }
+
     private func rebuildMenu() {
         menu.removeAllItems()
+        running = runningApps.take()
 
         let headerItem = NSMenuItem()
         headerItem.view = header
         menu.addItem(headerItem)
-        header.update(disk: disk, reclaimable: result?.reclaimable ?? 0, reviewable: result?.reviewable ?? 0,
+        // The numbers count only what can be cleaned now. An item of a running app is not in them.
+        let usable = (result?.findings ?? []).filter { $0.isActionable && blockers($0).isEmpty }
+        let usableSafe = usable.filter { $0.tier == .safe }
+        let usableReview = usable.filter { $0.tier == .review }
+        let safeBytes = usableSafe.reduce(Int64(0)) { $0 + $1.bytes }
+        header.update(disk: disk, reclaimable: safeBytes, reviewable: usableReview.reduce(Int64(0)) { $0 + $1.bytes },
                       activity: activity)
         menu.addItem(.separator())
 
         if cleaning {
             menu.addItem(disabled("Cleaning…"))
         } else if let result {
-            let safe = result.findings.filter { $0.tier == .safe }
+            let safe = usableSafe
             if safe.isEmpty {
                 menu.addItem(disabled(scanning ? "Scanning…" : "Nothing to clean automatically"))
             } else {
-                let item = NSMenuItem(title: "Free up \(Format.bytes(result.reclaimable))…",
+                let item = NSMenuItem(title: "Free up \(Format.bytes(safeBytes))…",
                                       action: #selector(confirmAndClean(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = FindingBox(
-                    safe, title: "Free up \(Format.bytes(result.reclaimable))?",
+                    safe, title: "Free up \(Format.bytes(safeBytes))?",
                     body: "Trash Panda will clear old build files and caches from \(names(of: safe)).")
                 menu.addItem(item)
             }
@@ -206,12 +224,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func addEcosystems(_ findings: [Finding]) {
         let grouped = Dictionary(grouping: findings, by: \.ecosystem)
         // Information lines (for example a volume that is in use) are not part of any total.
-        func total(_ items: [Finding]) -> Int64 { items.filter(\.isActionable).reduce(0) { $0 + $1.bytes } }
+        func total(_ items: [Finding]) -> Int64 {
+            items.filter { $0.isActionable && blockers($0).isEmpty }.reduce(0) { $0 + $1.bytes }
+        }
         let ordered = grouped.sorted { total($0.value) > total($1.value) }
         for (ecosystem, items) in ordered {
             let amount = total(items)
             let parent = NSMenuItem()
-            parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : "info")
+            let waiting = items.contains { $0.isActionable && !blockers($0).isEmpty }
+            parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : (waiting ? "app open" : "info"))
             parent.submenu = submenu(for: ecosystem, items: items)
             menu.addItem(parent)
         }
@@ -223,8 +244,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sub.addItem(disabled(engine.replacingOccurrences(of: "Docker engine: ", with: "Engine: ") + " (local)"))
             sub.addItem(.separator())
         }
-        let safe = items.filter { $0.isActionable && $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
-        let review = items.filter { $0.isActionable && $0.tier == .review }.sorted { $0.bytes > $1.bytes }
+        let actionable = items.filter(\.isActionable)
+        let blocked = actionable.filter { !blockers($0).isEmpty }.sorted { $0.bytes > $1.bytes }
+        let safe = actionable.filter { blockers($0).isEmpty && $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
+        let review = actionable.filter { blockers($0).isEmpty && $0.tier == .review }.sorted { $0.bytes > $1.bytes }
         let info = items.filter { !$0.isActionable }.sorted { $0.bytes > $1.bytes }
 
         if !safe.isEmpty {
@@ -246,8 +269,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for f in review.prefix(12) { sub.addItem(findingItem(f)) }
             if review.count > 12 { sub.addItem(disabled("+ \(review.count - 12) more")) }
         }
-        if !info.isEmpty {
+        if !blocked.isEmpty {
             if !safe.isEmpty || !review.isEmpty { sub.addItem(.separator()) }
+            sub.addItem(disabled("Quit an app first"))
+            for f in blocked.prefix(12) {
+                let item = NSMenuItem(title: f.title, action: nil, keyEquivalent: "")
+                item.attributedTitle = line(f.title, Format.bytes(f.bytes))
+                item.isEnabled = false
+                item.toolTip = f.location
+                sub.addItem(item)
+                let names = blockers(f).joined(separator: " and ")
+                let note = NSMenuItem(title: "Quit \(names) to clean this.", action: nil, keyEquivalent: "")
+                note.attributedTitle = NSAttributedString(string: "  Quit \(names) to clean this.", attributes: [
+                    .font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+                note.isEnabled = false
+                sub.addItem(note)
+            }
+            if blocked.count > 12 { sub.addItem(disabled("+ \(blocked.count - 12) more")) }
+        }
+        if !info.isEmpty {
+            if !safe.isEmpty || !review.isEmpty || !blocked.isEmpty { sub.addItem(.separator()) }
             sub.addItem(disabled("Information only. Cannot be removed here."))
             for f in info.prefix(12) {
                 let item = NSMenuItem(title: f.title, action: nil, keyEquivalent: "")
@@ -422,7 +463,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func perform(_ findings: [Finding]) {
         cleaning = true
         busyChanged()
-        let cleaner = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:))
+        let cleaner = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
+                              runningApps: runningApps)
         DispatchQueue.global(qos: .utility).async {
             let report = cleaner.clean(findings)
             DispatchQueue.main.async { self.finish(report) }
@@ -437,6 +479,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
             self?.flash = nil
             self?.refreshStatusItem()
+        }
+        if !report.blockedApps.isEmpty {
+            let alert = NSAlert()
+            let names = report.blockedApps.joined(separator: " and ")
+            alert.messageText = "Quit \(names) first"
+            alert.informativeText = "Some items belong to \(names), and it is open. Trash Panda left them alone. Quit it and clean again."
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
         }
         if !report.failed.isEmpty {
             let alert = NSAlert()
