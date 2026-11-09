@@ -29,6 +29,13 @@ To see what the app finds on your Mac without deleting anything, run:
 swift run trashpanda --scan
 ```
 
+To see the menu with made-up data, run this command. It never scans and never deletes. Use it for screenshots.
+
+```sh
+swift run trashpanda --demo light
+swift run trashpanda --demo dark
+```
+
 ## How the code is organized
 
 | Folder | Content |

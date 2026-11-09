@@ -8,6 +8,15 @@ The app has no window. It has only a menu.
 
 ## What you see
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/menu-dark.png">
+    <img src="assets/menu-light.png" width="340" alt="The Trash Panda menu. It shows 61 GB free of 245 GB, a bar, a button to free up 13 GB, and one line for each language.">
+  </picture>
+</p>
+
+The picture uses made-up data.
+
 Click the panda in the menu bar. The menu shows:
 
 - The free space and the total space of your disk.
@@ -181,7 +190,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Add Elixir and Erlang support ([#2](https://github.com/chaitanya-ramji/trashpanda/issues/2))
 - [x] Add Zig support ([#3](https://github.com/chaitanya-ramji/trashpanda/issues/3))
 - [x] Let the user set the stale limit ([#4](https://github.com/chaitanya-ramji/trashpanda/issues/4))
-- [ ] Add a screenshot of the menu to the README ([#5](https://github.com/chaitanya-ramji/trashpanda/issues/5))
+- [x] Add a screenshot of the menu to the README ([#5](https://github.com/chaitanya-ramji/trashpanda/issues/5))
 
 ### Next: v0.3 Docker
 - [x] Docker: act only on a local engine ([#6](https://github.com/chaitanya-ramji/trashpanda/issues/6))
