@@ -151,9 +151,65 @@ The code has two parts:
 
 To add a language, add rows to `Sources/PandaCore/Catalog.swift`. Add a test in `Tests/PandaCoreTests`.
 
-## Plan
+## Roadmap
 
-Phase 1 covers the languages in the table above. Phase 2 is planned: Dart and Flutter, Elixir, Scala, Haskell, Zig, R, Julia, AI coding tools, unused Homebrew packages, and old language runtimes. See `docs/SPEC.md` for the full spec and `docs/RELEASING.md` for releases.
+We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trashpanda/issues/38). Each box below is an issue. Pick one and help.
+
+### Done
+- [x] Menu bar app with a storage bar and the reclaimable total
+- [x] Ten language groups: Swift and Xcode, JavaScript and TypeScript, Python, Java and Kotlin, C# and .NET, C and C++, Go, Rust, PHP, Ruby
+- [x] Homebrew and Docker build cache
+- [x] Safe and review tiers, path guard, and a log
+- [x] Spinner, new icon, and a DMG release (not notarized)
+
+### Now: v0.2 Dart, Elixir, Zig
+- [ ] Add Dart and Flutter support ([#1](https://github.com/chaitanya-ramji/trashpanda/issues/1))
+- [ ] Add Elixir and Erlang support ([#2](https://github.com/chaitanya-ramji/trashpanda/issues/2))
+- [ ] Add Zig support ([#3](https://github.com/chaitanya-ramji/trashpanda/issues/3))
+- [ ] Let the user set the stale limit ([#4](https://github.com/chaitanya-ramji/trashpanda/issues/4))
+- [ ] Add a screenshot of the menu to the README ([#5](https://github.com/chaitanya-ramji/trashpanda/issues/5))
+
+### Next: v0.3 Docker
+- [ ] Docker: act only on a local engine ([#6](https://github.com/chaitanya-ramji/trashpanda/issues/6))
+- [ ] Docker: remove dangling images ([#7](https://github.com/chaitanya-ramji/trashpanda/issues/7))
+- [ ] Docker: remove stopped containers ([#8](https://github.com/chaitanya-ramji/trashpanda/issues/8))
+- [ ] Docker: remove unused images older than N days ([#9](https://github.com/chaitanya-ramji/trashpanda/issues/9))
+- [ ] Docker: show volumes and remove dangling ones ([#10](https://github.com/chaitanya-ramji/trashpanda/issues/10))
+- [ ] Docker: test with a fake docker tool ([#11](https://github.com/chaitanya-ramji/trashpanda/issues/11))
+- [ ] Docker: explain a VM disk that does not shrink ([#12](https://github.com/chaitanya-ramji/trashpanda/issues/12))
+
+### Next: v0.4 App and browser caches
+- [ ] Clean stale app update downloads ([#13](https://github.com/chaitanya-ramji/trashpanda/issues/13))
+- [ ] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))
+- [ ] Browser caches: Firefox ([#15](https://github.com/chaitanya-ramji/trashpanda/issues/15))
+- [ ] Do not clean an app while it runs ([#16](https://github.com/chaitanya-ramji/trashpanda/issues/16))
+- [ ] Browser Service Worker storage (review only) ([#17](https://github.com/chaitanya-ramji/trashpanda/issues/17))
+- [ ] Old test browser downloads: Cypress, Playwright, Puppeteer, Chrome for Testing ([#18](https://github.com/chaitanya-ramji/trashpanda/issues/18))
+- [ ] Electron and node-gyp download caches ([#19](https://github.com/chaitanya-ramji/trashpanda/issues/19))
+
+### Later: v0.5 Insight
+- [ ] Cache explorer: show the largest folders in Library/Caches ([#20](https://github.com/chaitanya-ramji/trashpanda/issues/20))
+- [ ] Explain space that does not come back: local snapshots ([#21](https://github.com/chaitanya-ramji/trashpanda/issues/21))
+- [ ] Logs and crash reports (review) ([#22](https://github.com/chaitanya-ramji/trashpanda/issues/22))
+- [ ] Show the Trash size and offer to empty it ([#23](https://github.com/chaitanya-ramji/trashpanda/issues/23))
+- [ ] Old installers in Downloads (DMG, PKG, ZIP) ([#24](https://github.com/chaitanya-ramji/trashpanda/issues/24))
+
+### Later: v0.6 Old tools
+- [ ] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
+- [ ] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
+- [ ] Xcode: old simulator runtimes and archives (review) ([#27](https://github.com/chaitanya-ramji/trashpanda/issues/27))
+- [ ] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
+- [ ] More languages (phase 2b): Scala, Haskell, R, Julia, Nim, OCaml, Crystal, Clojure, Perl, Lua ([#29](https://github.com/chaitanya-ramji/trashpanda/issues/29))
+
+### Later: v1.0 Signed and stable
+- [ ] Notarize the app and publish signed releases ([#30](https://github.com/chaitanya-ramji/trashpanda/issues/30))
+- [ ] Homebrew cask and tap ([#31](https://github.com/chaitanya-ramji/trashpanda/issues/31))
+- [ ] Check for updates ([#32](https://github.com/chaitanya-ramji/trashpanda/issues/32))
+- [ ] Move to Trash delete mode ([#33](https://github.com/chaitanya-ramji/trashpanda/issues/33))
+- [ ] Low-disk alert ([#34](https://github.com/chaitanya-ramji/trashpanda/issues/34))
+- [ ] Scheduled clean (opt in) ([#35](https://github.com/chaitanya-ramji/trashpanda/issues/35))
+- [ ] Test on Intel Macs and older macOS versions ([#36](https://github.com/chaitanya-ramji/trashpanda/issues/36))
+- [ ] Decide: cloud-synced project folders ([#37](https://github.com/chaitanya-ramji/trashpanda/issues/37))
 
 ## Licence
 
