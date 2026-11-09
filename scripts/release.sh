@@ -39,7 +39,7 @@ rm -rf "$STAGE"
 
 if [[ $UNSIGNED -eq 1 ]]; then
     echo "Built $DMG (not signed, not notarized)"
-    shasum -a 256 "$DMG" | tee "$DMG.sha256"
+    (cd build && shasum -a 256 "TrashPanda-$VERSION.dmg" | tee "TrashPanda-$VERSION.dmg.sha256")
     exit 0
 fi
 
@@ -56,5 +56,5 @@ xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature -v "$DMG"
 
-shasum -a 256 "$DMG" | tee "$DMG.sha256"
+(cd build && shasum -a 256 "TrashPanda-$VERSION.dmg" | tee "TrashPanda-$VERSION.dmg.sha256")
 echo "Ready: $DMG"
