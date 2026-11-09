@@ -1,0 +1,25 @@
+name: Roadmap sync
+
+# Keeps the checkboxes of the pinned Roadmap issue correct.
+# A box is ticked if and only if its issue is closed.
+# The workflow runs only when an issue closes or reopens. Its own edit does not start it again.
+
+on:
+  issues:
+    types: [closed, reopened]
+
+concurrency: roadmap-sync
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix the boxes
+        run: python3 scripts/sync-roadmap.py
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -14,3 +14,5 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Test the roadmap script
+        run: python3 -m unittest discover -s scripts -p "test_*.py"

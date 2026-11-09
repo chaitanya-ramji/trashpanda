@@ -6,7 +6,7 @@ Thank you for your help. Trash Panda deletes files, so we work with care. This g
 
 All work starts from an issue on the [roadmap](https://github.com/chaitanya-ramji/trashpanda/issues?q=is%3Aissue+label%3Aroadmap). The pinned **Roadmap** issue lists them in order.
 
-1. Pick an open issue. Issues with the label `good first issue` are the best start.
+1. Pick an open issue. Issues with the label `good first issue` are the best start. A workflow keeps the boxes of the Roadmap issue correct when an issue closes or reopens.
 2. Write a comment on the issue to say that you take it.
 3. Do the work in a branch. Open a pull request. Write `Closes #<number>` in the description.
 
