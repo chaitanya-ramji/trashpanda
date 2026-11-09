@@ -16,6 +16,18 @@ if CommandLine.arguments.contains("--scan") {
     exit(0)
 }
 
+// `trashpanda --write-icons <folder>` writes the app icon sizes. The build script uses it.
+if let flag = CommandLine.arguments.firstIndex(of: "--write-icons"), flag + 1 < CommandLine.arguments.count {
+    _ = NSApplication.shared
+    do {
+        try PandaArt.writeIconset(to: URL(fileURLWithPath: CommandLine.arguments[flag + 1]))
+        exit(0)
+    } catch {
+        FileHandle.standardError.write(Data("Could not write icons: \(error)\n".utf8))
+        exit(1)
+    }
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

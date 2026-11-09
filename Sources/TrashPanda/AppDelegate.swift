@@ -5,10 +5,12 @@ import PandaCore
 /// Carries findings from a menu item to its action.
 final class FindingBox: NSObject {
     let findings: [Finding]
-    let heading: String
-    init(_ findings: [Finding], heading: String) {
+    let title: String
+    let body: String
+    init(_ findings: [Finding], title: String, body: String) {
         self.findings = findings
-        self.heading = heading
+        self.title = title
+        self.body = body
     }
 }
 
@@ -24,13 +26,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var cleaning = false
     private var flash: String?
     private var timer: Timer?
+    private var spinnerTimer: Timer?
+    private var spinnerStep = 0
+    private let panda = PandaArt.menuBarIcon()
+
+    private var activity: Activity { cleaning ? .cleaning : (scanning ? .scanning : .idle) }
 
     // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        Log.info("launch Trash Panda \(version), log at \(Log.fileURL.path)")
+        statusItem.button?.imagePosition = .imageLeading
         menu.delegate = self
         statusItem.menu = menu
-        updateTitle()
+        refreshStatusItem()
         rebuildMenu()
         scan()
         timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.scan() }
@@ -38,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         disk = DiskUsage.current()
-        updateTitle()
+        refreshStatusItem()
         if let last = result?.date, Date().timeIntervalSince(last) > 30 * 60 { scan() }
         rebuildMenu()
     }
@@ -48,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func scan() {
         guard !scanning, !cleaning else { return }
         scanning = true
-        rebuildMenu()
+        busyChanged()
         let scanner = self.scanner
         DispatchQueue.global(qos: .utility).async {
             let r = scanner.scan()
@@ -56,29 +66,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.result = r
                 self.disk = r.disk
                 self.scanning = false
-                self.updateTitle()
-                self.rebuildMenu()
+                self.busyChanged()
             }
         }
     }
 
-    // MARK: Title
+    // MARK: Menu bar item and spinner
 
-    private func updateTitle() {
-        let text = cleaning ? "cleaning…" : (flash ?? Format.bytes(disk.free))
-        statusItem.button?.title = "🦝 \(text)"
+    /// Call when scanning or cleaning starts or stops.
+    private func busyChanged() {
+        if activity == .idle {
+            spinnerTimer?.invalidate()
+            spinnerTimer = nil
+        } else if spinnerTimer == nil {
+            spinnerStep = 0
+            let t = Timer(timeInterval: 0.09, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.spinnerStep += 1
+                self.statusItem.button?.image = PandaArt.spinnerFrame(self.spinnerStep)
+            }
+            RunLoop.main.add(t, forMode: .common)   // keeps turning while the menu is open
+            spinnerTimer = t
+        }
+        refreshStatusItem()
+        rebuildMenu()
+    }
+
+    private func refreshStatusItem() {
+        if activity == .idle { statusItem.button?.image = panda }
+        let text = cleaning ? "Cleaning…" : (flash ?? Format.bytes(disk.free))
+        statusItem.button?.title = " \(text)"
     }
 
     // MARK: Menu
 
-    @objc private func rebuildMenu() {
+    private func rebuildMenu() {
         menu.removeAllItems()
 
         let headerItem = NSMenuItem()
         headerItem.view = header
         menu.addItem(headerItem)
         header.update(disk: disk, reclaimable: result?.reclaimable ?? 0, reviewable: result?.reviewable ?? 0,
-                      scanning: scanning)
+                      activity: activity)
         menu.addItem(.separator())
 
         if cleaning {
@@ -86,12 +115,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if let result {
             let safe = result.findings.filter { $0.tier == .safe }
             if safe.isEmpty {
-                menu.addItem(disabled(scanning ? "Scanning…" : "Nothing safe to reclaim"))
+                menu.addItem(disabled(scanning ? "Scanning…" : "Nothing to clean automatically"))
             } else {
-                let item = NSMenuItem(title: "Reclaim \(Format.bytes(result.reclaimable))…",
+                let item = NSMenuItem(title: "Free up \(Format.bytes(result.reclaimable))…",
                                       action: #selector(confirmAndClean(_:)), keyEquivalent: "")
                 item.target = self
-                item.representedObject = FindingBox(safe, heading: "Reclaim \(Format.bytes(result.reclaimable))?")
+                item.representedObject = FindingBox(
+                    safe, title: "Free up \(Format.bytes(result.reclaimable))?",
+                    body: "Trash Panda will clear old build files and caches from \(names(of: safe)).")
                 menu.addItem(item)
             }
             menu.addItem(.separator())
@@ -101,12 +132,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        let rescan = NSMenuItem(title: scanning ? "Scanning…" : "Scan Again", action: #selector(rescan), keyEquivalent: "r")
+        let rescan = NSMenuItem(title: scanning ? "Scanning…" : "Scan again", action: #selector(rescan), keyEquivalent: "r")
         rescan.target = self
         rescan.isEnabled = !scanning && !cleaning
         menu.addItem(rescan)
 
-        let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
+        // Hold Option to see the log item. It is for support, so it stays out of the way.
+        let log = NSMenuItem(title: "Show log in Finder", action: #selector(showLog), keyEquivalent: "r")
+        log.keyEquivalentModifierMask = [.option]
+        log.isAlternate = true
+        log.target = self
+        menu.addItem(log)
+
+        let login = NSMenuItem(title: "Open at login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
@@ -135,10 +173,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.bytes }
-            let item = NSMenuItem(title: "Clean safe items (\(Format.bytes(total)))…",
+            let item = NSMenuItem(title: "Free up \(Format.bytes(total))…",
                                   action: #selector(confirmAndClean(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = FindingBox(safe, heading: "Delete \(Format.bytes(total)) of \(ecosystem.name) files?")
+            item.representedObject = FindingBox(
+                safe, title: "Free up \(Format.bytes(total)) of \(ecosystem.name) files?",
+                body: "Trash Panda will clear old build files and caches.")
             sub.addItem(item)
             sub.addItem(.separator())
             for f in safe.prefix(12) { sub.addItem(findingItem(f)) }
@@ -146,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if !review.isEmpty {
             if !safe.isEmpty { sub.addItem(.separator()) }
-            sub.addItem(disabled("Review first"))
+            sub.addItem(disabled("Take a look first"))
             for f in review.prefix(12) { sub.addItem(findingItem(f)) }
             if review.count > 12 { sub.addItem(disabled("+ \(review.count - 12) more")) }
         }
@@ -157,14 +197,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: f.title, action: #selector(confirmAndClean(_:)), keyEquivalent: "")
         item.attributedTitle = line(f.title, Format.bytes(f.bytes))
         item.target = self
-        item.representedObject = FindingBox([f], heading: "Delete \(Format.bytes(f.bytes))?")
+        item.representedObject = FindingBox([f], title: "Free up \(Format.bytes(f.bytes))?", body: singleBody(f))
         var tip = "\(f.location)\n\(f.rebuild.label)"
-        if let d = f.lastActivity {
-            let days = max(0, Int(Date().timeIntervalSince(d) / 86_400))
-            tip += "\nLast project activity: \(days) days ago"
-        }
+        if let days = daysSinceActivity(f) { tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")" }
         item.toolTip = tip
         return item
+    }
+
+    private func singleBody(_ f: Finding) -> String {
+        var text = "\(f.title)\n\(f.rebuild.label)."
+        if f.tier == .review, let days = daysSinceActivity(f), days < ProjectScanner.defaultStaleDays {
+            text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")."
+        }
+        return text
+    }
+
+    private func daysSinceActivity(_ f: Finding) -> Int? {
+        f.lastActivity.map { max(0, Int(Date().timeIntervalSince($0) / 86_400)) }
+    }
+
+    /// "JavaScript, Xcode and 2 more"
+    private func names(of findings: [Finding]) -> String {
+        var seen: [String] = []
+        for f in findings.sorted(by: { $0.bytes > $1.bytes }) where !seen.contains(f.ecosystem.name) {
+            seen.append(f.ecosystem.name)
+        }
+        switch seen.count {
+        case 0: return "your tools"
+        case 1: return seen[0]
+        case 2: return "\(seen[0]) and \(seen[1])"
+        default: return "\(seen[0]), \(seen[1]) and \(seen.count - 2) more"
+        }
     }
 
     private func disabled(_ title: String) -> NSMenuItem {
@@ -185,7 +248,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Actions
 
-    @objc private func rescan() { scan() }
+    @objc private func rescan() {
+        Log.info("user: scan again")
+        scan()
+    }
+
+    @objc private func showLog() {
+        NSWorkspace.shared.activateFileViewerSelecting([Log.fileURL])
+    }
 
     @objc private func toggleLogin() {
         do {
@@ -195,35 +265,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try SMAppService.mainApp.register()
             }
         } catch {
-            NSLog("Open at Login failed: \(error.localizedDescription)")
+            Log.error("Open at login failed: \(error.localizedDescription)")
         }
     }
 
+    /// One short dialog. It says what happens and that it cannot be undone. Nothing more.
     @objc private func confirmAndClean(_ sender: NSMenuItem) {
         guard let box = sender.representedObject as? FindingBox, !cleaning else { return }
         let total = box.findings.reduce(Int64(0)) { $0 + $1.bytes }
 
-        var lines = box.findings.prefix(10).map { "• \($0.title) — \(Format.bytes($0.bytes)) — \($0.rebuild.label.lowercased())" }
-        if box.findings.count > 10 { lines.append("• and \(box.findings.count - 10) more") }
-
         let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = box.heading
-        alert.informativeText = lines.joined(separator: "\n")
-            + "\n\nThese files are deleted now. They do not go to the Trash.\(total > 0 ? "" : "")"
-        let delete = alert.addButton(withTitle: "Delete")
-        delete.hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .informational
+        alert.messageText = box.title
+        alert.informativeText = box.body + "\n\nYour code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
+        let confirm = alert.addButton(withTitle: "Free up \(Format.bytes(total))")
+        confirm.hasDestructiveAction = true
+        alert.addButton(withTitle: "Not now")
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            Log.info("user: cancelled clean of \(box.findings.count) items")
+            return
+        }
+        Log.info("user: confirmed clean of \(box.findings.count) items, \(total) bytes: \(box.findings.map(\.id).joined(separator: ", "))")
         perform(box.findings)
     }
 
     private func perform(_ findings: [Finding]) {
         cleaning = true
-        updateTitle()
-        rebuildMenu()
-        let cleaner = Cleaner(guardian: scanner.guardian)
+        busyChanged()
+        let cleaner = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:))
         DispatchQueue.global(qos: .utility).async {
             let report = cleaner.clean(findings)
             DispatchQueue.main.async { self.finish(report) }
@@ -233,16 +303,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func finish(_ report: CleanReport) {
         cleaning = false
         disk = DiskUsage.current()
-        flash = "freed \(Format.bytes(report.freed))"
-        updateTitle()
+        flash = report.freed > 0 ? "Freed \(Format.bytes(report.freed))" : "Nothing to free"
+        busyChanged()
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
             self?.flash = nil
-            self?.updateTitle()
+            self?.refreshStatusItem()
         }
         if !report.failed.isEmpty {
             let alert = NSAlert()
-            alert.messageText = "Some items stayed"
-            alert.informativeText = report.failed.prefix(8).joined(separator: "\n")
+            alert.messageText = "A few things couldn't be cleaned"
+            alert.informativeText = "They may be in use. Close your editor or Docker and try again. Details are in the log."
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }

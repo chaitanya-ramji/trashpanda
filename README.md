@@ -1,4 +1,6 @@
-# Trash Panda 🦝
+<p align="center"><img src="assets/icon.png" width="128" alt="Trash Panda icon"></p>
+
+# Trash Panda
 
 Trash Panda is a small menu bar app for developers. It finds the files that fill your disk. It shows how much space you can get back. You decide what to delete.
 
@@ -6,7 +8,7 @@ The app has no window. It has only a menu.
 
 ## What you see
 
-Click the raccoon in the menu bar. The menu shows:
+Click the panda in the menu bar. The menu shows:
 
 - The free space and the total space of your disk.
 - A bar that splits the disk into used, review, reclaimable, and free space.
@@ -59,11 +61,22 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app never deletes outside your home folder.
 - The app never deletes Documents, Desktop, Pictures, Movies, Music, `.ssh`, `.config`, iCloud, or app data.
 - The app counts only space that a delete frees. A file with more than one hard link frees no space.
+- For Homebrew, the app asks `brew` what it would remove. Homebrew keeps its own index files, and the app does not count them.
 - The app asks the owning tool to clean its own data when it can. It runs fixed commands only.
 
 ## Install
 
-You need macOS 13 or later and the Swift toolchain.
+You need macOS 13 or later.
+
+**Homebrew.** This works after the first signed release.
+
+```sh
+brew install --cask chaitanya-ramji/tap/trashpanda
+```
+
+**DMG.** Download the DMG from the Releases page. Open it. Drag Trash Panda to Applications.
+
+**From source.** You need the Swift toolchain.
 
 ```sh
 git clone https://github.com/chaitanya-ramji/trashpanda.git
@@ -79,6 +92,18 @@ To see the result without the menu, run this command. It never deletes anything.
 ```sh
 .build/release/trashpanda --scan
 ```
+
+## Spinner and log
+
+The panda in the menu bar turns into a spinner while the app scans or cleans. The menu header shows a spinner too.
+
+The app writes every scan, every command, and every delete to a log:
+
+```
+~/Library/Logs/TrashPanda/trashpanda.log
+```
+
+Hold the Option key and open the menu. Choose **Show log in Finder**. The log shows the size of each item before and after a clean. After each clean, the app measures what is left. The "Freed" number is the measured result.
 
 ## Settings
 
@@ -105,7 +130,7 @@ To add a language, add rows to `Sources/PandaCore/Catalog.swift`. Add a test in 
 
 ## Plan
 
-Phase 1 covers the languages in the table above. Phase 2 is planned: Dart and Flutter, Elixir, Scala, Haskell, Zig, R, Julia, AI coding tools, unused Homebrew packages, and old language runtimes. See `docs/` for the full spec.
+Phase 1 covers the languages in the table above. Phase 2 is planned: Dart and Flutter, Elixir, Scala, Haskell, Zig, R, Julia, AI coding tools, unused Homebrew packages, and old language runtimes. See `docs/SPEC.md` for the full spec and `docs/RELEASING.md` for releases.
 
 ## Licence
 

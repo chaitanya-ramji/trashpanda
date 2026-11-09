@@ -16,42 +16,55 @@ enum Format {
     }
 }
 
-/// The top of the menu: free space, the reclaimable amount, and one bar.
+enum Activity { case idle, scanning, cleaning }
+
+/// The top of the menu: free space, what you can free, one bar, and a spinner when the app is busy.
 final class StorageHeaderView: NSView {
     private var disk = DiskUsage(total: 0, free: 0)
     private var reclaimable: Int64 = 0
     private var reviewable: Int64 = 0
-    private var scanning = true
+    private var activity = Activity.scanning
+    private let spinner = NSProgressIndicator()
 
     override init(frame: NSRect) {
         super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 74))
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = false
+        spinner.frame = NSRect(x: 300 - 16 - 16, y: 74 - 30, width: 16, height: 16)
+        addSubview(spinner)
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func update(disk: DiskUsage, reclaimable: Int64, reviewable: Int64, scanning: Bool) {
+    func update(disk: DiskUsage, reclaimable: Int64, reviewable: Int64, activity: Activity) {
         self.disk = disk
         self.reclaimable = reclaimable
         self.reviewable = reviewable
-        self.scanning = scanning
+        self.activity = activity
+        if activity == .idle { spinner.stopAnimation(nil) } else { spinner.startAnimation(nil) }
         needsDisplay = true
+    }
+
+    private var detail: String {
+        switch activity {
+        case .scanning: return "Scanning for things to clean…"
+        case .cleaning: return "Cleaning up…"
+        case .idle:
+            if reclaimable == 0 && reviewable == 0 { return "All tidy. Nothing to clean." }
+            if reclaimable == 0 { return "\(Format.bytes(reviewable)) to look through" }
+            if reviewable == 0 { return "You can free \(Format.bytes(reclaimable)) now" }
+            return "You can free \(Format.bytes(reclaimable)) now · \(Format.bytes(reviewable)) to look through"
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let inset: CGFloat = 16
-        let title = "\(Format.bytes(disk.free)) free of \(Format.bytes(disk.total))"
-        title.draw(at: NSPoint(x: inset, y: bounds.height - 28), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
-            .foregroundColor: NSColor.labelColor,
-        ])
-
-        let detail: String
-        if scanning && reclaimable == 0 && reviewable == 0 {
-            detail = "Looking for developer files…"
-        } else if reclaimable == 0 && reviewable == 0 {
-            detail = "Nothing to reclaim"
-        } else {
-            detail = "Reclaim \(Format.bytes(reclaimable)) now · \(Format.bytes(reviewable)) to review"
-        }
+        "\(Format.bytes(disk.free)) free of \(Format.bytes(disk.total))"
+            .draw(at: NSPoint(x: inset, y: bounds.height - 28), withAttributes: [
+                .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+                .foregroundColor: NSColor.labelColor,
+            ])
         detail.draw(at: NSPoint(x: inset, y: bounds.height - 46), withAttributes: [
             .font: NSFont.systemFont(ofSize: 11),
             .foregroundColor: NSColor.secondaryLabelColor,
