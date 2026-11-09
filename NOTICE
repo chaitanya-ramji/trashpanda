@@ -1,0 +1,21 @@
+Trash Panda
+Copyright (C) 2026 chaitanya-ramji
+License: GPL-3.0-or-later (see LICENSE)
+
+Third-party credit
+------------------
+Parts of the cleanup catalog and the safety rules in this project are ported from Mole.
+
+  Mole
+  https://github.com/tw93/Mole
+  License: GPL-3.0
+  Copyright belongs to the Mole authors and contributors.
+
+Ported from Mole:
+- The list of developer cache folders and project build folders.
+- The rules that protect system paths, user data, and package stores.
+- The rule that skips projects that a running process uses.
+- The rule that skips projects that someone changed in the last days.
+
+Mole is a separate project. This project has no link with the Mole authors.
+The name "Mole" and its logo belong to the Mole project.
