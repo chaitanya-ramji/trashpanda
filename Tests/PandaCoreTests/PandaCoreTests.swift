@@ -256,3 +256,55 @@ final class MiscTests: XCTestCase {
         XCTAssertEqual(config.keep, [box.home.path + "/Developer/keepme", "/abs/path"])
     }
 }
+
+final class BrewTests: XCTestCase {
+    func testParsesWhatBrewWouldFree() {
+        let out = "Would remove: /opt/homebrew/Cellar/foo/1.0 (10 files, 4.1MB)\n==> This operation would free approximately 12.3MB of disk space.\n"
+        XCTAssertEqual(DiskScanner.parseBrewFreed(out), 12_300_000)
+        XCTAssertEqual(DiskScanner.parseBrewFreed("==> This operation would free approximately 1.5GB of disk space."), 1_500_000_000)
+        XCTAssertEqual(DiskScanner.parseBrewFreed("==> This operation would free approximately 800KB of disk space."), 800_000)
+    }
+
+    /// The bug that showed 46 MB again: brew keeps its own index and never removes it.
+    func testNothingToFreeMeansNoItem() {
+        XCTAssertEqual(DiskScanner.parseBrewFreed(""), 0)
+        XCTAssertEqual(DiskScanner.parseBrewFreed("Warning: Skipping gh: most recent version 2.1 not installed\n"), 0)
+    }
+}
+
+final class EndToEndTests: XCTestCase {
+    func testScanCleanRescanAndLog() throws {
+        let box = try Sandbox()
+        Log.fileURL = box.home.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+
+        try box.file(".npm/_cacache/content/blob", bytes: 3_000_000)
+        try box.file("Developer/old/package.json", bytes: 10)
+        try box.file("Developer/old/node_modules/x/index.js", bytes: 4_000_000)
+        box.ageProject("Developer/old", days: 90)
+        try box.file("Documents/thesis.docx", bytes: 2_000_000)          // must never be touched
+        let thesis = box.home.appendingPathComponent("Documents/thesis.docx")
+
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false)
+        let first = scanner.scan()
+        XCTAssertEqual(Set(first.findings.map(\.id)).count, 2)
+        XCTAssertGreaterThan(first.reclaimable, 6_900_000)
+        XCTAssertEqual(first.reviewable, 0)
+
+        let cleaner = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:))
+        let report = cleaner.clean(first.findings.filter { $0.tier == .safe })
+        XCTAssertEqual(report.removed, 2)
+        XCTAssertTrue(report.failed.isEmpty)
+        XCTAssertGreaterThan(report.freed, 6_900_000)
+
+        // The scan must now agree with the disk: nothing is left to reclaim.
+        XCTAssertTrue(scanner.scan().findings.isEmpty, "A clean item must not come back in the next scan")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: thesis.path), "Personal files stay")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: box.home.appendingPathComponent("Developer/old/package.json").path))
+
+        let log = try String(contentsOf: Log.fileURL, encoding: .utf8)
+        XCTAssertTrue(log.contains("scan start"))
+        XCTAssertTrue(log.contains("found [safe]"))
+        XCTAssertTrue(log.contains("clean start: 2 items"))
+        XCTAssertTrue(log.contains("clean done"))
+    }
+}

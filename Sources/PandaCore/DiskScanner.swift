@@ -37,31 +37,69 @@ public final class DiskScanner {
         "Developer", "dev", "Projects", "Code", "GitHub", "Repos", "Workspace", "Development", "src", "work", "www",
     ]
 
-    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load()) {
+    /// When false, the scan never runs brew, docker, go, uv, or xcrun. Tests use this.
+    public let useOwnerTools: Bool
+
+    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
+                useOwnerTools: Bool = true) {
         self.home = home
         self.config = config
         self.guardian = PathGuard(home: home, keep: config.keep)
+        self.useOwnerTools = useOwnerTools
     }
 
     public func scan() -> ScanResult {
+        let started = Date()
+        Log.info("scan start (owner tools: \(useOwnerTools))")
         var findings: [Finding] = []
         let lock = NSLock()
         func add(_ f: [Finding]) { lock.lock(); findings.append(contentsOf: f); lock.unlock() }
 
-        let jobs: [() -> Void] = [
+        var jobs: [() -> Void] = [
             { add(self.scanCaches()) },
-            { add(self.scanSimulators()) },
-            { add(self.scanHomebrew()) },
-            { add(self.scanDocker()) },
-            { add(self.scanGo()) },
-            { add(self.scanUv()) },
             { add(self.scanProjects()) },
         ]
+        if useOwnerTools {
+            jobs += [
+                { add(self.scanSimulators()) },
+                { add(self.scanHomebrew()) },
+                { add(self.scanDocker()) },
+                { add(self.scanGo()) },
+                { add(self.scanUv()) },
+            ]
+        }
         DispatchQueue.concurrentPerform(iterations: jobs.count) { jobs[$0]() }
 
         // Tiny items add noise to the menu and free almost nothing.
         let sorted = findings.filter { $0.bytes >= Self.minimumBytes }.sorted { $0.bytes > $1.bytes }
-        return ScanResult(findings: sorted, disk: DiskUsage.current(for: home))
+        let result = ScanResult(findings: sorted, disk: DiskUsage.current(for: home))
+        for f in sorted {
+            Log.info("found [\(f.tier == .safe ? "safe" : "review")] \(f.id) \(f.bytes) bytes — \(f.location)")
+        }
+        Log.info(String(format: "scan done in %.1fs: %d items, safe %lld bytes, review %lld bytes, free %lld of %lld",
+                        Date().timeIntervalSince(started), sorted.count, result.reclaimable, result.reviewable,
+                        result.disk.free, result.disk.total))
+        return result
+    }
+
+    /// Measures an item again after a clean. The result is what is still on disk.
+    /// For tools that keep their own files, we ask the tool again instead of counting a folder.
+    public func remainingBytes(of finding: Finding) -> Int64 {
+        switch finding.action {
+        case .removeContents(let url), .removeArtifact(let url):
+            return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url, exclusiveOnly: true) : 0
+        case .owner(let command):
+            switch command {
+            case .brewCleanup: return brewReclaimableBytes()
+            case .dockerBuilderPrune: return dockerBuildCacheBytes()
+            case .simctlDeleteUnavailable: return scanSimulators().first?.bytes ?? 0
+            case .uvCacheClean:
+                return FileManager.default.fileExists(atPath: finding.location)
+                    ? Sizer.size(of: URL(fileURLWithPath: finding.location)) : 0
+            case .goCleanCache, .goCleanModcache:
+                return Sizer.size(of: URL(fileURLWithPath: finding.location))
+            }
+        }
     }
 
     // MARK: Fixed cache folders
@@ -106,30 +144,50 @@ public final class DiskScanner {
                         action: .owner(.simctlDeleteUnavailable))]
     }
 
+    /// Homebrew keeps its own index (`api`) and Ruby cache (`bootsnap`) in the cache folder.
+    /// `brew cleanup` never removes them, so a folder size would be wrong. We ask brew what it would free.
     func scanHomebrew() -> [Finding] {
-        guard Shell.resolve("brew") != nil else { return [] }
-        let cache = home.appendingPathComponent("Library/Caches/Homebrew", isDirectory: true)
-        let bytes = Sizer.size(of: cache)
+        let bytes = brewReclaimableBytes()
         guard bytes > 0 else { return [] }
-        return [Finding(id: "brew.cleanup", ecosystem: .homebrew, title: "Downloads and old versions",
+        let cache = home.appendingPathComponent("Library/Caches/Homebrew", isDirectory: true)
+        return [Finding(id: "brew.cleanup", ecosystem: .homebrew, title: "Old downloads and versions",
                         location: cache.path, bytes: bytes, tier: .safe, rebuild: .download,
                         action: .owner(.brewCleanup))]
     }
 
+    func brewReclaimableBytes() -> Int64 {
+        guard let brew = Shell.resolve("brew") else { return 0 }
+        let r = Shell.run(brew, ["cleanup", "--prune=all", "-n"], timeout: 60)
+        return r.status == 0 ? Self.parseBrewFreed(r.stdout) : 0
+    }
+
+    /// Reads "==> This operation would free approximately 12.3MB of disk space."
+    static func parseBrewFreed(_ output: String) -> Int64 {
+        guard let line = output.split(separator: "\n").last(where: { $0.contains("would free approximately") }),
+              let range = line.range(of: "approximately ") else { return 0 }
+        let token = line[range.upperBound...].split(separator: " ").first.map(String.init) ?? ""
+        return parseDockerSize(token) ?? 0
+    }
+
     func scanDocker() -> [Finding] {
-        guard let docker = Shell.resolve("docker") else { return [] }
+        let bytes = dockerBuildCacheBytes()
+        guard bytes > 0 else { return [] }
+        return [Finding(id: "docker.buildcache", ecosystem: .docker, title: "Build cache",
+                        location: "Docker engine", bytes: bytes, tier: .safe, rebuild: .minutes,
+                        action: .owner(.dockerBuilderPrune))]
+    }
+
+    func dockerBuildCacheBytes() -> Int64 {
+        guard let docker = Shell.resolve("docker") else { return 0 }
         let r = Shell.run(docker, ["system", "df", "--format", "{{json .}}"], timeout: 8)
-        guard r.status == 0 else { return [] }
+        guard r.status == 0 else { return 0 }
         for line in r.stdout.split(separator: "\n") {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   obj["Type"] as? String == "Build Cache",
-                  let text = obj["Reclaimable"] as? String,
-                  let bytes = Self.parseDockerSize(text), bytes > 0 else { continue }
-            return [Finding(id: "docker.buildcache", ecosystem: .docker, title: "Build cache",
-                            location: "Docker engine", bytes: bytes, tier: .safe, rebuild: .minutes,
-                            action: .owner(.dockerBuilderPrune))]
+                  let text = obj["Reclaimable"] as? String else { continue }
+            return Self.parseDockerSize(text) ?? 0
         }
-        return []
+        return 0
     }
 
     func scanGo() -> [Finding] {

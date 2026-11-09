@@ -18,8 +18,8 @@ public enum Rebuild: Sendable {
 
     public var label: String {
         switch self {
-        case .seconds: return "Rebuilds in seconds"
-        case .minutes: return "Rebuilds in minutes"
+        case .seconds: return "Comes back in seconds"
+        case .minutes: return "Rebuilds in a few minutes"
         case .download: return "Downloads again when needed"
         }
     }
@@ -31,7 +31,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
 
     public var name: String {
         switch self {
-        case .swift: return "Swift, Obj-C & Xcode"
+        case .swift: return "Xcode & Swift"
         case .javascript: return "JavaScript & TypeScript"
         case .python: return "Python"
         case .jvm: return "Java & Kotlin"
@@ -127,6 +127,11 @@ public struct DiskUsage: Sendable {
     public init(total: Int64, free: Int64) {
         self.total = total
         self.free = free
+    }
+
+    /// Free bytes without purgeable space. This shows real change after a delete. It is for the log only.
+    public static func rawFree(at url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity ?? 0)
     }
 
     /// Reads the capacity that Finder shows (includes purgeable space as free).
