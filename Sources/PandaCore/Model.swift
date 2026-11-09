@@ -15,12 +15,15 @@ public enum Rebuild: Sendable {
     case seconds
     case minutes
     case download
+    /// The item cannot be rebuilt. The user must make it again, for example a container.
+    case recreate
 
     public var label: String {
         switch self {
         case .seconds: return "Comes back in seconds"
         case .minutes: return "Rebuilds in a few minutes"
         case .download: return "Downloads again when needed"
+        case .recreate: return "You would need to recreate it"
         }
     }
 }
@@ -90,7 +93,29 @@ public enum OwnerCommand: String, Sendable, CaseIterable {
     }
 }
 
+/// A Docker command for one object. The identifier is checked, and the command has a fixed shape.
+/// We never use -f (force) or -v (volumes), so Docker itself refuses to remove something that is in use.
+public enum DockerAction: Sendable, Equatable {
+    case removeContainer(id: String)
+
+    /// The arguments, or nil when the identifier is not valid. A name can hold any text.
+    /// We use the hex identifier, and we accept nothing else.
+    public var arguments: [String]? {
+        switch self {
+        case .removeContainer(let id): return Self.isHexID(id) ? ["container", "rm", id] : nil
+        }
+    }
+
+    public var timeout: TimeInterval { 60 }
+
+    static func isHexID(_ id: String) -> Bool {
+        id.range(of: "^[0-9a-f]{12,64}$", options: .regularExpression) != nil
+    }
+}
+
 public enum Action: Sendable {
+    /// One Docker object. The cleaner checks the engine and the object again before it runs.
+    case docker(DockerAction)
     /// Delete everything inside a directory. Keep the directory.
     case removeContents(URL)
     /// Delete one build output directory inside a project.

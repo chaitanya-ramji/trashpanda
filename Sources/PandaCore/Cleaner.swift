@@ -21,6 +21,8 @@ public final class Cleaner {
 
     public func clean(_ findings: [Finding], progress: ((String) -> Void)? = nil) -> CleanReport {
         var report = CleanReport()
+        inventoryLoaded = false
+        inventory = nil
         let started = Date()
         let before = DiskUsage.rawFree(at: URL(fileURLWithPath: guardian.home))
         Log.info("clean start: \(findings.count) items, estimate \(findings.reduce(0) { $0 + $1.bytes }) bytes")
@@ -48,6 +50,9 @@ public final class Cleaner {
 
             case .owner(let command):
                 runOwner(command, finding: finding, into: &report)
+
+            case .docker(let action):
+                runDocker(action, finding: finding, into: &report)
             }
         }
 
@@ -59,6 +64,48 @@ public final class Cleaner {
     }
 
     // MARK: Actions
+
+    /// What the Docker engine holds right now. We read it once for each clean, at the first Docker item.
+    private var inventory: DockerInventory?
+    private var inventoryLoaded = false
+
+    private func runDocker(_ action: DockerAction, finding: Finding, into report: inout CleanReport) {
+        guard let arguments = action.arguments else {
+            skip(finding, "the Docker identifier is not valid", &report); return
+        }
+        guard case .success(let engine) = dockerEngine() else {
+            skip(finding, "Docker: the engine is not a checked local engine", &report); return
+        }
+        if !inventoryLoaded {
+            inventory = engine.inventory()
+            inventoryLoaded = true
+        }
+        guard let current = inventory else {
+            skip(finding, "Docker: could not read the engine", &report); return
+        }
+
+        // Check the object again. It can change after the scan.
+        switch action {
+        case .removeContainer(let id):
+            guard let container = current.containers.first(where: { $0.id == id }) else {
+                skip(finding, "the container is already gone", &report); return
+            }
+            guard container.isStopped else {
+                skip(finding, "the container is not stopped (\(container.state))", &report); return
+            }
+        }
+
+        let result = engine.run(arguments, timeout: action.timeout)
+        guard result.status == 0, !result.timedOut else {
+            report.failed.append("\(finding.title): Docker did not remove it")
+            return
+        }
+        let left = remaining?(finding) ?? 0
+        let freed = max(0, finding.bytes - left)
+        report.freed += freed
+        report.removed += 1
+        Log.info("clean \(finding.id): removed through docker, estimate \(finding.bytes), left \(left), freed \(freed)")
+    }
 
     private func skip(_ finding: Finding, _ reason: String, _ report: inout CleanReport) {
         Log.warn("skip \(finding.id): \(reason) — \(finding.location)")

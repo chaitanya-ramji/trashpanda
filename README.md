@@ -47,9 +47,9 @@ Trash Panda looks in two places:
 | Elixir, Erlang | Hex packages, rebar3 | `_build`, `deps`, `.elixir_ls` |
 | Zig | Global cache | `.zig-cache`, `zig-out` |
 | Homebrew | Downloads and old versions | None |
-| Docker | Build cache, untagged images | None |
+| Docker | Build cache, untagged images, stopped containers (review) | None |
 
-Trash Panda does **not** touch your images, volumes, documents, or app data.
+Trash Panda does **not** touch your Docker volumes, documents, or app data. It removes Docker images only when they are untagged and no container uses them.
 
 ## Safe and Review
 
@@ -195,7 +195,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 ### Next: v0.3 Docker
 - [x] Docker: act only on a local engine ([#6](https://github.com/chaitanya-ramji/trashpanda/issues/6))
 - [x] Docker: remove dangling images ([#7](https://github.com/chaitanya-ramji/trashpanda/issues/7))
-- [ ] Docker: remove stopped containers ([#8](https://github.com/chaitanya-ramji/trashpanda/issues/8))
+- [x] Docker: remove stopped containers ([#8](https://github.com/chaitanya-ramji/trashpanda/issues/8))
 - [ ] Docker: remove unused images older than N days ([#9](https://github.com/chaitanya-ramji/trashpanda/issues/9))
 - [ ] Docker: show volumes and remove dangling ones ([#10](https://github.com/chaitanya-ramji/trashpanda/issues/10))
 - [x] Docker: test with a fake docker tool ([#11](https://github.com/chaitanya-ramji/trashpanda/issues/11))

@@ -137,6 +137,12 @@ public final class DiskScanner {
         switch finding.action {
         case .removeContents(let url), .removeArtifact(let url):
             return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url, exclusiveOnly: true) : 0
+        case .docker(let action):
+            guard case .success(let engine) = dockerEngine(), let inventory = engine.inventory() else { return finding.bytes }
+            switch action {
+            case .removeContainer(let id):
+                return inventory.containers.contains { $0.id == id } ? finding.bytes : 0
+            }
         case .owner(let command):
             switch command {
             case .brewCleanup: return brewReclaimableBytes()
@@ -231,11 +237,24 @@ public final class DiskScanner {
                                action: .owner(.dockerBuilderPrune)))
         }
 
-        let dangling = danglingImageBytes(engine)
+        guard let inventory = engine.inventory() else { return out }
+
+        let dangling = inventory.danglingImages.reduce(Int64(0)) { $0 + $1.uniqueBytes }
         if dangling > 0 {
             out.append(Finding(id: "docker.images.dangling", ecosystem: .docker, title: "Untagged images",
                                location: place, bytes: dangling, tier: .safe, rebuild: .minutes,
                                action: .owner(.dockerImagePrune)))
+        }
+
+        // Stopped containers, one by one. A container can hold data that is stored nowhere else,
+        // so each one is a review item. A running container never appears.
+        for c in inventory.stoppedContainers where DockerAction.isHexID(c.id) {
+            let label = c.name.isEmpty ? String(c.id.prefix(12)) : c.name
+            out.append(Finding(id: "docker.container:\(c.id.prefix(12))", ecosystem: .docker,
+                               title: "Stopped container · \(label)",
+                               location: "\(place) · image \(c.image) · \(c.status)",
+                               bytes: c.writableBytes, tier: .review, rebuild: .recreate,
+                               action: .docker(.removeContainer(id: c.id))))
         }
         return out
     }

@@ -7,10 +7,16 @@ final class FindingBox: NSObject {
     let findings: [Finding]
     let title: String
     let body: String
-    init(_ findings: [Finding], title: String, body: String) {
+    /// Text under the body. When nil, the dialog says that tools rebuild what they need.
+    let footer: String?
+    /// Text of the confirm button. When nil, it says "Free up <size>".
+    let confirmTitle: String?
+    init(_ findings: [Finding], title: String, body: String, footer: String? = nil, confirmTitle: String? = nil) {
         self.findings = findings
         self.title = title
         self.body = body
+        self.footer = footer
+        self.confirmTitle = confirmTitle
     }
 }
 
@@ -218,7 +224,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: f.title, action: #selector(confirmAndClean(_:)), keyEquivalent: "")
         item.attributedTitle = line(f.title, Format.bytes(f.bytes))
         item.target = self
-        item.representedObject = FindingBox([f], title: "Free up \(Format.bytes(f.bytes))?", body: singleBody(f))
+        // Something that cannot be rebuilt gets its own words. "Your tools will rebuild it" would be wrong.
+        let cannotRebuild = f.rebuild == .recreate
+        item.representedObject = FindingBox(
+            [f],
+            title: cannotRebuild ? "Remove this container?" : "Free up \(Format.bytes(f.bytes))?",
+            body: singleBody(f),
+            footer: cannotRebuild ? "A container can hold data that is stored nowhere else. This can't be undone." : nil,
+            confirmTitle: cannotRebuild ? "Remove" : nil)
         var tip = "\(f.location)\n\(f.rebuild.label)"
         if let days = daysSinceActivity(f) { tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")" }
         item.toolTip = tip
@@ -226,7 +239,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func singleBody(_ f: Finding) -> String {
-        var text = "\(f.title)\n\(f.rebuild.label)."
+        var text = f.rebuild == .recreate
+            ? "\(f.title)\n\(f.location)\n\(f.rebuild.label)."
+            : "\(f.title)\n\(f.rebuild.label)."
         if f.tier == .review, let days = daysSinceActivity(f), days < scanner.config.staleDays {
             text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")."
         }
@@ -298,8 +313,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = box.title
-        alert.informativeText = box.body + "\n\nYour code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
-        let confirm = alert.addButton(withTitle: "Free up \(Format.bytes(total))")
+        let footer = box.footer
+            ?? "Your code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
+        alert.informativeText = box.body + "\n\n" + footer
+        let confirm = alert.addButton(withTitle: box.confirmTitle ?? "Free up \(Format.bytes(total))")
         confirm.hasDestructiveAction = true
         alert.addButton(withTitle: "Not now")
         NSApp.activate(ignoringOtherApps: true)

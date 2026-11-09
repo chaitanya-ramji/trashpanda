@@ -90,6 +90,12 @@ final class FakeDocker {
                           ?? FakeDocker.buildCacheOnly)
     }
 
+    /// Changes what the engine reports from now on. Use it to test a change after the scan.
+    func setInventory(_ json: String) throws {
+        let dir = (path as NSString).deletingLastPathComponent
+        try json.write(toFile: dir + "/inventory-before.json", atomically: true, encoding: .utf8)
+    }
+
     private var lines: [String] {
         ((try? String(contentsOfFile: logPath, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
     }
@@ -171,4 +177,125 @@ final class DockerFixtureTests: DockerTestCase {
 
 extension Result where Failure == DockerRefusal {
     var failureReason: DockerRefusal? { if case .failure(let e) = self { return e } else { return nil } }
+}
+
+// MARK: - Docker: stopped containers (#8)
+
+final class DockerContainerTests: DockerTestCase {
+    private let fullInventory = { try FakeDocker.fixture("inventory-full") }
+
+    private func setup(_ box: Sandbox, after: String? = nil) throws -> (FakeDocker, DiskScanner) {
+        let fake = try FakeDocker(box: box, contextFixture: "context-local", inventoryFixture: "inventory-full",
+                                  summaryFixture: "summary-full")
+        if let after { try? after.write(toFile: (fake.path as NSString).deletingLastPathComponent + "/inventory-after.json",
+                                        atomically: true, encoding: .utf8) }
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false,
+                                  dockerPath: fake.path, isSocket: { _ in true })
+        return (fake, scanner)
+    }
+
+    private func containers(_ s: DiskScanner) -> [Finding] { s.scanDocker().filter { $0.id.hasPrefix("docker.container:") } }
+
+    /// The full inventory without one container, as the engine reports it after a removal.
+    private func inventoryWithout(containerNamed name: String) throws -> String {
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try fullInventory().utf8)) as? [String: Any])
+        root["Containers"] = (root["Containers"] as? [[String: Any]] ?? []).filter { ($0["Names"] as? String) != name }
+        return String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+    }
+
+    func testOnlyStoppedContainersAppear() throws {
+        let box = try Sandbox()
+        let (_, scanner) = try setup(box)
+        let found = containers(scanner)
+
+        XCTAssertEqual(found.count, 3, "The running container is not listed")
+        XCTAssertFalse(found.contains { $0.title.contains("· db") }, "db is running")
+        XCTAssertTrue(found.allSatisfy { $0.tier == .review && $0.ecosystem == .docker && $0.rebuild == .recreate })
+
+        let old = try XCTUnwrap(found.first { $0.title == "Stopped container · old-db" })
+        XCTAssertEqual(old.bytes, 217_000)
+        XCTAssertTrue(old.location.contains("postgres:17-alpine"))
+        XCTAssertTrue(old.location.contains("Exited (0) 4 months ago"))
+        if case .docker(.removeContainer(let id)) = old.action { XCTAssertEqual(id.count, 16) } else { XCTFail() }
+    }
+
+    func testCleaningOneContainerTouchesOnlyThatContainer() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box, after: try inventoryWithout(containerNamed: "cache"))
+        let target = try XCTUnwrap(containers(scanner).first { $0.title.hasSuffix("· cache") })
+        guard case .docker(.removeContainer(let id)) = target.action else { return XCTFail() }
+
+        let report = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
+                             dockerEngine: { scanner.dockerEngine() }).clean([target])
+
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(report.freed, 1_000_000)
+        let removals = fake.calls.filter { $0.contains("container rm") }
+        XCTAssertEqual(removals, ["--host unix://\(box.home.path)/.orbstack/run/docker.sock container rm \(id)"])
+        XCTAssertFalse(removals[0].contains(" -f"), "Never force")
+        XCTAssertFalse(removals[0].contains(" -v"), "Never remove volumes")
+        XCTAssertTrue(fake.unexpected.isEmpty)
+    }
+
+    func testARunningContainerIsNeverRemoved() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box)
+        // A finding for the running container that the scan never made.
+        let inventory = try XCTUnwrap(DockerInventory.parse(try fullInventory()))
+        let running = try XCTUnwrap(inventory.containers.first { $0.state == "running" })
+        let forged = Finding(id: "x", ecosystem: .docker, title: "Stopped container · db", location: "x", bytes: 193_000,
+                             tier: .review, rebuild: .recreate, action: .docker(.removeContainer(id: running.id)))
+
+        let report = Cleaner(guardian: scanner.guardian, dockerEngine: { scanner.dockerEngine() }).clean([forged])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertTrue(report.skipped.joined().contains("not stopped"))
+        XCTAssertFalse(fake.calls.contains { $0.contains("container rm") })
+    }
+
+    func testAContainerStartedAfterTheScanIsSkipped() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box)
+        let target = try XCTUnwrap(containers(scanner).first { $0.title.hasSuffix("· cache") })
+
+        // Between the scan and the clean, the user starts that container.
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try fullInventory().utf8)) as? [String: Any])
+        root["Containers"] = (root["Containers"] as? [[String: Any]] ?? []).map { item in
+            var item = item
+            if item["Names"] as? String == "cache" { item["State"] = "running"; item["Status"] = "Up 1 second" }
+            return item
+        }
+        try fake.setInventory(String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self))
+        let report = Cleaner(guardian: scanner.guardian, dockerEngine: { scanner.dockerEngine() }).clean([target])
+
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertFalse(fake.calls.contains { $0.contains("container rm") }, "Nothing is removed: \(fake.calls)")
+    }
+
+    func testBadIdentifiersGiveNoCommand() {
+        for bad in ["", "--force", "-f", "abc", "ABCDEF0123456789", "a b c d e f 1 2 3 4 5 6", "0123456789ab; rm -rf /",
+                    "../../etc", "0123456789ab\n--volumes", String(repeating: "a", count: 65)] {
+            XCTAssertNil(DockerAction.removeContainer(id: bad).arguments, "\"\(bad)\"")
+        }
+        XCTAssertEqual(DockerAction.removeContainer(id: "0123456789ab").arguments, ["container", "rm", "0123456789ab"])
+        XCTAssertNotNil(DockerAction.removeContainer(id: String(repeating: "f", count: 64)).arguments)
+    }
+
+    func testAnInvalidIdentifierInAFindingRunsNothing() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box)
+        let forged = Finding(id: "x", ecosystem: .docker, title: "x", location: "x", bytes: 1, tier: .review,
+                             rebuild: .recreate, action: .docker(.removeContainer(id: "--force")))
+        let report = Cleaner(guardian: scanner.guardian, dockerEngine: { scanner.dockerEngine() }).clean([forged])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertTrue(fake.calls.isEmpty, "Not even the engine is contacted: \(fake.calls)")
+    }
+
+    func testRemoteEngineGivesNoContainers() throws {
+        let box = try Sandbox()
+        let fake = try FakeDocker(box: box, contextFixture: "context-remote-ssh", inventoryFixture: "inventory-full")
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false,
+                                  dockerPath: fake.path, isSocket: { _ in true })
+        XCTAssertTrue(containers(scanner).isEmpty)
+        XCTAssertEqual(fake.calls, ["context inspect"])
+    }
 }
