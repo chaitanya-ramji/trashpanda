@@ -54,6 +54,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
 public enum OwnerCommand: String, Sendable, CaseIterable {
     case simctlDeleteUnavailable
     case dockerBuilderPrune
+    case dockerImagePrune
     case brewCleanup
     case uvCacheClean
     case goCleanCache
@@ -62,7 +63,7 @@ public enum OwnerCommand: String, Sendable, CaseIterable {
     public var toolName: String {
         switch self {
         case .simctlDeleteUnavailable: return "xcrun"
-        case .dockerBuilderPrune: return "docker"
+        case .dockerBuilderPrune, .dockerImagePrune: return "docker"
         case .brewCleanup: return "brew"
         case .uvCacheClean: return "uv"
         case .goCleanCache, .goCleanModcache: return "go"
@@ -73,6 +74,7 @@ public enum OwnerCommand: String, Sendable, CaseIterable {
         switch self {
         case .simctlDeleteUnavailable: return ["simctl", "delete", "unavailable"]
         case .dockerBuilderPrune: return ["builder", "prune", "-f"]
+        case .dockerImagePrune: return ["image", "prune", "-f"]
         case .brewCleanup: return ["cleanup", "--prune=all"]
         case .uvCacheClean: return ["cache", "clean"]
         case .goCleanCache: return ["clean", "-cache"]

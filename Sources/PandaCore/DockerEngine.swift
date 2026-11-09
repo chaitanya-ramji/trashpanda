@@ -66,6 +66,16 @@ public struct DockerEngine: Sendable, Equatable {
         Shell.run(dockerPath, ["--host", host] + args, timeout: timeout, unsetEnvironment: Self.scrubbedEnvironment)
     }
 
+    /// Reads everything the engine holds. Returns nil when Docker does not answer in the expected format.
+    public func inventory() -> DockerInventory? {
+        let r = run(["system", "df", "-v", "--format", "json"], timeout: 20)
+        guard r.status == 0, let inventory = DockerInventory.parse(r.stdout) else {
+            Log.warn("docker inventory unavailable")
+            return nil
+        }
+        return inventory
+    }
+
     // MARK: Known local engines
 
     /// Returns the name of a known local engine, or nil. A socket in any other place is refused,

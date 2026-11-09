@@ -459,13 +459,18 @@ final class ZigTests: XCTestCase {
 // MARK: - Docker: act only on a local engine (#6)
 
 /// A fake docker tool. It records every call, so a test can prove what ran.
+/// It can serve one inventory before a prune and another one after it.
 final class FakeDocker {
     let path: String
     private let logPath: String
 
-    init(box: Sandbox, contextName: String, host: String) throws {
+    init(box: Sandbox, contextName: String, host: String,
+         inventory: String = "{}", inventoryAfter: String? = nil) throws {
         path = box.home.appendingPathComponent("bin/docker").path
         logPath = box.home.appendingPathComponent("docker-calls.log").path
+        let dir = (path as NSString).deletingLastPathComponent
+        let before = dir + "/inventory-before.json", after = dir + "/inventory-after.json"
+        let marker = dir + "/pruned"
         let script = """
         #!/bin/bash
         echo "$*" >> "\(logPath)"
@@ -475,13 +480,17 @@ final class FakeDocker {
           exit 0
         fi
         case "$*" in
+          *"system df -v"*)
+            if [ -f "\(marker)" ]; then cat "\(after)"; else cat "\(before)"; fi
+            exit 0;;
           *"system df"*) echo '{"Type":"Build Cache","Reclaimable":"2.5GB (100%)"}'; exit 0;;
-          *"builder prune"*) exit 0;;
+          *"builder prune"*|*"image prune"*|*" rm "*|*"volume rm"*) touch "\(marker)"; exit 0;;
         esac
         exit 1
         """
-        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
-                                                withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try inventory.write(toFile: before, atomically: true, encoding: .utf8)
+        try (inventoryAfter ?? inventory).write(toFile: after, atomically: true, encoding: .utf8)
         try script.write(toFile: path, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
     }
@@ -674,5 +683,113 @@ final class StaleLimitTests: XCTestCase {
     func testMissingFileUsesTheDefault() throws {
         let box = try Sandbox()
         XCTAssertEqual(Config.load(home: box.home).staleDays, 30)
+    }
+}
+
+// MARK: - Docker: dangling images (#7)
+
+/// Builds a `docker system df -v --format json` document for tests.
+enum DockerJSON {
+    static func image(_ repo: String, _ tag: String, containers: Int, unique: String, size: String = "100MB") -> String {
+        """
+        {"Repository":"\(repo)","Tag":"\(tag)","ID":"sha256:\(UUID().uuidString)","Size":"\(size)","SharedSize":"0B",\
+        "UniqueSize":"\(unique)","Containers":"\(containers)","CreatedSince":"2 weeks ago","CreatedAt":"2026-10-23 14:21:40 +0530 IST"}
+        """
+    }
+
+    static func inventory(images: [String]) -> String {
+        "{\"Images\":[\(images.joined(separator: ","))],\"Containers\":[],\"Volumes\":[],\"BuildCache\":[]}"
+    }
+}
+
+final class DanglingImageTests: XCTestCase {
+    private let socketPath = { (box: Sandbox) in box.home.appendingPathComponent(".orbstack/run/docker.sock").path }
+
+    private func fixture(_ box: Sandbox, before: [String], after: [String]? = nil) throws -> (FakeDocker, DiskScanner) {
+        let fake = try FakeDocker(box: box, contextName: "orbstack", host: "unix://\(socketPath(box))",
+                                  inventory: DockerJSON.inventory(images: before),
+                                  inventoryAfter: after.map { DockerJSON.inventory(images: $0) })
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false,
+                                  dockerPath: fake.path, isSocket: { _ in true })
+        return (fake, scanner)
+    }
+
+    func testOnlyUntaggedUnusedImagesCount() throws {
+        let box = try Sandbox()
+        let (_, scanner) = try fixture(box, before: [
+            DockerJSON.image("<none>", "<none>", containers: 0, unique: "120MB"),      // counts
+            DockerJSON.image("<none>", "<none>", containers: 0, unique: "30.5MB"),     // counts
+            DockerJSON.image("<none>", "<none>", containers: 1, unique: "900MB"),      // a container uses it
+            DockerJSON.image("app", "latest", containers: 0, unique: "500MB"),         // tagged: not dangling
+            DockerJSON.image("postgres", "17", containers: 1, unique: "400MB"),        // in use
+            DockerJSON.image("<none>", "latest", containers: 0, unique: "70MB"),       // has a tag
+        ])
+        let found = try XCTUnwrap(scanner.scanDocker().first { $0.id == "docker.images.dangling" })
+        XCTAssertEqual(found.bytes, 150_500_000, "Only the two untagged, unused images, by unique size")
+        XCTAssertEqual(found.tier, .safe)
+        XCTAssertEqual(found.location, "Docker engine: OrbStack")
+        if case .owner(.dockerImagePrune) = found.action {} else { XCTFail("Uses the owner command") }
+    }
+
+    func testNoItemWhenThereAreNone() throws {
+        let box = try Sandbox()
+        let (_, scanner) = try fixture(box, before: [DockerJSON.image("app", "latest", containers: 0, unique: "500MB")])
+        XCTAssertNil(scanner.scanDocker().first { $0.id == "docker.images.dangling" })
+    }
+
+    func testBadOrOldOutputGivesNothingAndDoesNotCrash() throws {
+        let box = try Sandbox()
+        for bad in ["", "not json", "[]", "{\"Images\":\"oops\"}"] {
+            let fake = try FakeDocker(box: box, contextName: "orbstack", host: "unix://\(socketPath(box))", inventory: bad)
+            let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false,
+                                      dockerPath: fake.path, isSocket: { _ in true })
+            XCTAssertNil(scanner.scanDocker().first { $0.id == "docker.images.dangling" }, "input: \(bad)")
+        }
+    }
+
+    func testCleanReportsTheMeasuredResult() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try fixture(box, before: [
+            DockerJSON.image("<none>", "<none>", containers: 0, unique: "120MB"),
+            DockerJSON.image("<none>", "<none>", containers: 0, unique: "30MB"),
+            DockerJSON.image("app", "latest", containers: 0, unique: "500MB"),
+        ], after: [DockerJSON.image("app", "latest", containers: 0, unique: "500MB")])
+
+        let finding = try XCTUnwrap(scanner.scanDocker().first { $0.id == "docker.images.dangling" })
+        let cleaner = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
+                              dockerEngine: { scanner.dockerEngine() })
+        let report = cleaner.clean([finding])
+
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(report.freed, 150_000_000)
+        XCTAssertTrue(fake.calls.contains("--host unix://\(socketPath(box)) image prune -f"))
+        XCTAssertFalse(fake.calls.contains { $0.contains("prune -a") || $0.contains("--all") },
+                       "The tagged image stays. The app never prunes all images.")
+        XCTAssertNil(scanner.scanDocker().first { $0.id == "docker.images.dangling" }, "Not listed again")
+    }
+
+    func testNewDanglingImagesAfterTheScanAreNotCountedAsFreed() throws {
+        let box = try Sandbox()
+        // A build makes a new untagged image after the clean. It stays, and it is not counted as freed.
+        let (_, scanner) = try fixture(box, before: [
+            DockerJSON.image("<none>", "<none>", containers: 0, unique: "100MB"),
+        ], after: [
+            DockerJSON.image("<none>", "<none>", containers: 0, unique: "40MB"),
+        ])
+        let finding = try XCTUnwrap(scanner.scanDocker().first { $0.id == "docker.images.dangling" })
+        let report = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
+                             dockerEngine: { scanner.dockerEngine() }).clean([finding])
+        XCTAssertEqual(report.freed, 60_000_000)
+    }
+
+    func testRemoteEngineLeavesImagesAlone() throws {
+        let box = try Sandbox()
+        let fake = try FakeDocker(box: box, contextName: "prod", host: "tcp://prod.example.com:2375",
+                                  inventory: DockerJSON.inventory(images: [
+                                    DockerJSON.image("<none>", "<none>", containers: 0, unique: "120MB")]))
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false,
+                                  dockerPath: fake.path, isSocket: { _ in true })
+        XCTAssertTrue(scanner.scanDocker().isEmpty)
+        XCTAssertEqual(fake.calls, ["context inspect"])
     }
 }

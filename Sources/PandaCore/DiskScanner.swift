@@ -141,6 +141,7 @@ public final class DiskScanner {
             switch command {
             case .brewCleanup: return brewReclaimableBytes()
             case .dockerBuilderPrune: return dockerBuildCacheBytes()
+            case .dockerImagePrune: return danglingImageBytes()
             case .simctlDeleteUnavailable: return scanSimulators().first?.bytes ?? 0
             case .uvCacheClean:
                 return FileManager.default.fileExists(atPath: finding.location)
@@ -220,11 +221,34 @@ public final class DiskScanner {
 
     func scanDocker() -> [Finding] {
         guard case .success(let engine) = dockerEngine() else { return [] }
-        let bytes = dockerBuildCacheBytes(engine)
-        guard bytes > 0 else { return [] }
-        return [Finding(id: "docker.buildcache", ecosystem: .docker, title: "Build cache",
-                        location: "Docker engine: \(engine.kind)", bytes: bytes, tier: .safe, rebuild: .minutes,
-                        action: .owner(.dockerBuilderPrune))]
+        let place = "Docker engine: \(engine.kind)"
+        var out: [Finding] = []
+
+        let cache = dockerBuildCacheBytes(engine)
+        if cache > 0 {
+            out.append(Finding(id: "docker.buildcache", ecosystem: .docker, title: "Build cache",
+                               location: place, bytes: cache, tier: .safe, rebuild: .minutes,
+                               action: .owner(.dockerBuilderPrune)))
+        }
+
+        let dangling = danglingImageBytes(engine)
+        if dangling > 0 {
+            out.append(Finding(id: "docker.images.dangling", ecosystem: .docker, title: "Untagged images",
+                               location: place, bytes: dangling, tier: .safe, rebuild: .minutes,
+                               action: .owner(.dockerImagePrune)))
+        }
+        return out
+    }
+
+    func danglingImageBytes() -> Int64 {
+        guard case .success(let engine) = dockerEngine() else { return 0 }
+        return danglingImageBytes(engine)
+    }
+
+    /// Untagged images that no container uses. We add each image's unique size, so that
+    /// layers that images share are not counted twice.
+    private func danglingImageBytes(_ engine: DockerEngine) -> Int64 {
+        engine.inventory()?.danglingImages.reduce(0) { $0 + $1.uniqueBytes } ?? 0
     }
 
     func dockerBuildCacheBytes() -> Int64 {
