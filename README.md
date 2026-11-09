@@ -208,7 +208,9 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Docker: explain a VM disk that does not shrink ([#12](https://github.com/chaitanya-ramji/trashpanda/issues/12))
 - [x] Roadmap: keep the checkboxes correct ([#39](https://github.com/chaitanya-ramji/trashpanda/issues/39))
 
-### Next: v0.4 App and browser caches
+### Next: v0.4 Xcode, app and browser caches
+- [ ] Xcode: old simulator runtimes, devices, and archives (review) ([#27](https://github.com/chaitanya-ramji/trashpanda/issues/27))
+- [ ] Xcode: iOS device support files, one item for each iOS version ([#41](https://github.com/chaitanya-ramji/trashpanda/issues/41))
 - [ ] Clean stale app update downloads ([#13](https://github.com/chaitanya-ramji/trashpanda/issues/13))
 - [ ] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))
 - [ ] Browser caches: Firefox ([#15](https://github.com/chaitanya-ramji/trashpanda/issues/15))
@@ -224,11 +226,11 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Show the Trash size and offer to empty it ([#23](https://github.com/chaitanya-ramji/trashpanda/issues/23))
 - [ ] Old installers in Downloads (DMG, PKG, ZIP) ([#24](https://github.com/chaitanya-ramji/trashpanda/issues/24))
 - [ ] Docker: say when freed space is not back on the Mac yet ([#40](https://github.com/chaitanya-ramji/trashpanda/issues/40))
+- [ ] Menu: show the full split of reclaimable data as an interactive bar ([#42](https://github.com/chaitanya-ramji/trashpanda/issues/42))
 
 ### Later: v0.6 Old tools
 - [ ] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
 - [ ] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
-- [ ] Xcode: old simulator runtimes and archives (review) ([#27](https://github.com/chaitanya-ramji/trashpanda/issues/27))
 - [ ] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
 - [ ] More languages (phase 2b): Scala, Haskell, R, Julia, Nim, OCaml, Crystal, Clojure, Perl, Lua ([#29](https://github.com/chaitanya-ramji/trashpanda/issues/29))
 
