@@ -2,6 +2,8 @@ name: Release
 
 # Push a tag such as v0.2.0. The workflow builds, signs, notarizes, and publishes the DMG.
 # It then updates the Homebrew cask. See docs/RELEASING.md for the secrets it needs.
+# The job runs only when the repository variable SIGNED_RELEASES is "true".
+# Until then, releases are made by hand and are not signed.
 
 on:
   push:
@@ -9,6 +11,7 @@ on:
 
 jobs:
   release:
+    if: ${{ vars.SIGNED_RELEASES == 'true' }}
     runs-on: macos-15
     permissions:
       contents: write

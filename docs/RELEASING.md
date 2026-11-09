@@ -12,7 +12,21 @@ Notarization means that Apple scans the app and approves it. After that, macOS o
 4. Make an app-specific password at appleid.apple.com.
 5. Make a second GitHub repository named `homebrew-tap`. It holds the cask.
 
+## Unsigned releases (no Apple account)
+
+Until you have an account, make releases by hand:
+
+```sh
+./scripts/release.sh 0.1.0 --unsigned
+gh release create v0.1.0 build/TrashPanda-0.1.0.dmg build/TrashPanda-0.1.0.dmg.sha256 --notes-file notes.md
+```
+
+The release workflow does not run for these tags. It runs only when the repository variable `SIGNED_RELEASES` is `true`.
+Users must approve the app on first launch. The README explains how.
+
 ## Release from GitHub (recommended)
+
+Add the secrets below. Then set the repository variable `SIGNED_RELEASES` to `true`.
 
 Add these secrets to the `trashpanda` repository:
 

@@ -68,22 +68,45 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 
 You need macOS 13 or later.
 
-**Homebrew.** This works after the first signed release.
+### Option 1: DMG
+
+1. Download `TrashPanda-0.1.0.dmg` from the [Releases page](https://github.com/chaitanya-ramji/trashpanda/releases).
+2. Open the DMG. Drag Trash Panda to Applications.
+3. Open Trash Panda from Applications.
+
+The app is not notarized by Apple yet. macOS blocks the first launch. To allow it, use one of these methods:
+
+- Open **System Settings**, then **Privacy & Security**. Scroll down and click **Open Anyway** next to Trash Panda.
+- Or run this command in Terminal, then open the app again:
 
 ```sh
-brew install --cask chaitanya-ramji/tap/trashpanda
+xattr -dr com.apple.quarantine /Applications/TrashPanda.app
 ```
 
-**DMG.** Download the DMG from the Releases page. Open it. Drag Trash Panda to Applications.
+You do this one time only. To check the download, compare its SHA-256 checksum with the `.sha256` file on the Releases page.
 
-**From source.** You need the Swift toolchain.
+### Option 2: Build from source
+
+An app that you build on your own Mac does not need approval. You need the Swift toolchain (Xcode or the Command Line Tools).
 
 ```sh
 git clone https://github.com/chaitanya-ramji/trashpanda.git
 cd trashpanda
+./scripts/install-from-source.sh
+```
+
+The script builds the app, copies it to Applications, and opens it.
+
+To build without installing:
+
+```sh
 ./scripts/build-app.sh
 open build/TrashPanda.app
 ```
+
+### Homebrew
+
+A Homebrew cask is planned. It needs a notarized app first.
 
 To start the app at login, choose **Open at Login** in the menu.
 
