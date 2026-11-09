@@ -82,6 +82,9 @@ public final class Cleaner {
             case .removeArchive(let url):
                 removeArchive(url, finding: finding, into: &report)
 
+            case .removeDeviceSupport(let url):
+                removeDeviceSupport(url, finding: finding, into: &report)
+
             case .inform:
                 skip(finding, "this item is information only", &report)
             }
@@ -207,6 +210,23 @@ public final class Cleaner {
             report.freed += finding.bytes
             report.removed += 1
             Log.info("clean \(finding.id): removed archive \(finding.bytes) bytes — \(url.path)")
+        } catch {
+            Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            report.failed.append("\(url.path): \(error.localizedDescription)")
+        }
+    }
+
+    /// One folder of device support files, `<platform> DeviceSupport/<name>` in the Xcode folder. Nothing else is accepted.
+    private func removeDeviceSupport(_ url: URL, finding: Finding, into report: inout CleanReport) {
+        guard DeviceSupport.isDeviceSupport(url, home: URL(fileURLWithPath: guardian.home)) else {
+            skip(finding, "not a device support folder of Xcode", &report); return
+        }
+        if let reason = guardian.check(url) { skip(finding, "\(reason)", &report); return }
+        do {
+            try FileManager.default.removeItem(at: url)
+            report.freed += finding.bytes
+            report.removed += 1
+            Log.info("clean \(finding.id): removed \(finding.bytes) bytes — \(url.path)")
         } catch {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")

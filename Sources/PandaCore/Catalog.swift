@@ -69,8 +69,7 @@ enum Catalog {
                   paths: ["Library/Developer/Xcode/DocumentationCache"], tier: .safe, rebuild: .seconds, owner: Catalog.xcode),
         CacheSpec(id: "xcode.simcache", title: "Simulator caches", ecosystem: .swift,
                   paths: ["Library/Developer/CoreSimulator/Caches"], tier: .safe, rebuild: .seconds, owner: Catalog.xcodeOrSimulator),
-        CacheSpec(id: "xcode.devsupport", title: "iOS device support files", ecosystem: .swift,
-                  paths: ["Library/Developer/Xcode/iOS DeviceSupport"], tier: .review, rebuild: .minutes, owner: Catalog.xcode),
+        // iOS and other device support files are listed one version at a time (see DeviceSupport).
         CacheSpec(id: "swiftpm.cache", title: "Swift package cache", ecosystem: .swift,
                   paths: ["Library/Caches/org.swift.swiftpm"], tier: .safe, rebuild: .download, owner: Catalog.xcode),
         CacheSpec(id: "cocoapods.cache", title: "CocoaPods cache", ecosystem: .swift,

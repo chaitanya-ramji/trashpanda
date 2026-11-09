@@ -52,7 +52,10 @@ enum DemoData {
         let findings: [Finding] = [
             item("1", .swift, "Xcode build data", 4_200_000_000, .safe, .minutes, owner: xcode),
             item("2", .swift, "Unavailable simulators", 2_100_000_000, .safe, .seconds),
-            item("3", .swift, "iOS device support files", 3_800_000_000, .review, .minutes, owner: xcode),
+            item("3", .swift, "iOS device support · iPhone15,2 17.4 (21E219)", 3_800_000_000, .review, .minutes,
+                 action: .removeDeviceSupport(URL(fileURLWithPath: "/tmp/none")), owner: xcode),
+            item("27", .swift, "iOS device support · iPhone15,2 18.0 (22A3354) · newest, kept", 4_100_000_000, .review, .minutes,
+                 action: .inform),
             item("4", .rust, "Build output · cli-tool", 2_400_000_000, .safe, .minutes, last: ago(90)),
             item("5", .javascript, "node_modules · storefront", 1_300_000_000, .safe, .minutes, last: ago(75)),
             item("6", .javascript, "node_modules · admin-panel", 640_000_000, .safe, .minutes, last: ago(48)),

@@ -115,6 +115,7 @@ public final class DiskScanner {
             { add(self.scanCaches()) },
             { add(self.scanProjects()) },
             { add(self.scanArchives()) },
+            { add(self.scanDeviceSupport()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -157,7 +158,7 @@ public final class DiskScanner {
             case .removeVolume(let name):
                 return inventory.volumes.contains { $0.name == name } ? finding.bytes : 0
             }
-        case .removeArchive(let url):
+        case .removeArchive(let url), .removeDeviceSupport(let url):
             return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url) : 0
         case .simulator(let action):
             guard let simctl = simctl() else { return finding.bytes }
@@ -297,6 +298,28 @@ public final class DiskScanner {
                                owner: Catalog.xcodeOrSimulator))
         }
         return out
+    }
+
+    /// Device support files, one item for each OS version. The newest version of each device model is kept.
+    func scanDeviceSupport() -> [Finding] {
+        let folders = DeviceSupport.list(home: home).filter { $0.bytes > 0 }
+        let keep = DeviceSupport.newest(folders)
+        let current = now()
+        return folders.compactMap { f in
+            guard guardian.check(f.url) == nil else { return nil }
+            let rel = "\(f.directory)/\(f.name)"
+            let label = "\(f.platform) device support · \(f.name)"
+            let age = f.modified.map { "added \(max(0, Int(current.timeIntervalSince($0) / 86_400))) days ago" } ?? "age unknown"
+            if keep.contains(f.url) {
+                return Finding(id: "xcode.devicesupport.info:\(rel)", ecosystem: .swift, title: "\(label) · newest, kept",
+                               location: "\(f.directory) · \(age)", bytes: f.bytes, tier: .review, rebuild: .minutes,
+                               action: .inform)
+            }
+            return Finding(id: "xcode.devicesupport:\(rel)", ecosystem: .swift, title: label,
+                           location: "\(f.directory) · \(age) · Xcode copies it again when you connect the device",
+                           bytes: f.bytes, tier: .review, rebuild: .minutes, action: .removeDeviceSupport(f.url),
+                           lastActivity: f.modified, owner: Catalog.xcode)
+        }
     }
 
     /// The archives of apps that were built for release. They are review items, one by one.

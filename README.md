@@ -40,7 +40,7 @@ Trash Panda looks in two places:
 
 | Language or tool | Global caches | Project folders |
 | --- | --- | --- |
-| Swift, Obj-C, Xcode | Build data, simulator caches, Swift packages, CocoaPods. Review: simulator runtimes, old simulators, archives. | `.build`, `Pods` |
+| Swift, Obj-C, Xcode | Build data, simulator caches, Swift packages, CocoaPods. Review: simulator runtimes, old simulators, archives, device support files (one item for each OS version; the newest of each device model is kept). | `.build`, `Pods` |
 | JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright | `node_modules`, `.next`, `.nuxt`, `.turbo` |
 | Python | pip, uv, pre-commit, Poetry, Hugging Face, PyTorch | `.venv`, `.tox`, `.nox` |
 | Java, Kotlin | Gradle, Maven, Android, Kotlin/Native, JetBrains | `target`, `build`, `.gradle` |
@@ -219,7 +219,8 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 
 ### Next: v0.4 Xcode, app and browser caches
 - [x] Xcode: old simulator runtimes, devices, and archives (review) ([#27](https://github.com/chaitanya-ramji/trashpanda/issues/27))
-- [ ] Xcode: iOS device support files, one item for each iOS version ([#41](https://github.com/chaitanya-ramji/trashpanda/issues/41))
+- [x] Xcode: iOS device support files, one item for each iOS version ([#41](https://github.com/chaitanya-ramji/trashpanda/issues/41))
+- [ ] Xcode: keep the device support folder of a connected device ([#43](https://github.com/chaitanya-ramji/trashpanda/issues/43))
 - [ ] Clean stale app update downloads ([#13](https://github.com/chaitanya-ramji/trashpanda/issues/13))
 - [ ] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))
 - [ ] Browser caches: Firefox ([#15](https://github.com/chaitanya-ramji/trashpanda/issues/15))

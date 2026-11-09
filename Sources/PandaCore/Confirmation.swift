@@ -17,7 +17,7 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -27,6 +27,7 @@ public struct Confirmation: Equatable, Sendable {
         case .simulator(.deleteRuntime): return .simulatorRuntime
         case .simulator(.deleteDevice): return .simulatorDevice
         case .removeArchive: return .archive
+        case .removeDeviceSupport: return .deviceSupport
         default: return .ordinary
         }
     }
@@ -59,6 +60,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Delete this archive?", body: detail,
                 footer: "An archive holds the symbol files (dSYMs) that you need to read crash reports of a build that you shipped. This can't be undone.",
                 confirmTitle: "Delete archive", cancelIsDefault: true)
+        case .deviceSupport:
+            return Confirmation(
+                title: "Remove these device support files?", body: detail,
+                footer: "Xcode copies them from the device again the next time you connect it. This can't be undone.",
+                confirmTitle: "Remove files", cancelIsDefault: false)
         case .ordinary:
             var text = "\(f.title)\n\(f.rebuild.label)."
             if case .removeArtifact = f.action, f.tier == .review, let d = f.lastActivity {

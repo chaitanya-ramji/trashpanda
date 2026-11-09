@@ -193,6 +193,8 @@ public enum Action: Sendable {
     case simulator(SimulatorAction)
     /// One Xcode archive. It must be `Archives/<date>/<name>.xcarchive` in the home folder.
     case removeArchive(URL)
+    /// One folder of device support files. It must be `<platform> DeviceSupport/<name>` in the Xcode folder.
+    case removeDeviceSupport(URL)
     /// Information only. Nothing can be deleted. The menu shows it as a line that cannot be chosen.
     case inform
     /// One Docker object. The cleaner checks the engine and the object again before it runs.
