@@ -11,7 +11,8 @@ let package = Package(
     targets: [
         .target(name: "PandaCore"),
         .executableTarget(name: "TrashPanda", dependencies: ["PandaCore"]),
-        .testTarget(name: "PandaCoreTests", dependencies: ["PandaCore"]),
+        .testTarget(name: "PandaCoreTests", dependencies: ["PandaCore"],
+                    resources: [.copy("Fixtures")]),
     ],
     swiftLanguageModes: [.v5]
 )

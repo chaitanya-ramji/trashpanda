@@ -1,0 +1,17 @@
+[
+  {
+    "Name": "staging",
+    "Metadata": {},
+    "Endpoints": {
+      "docker": {
+        "Host": "tcp://staging.example.com:2376",
+        "SkipTLSVerify": false
+      }
+    },
+    "TLSMaterial": {},
+    "Storage": {
+      "MetadataPath": "<IN MEMORY>",
+      "TLSPath": "<IN MEMORY>"
+    }
+  }
+]

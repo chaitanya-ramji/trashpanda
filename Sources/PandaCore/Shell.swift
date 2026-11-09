@@ -9,7 +9,11 @@ public struct ShellResult: Sendable {
 
 public enum Shell {
     /// Apps that start from Finder get a short PATH. We add the usual tool folders.
+    /// Tests set this to hide the tools that are installed on the machine.
+    public static var searchDirsOverride: [String]?
+
     public static var searchDirs: [String] {
+        if let override = searchDirsOverride { return override }
         let home = NSHomeDirectory()
         return [
             "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",

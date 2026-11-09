@@ -1,0 +1,17 @@
+[
+  {
+    "Name": "orbstack",
+    "Metadata": {},
+    "Endpoints": {
+      "docker": {
+        "Host": "unix://__SOCKET__",
+        "SkipTLSVerify": false
+      }
+    },
+    "TLSMaterial": {},
+    "Storage": {
+      "MetadataPath": "<IN MEMORY>",
+      "TLSPath": "<IN MEMORY>"
+    }
+  }
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "Name": "prod",
+    "Metadata": {},
+    "Endpoints": {
+      "docker": {
+        "Host": "ssh://deploy@prod.example.com",
+        "SkipTLSVerify": false
+      }
+    },
+    "TLSMaterial": {},
+    "Storage": {
+      "MetadataPath": "<IN MEMORY>",
+      "TLSPath": "<IN MEMORY>"
+    }
+  }
+]

@@ -57,6 +57,21 @@ Most languages need data only. Open `Sources/PandaCore/Catalog.swift`.
 
 A marker file is a file that proves the folder is a project of that language. For example, `Cargo.toml` proves that `target` is a Rust build folder. Never match a folder by name alone.
 
+## Test Docker features
+
+No test may use a real Docker engine. Docker tests use a fake `docker` tool.
+
+- Make your test class a subclass of `DockerTestCase`. It hides the real `docker` tool from the search path.
+- Make the fake with `FakeDocker` (in `Tests/PandaCoreTests/FakeDocker.swift`). It answers from fixture files.
+- Fixtures are in `Tests/PandaCoreTests/Fixtures/docker`. They have the shape of real Docker output. All names in them are made up.
+  - `inventory-full.json` and `summary-full.jsonl` are a busy engine.
+  - `inventory-empty.json` and `summary-empty.jsonl` are an empty engine.
+  - `context-local.json` is a local engine. `context-remote-tcp.json` and `context-remote-ssh.json` are remote engines.
+- The fake serves one inventory before a delete command and another one after it. Use this to test the measured result.
+- The fake records every call. Check `fake.calls` to prove what ran. Check `fake.unexpected` to prove that nothing else ran.
+- A remote engine must always give no items and no commands except `context inspect`.
+- To add a case, add a fixture file or build one with `DockerJSON`.
+
 ## Safety rules for every change
 
 A pull request must follow these rules. A reviewer checks them.

@@ -458,54 +458,7 @@ final class ZigTests: XCTestCase {
 
 // MARK: - Docker: act only on a local engine (#6)
 
-/// A fake docker tool. It records every call, so a test can prove what ran.
-/// It can serve one inventory before a prune and another one after it.
-final class FakeDocker {
-    let path: String
-    private let logPath: String
-
-    init(box: Sandbox, contextName: String, host: String,
-         inventory: String = "{}", inventoryAfter: String? = nil) throws {
-        path = box.home.appendingPathComponent("bin/docker").path
-        logPath = box.home.appendingPathComponent("docker-calls.log").path
-        let dir = (path as NSString).deletingLastPathComponent
-        let before = dir + "/inventory-before.json", after = dir + "/inventory-after.json"
-        let marker = dir + "/pruned"
-        let script = """
-        #!/bin/bash
-        echo "$*" >> "\(logPath)"
-        echo "ENV DOCKER_HOST=${DOCKER_HOST:-} DOCKER_CONTEXT=${DOCKER_CONTEXT:-}" >> "\(logPath)"
-        if [ "$1" = "context" ] && [ "$2" = "inspect" ]; then
-          echo '[{"Name":"\(contextName)","Endpoints":{"docker":{"Host":"\(host)"}}}]'
-          exit 0
-        fi
-        case "$*" in
-          *"system df -v"*)
-            if [ -f "\(marker)" ]; then cat "\(after)"; else cat "\(before)"; fi
-            exit 0;;
-          *"system df"*) echo '{"Type":"Build Cache","Reclaimable":"2.5GB (100%)"}'; exit 0;;
-          *"builder prune"*|*"image prune"*|*" rm "*|*"volume rm"*) touch "\(marker)"; exit 0;;
-        esac
-        exit 1
-        """
-        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        try inventory.write(toFile: before, atomically: true, encoding: .utf8)
-        try (inventoryAfter ?? inventory).write(toFile: after, atomically: true, encoding: .utf8)
-        try script.write(toFile: path, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
-    }
-
-    var calls: [String] {
-        ((try? String(contentsOfFile: logPath, encoding: .utf8)) ?? "")
-            .split(separator: "\n").map(String.init).filter { !$0.hasPrefix("ENV ") }
-    }
-    var environments: [String] {
-        ((try? String(contentsOfFile: logPath, encoding: .utf8)) ?? "")
-            .split(separator: "\n").map(String.init).filter { $0.hasPrefix("ENV ") }
-    }
-}
-
-final class DockerEngineTests: XCTestCase {
+final class DockerEngineTests: DockerTestCase {
     private func scanner(_ box: Sandbox, _ fake: FakeDocker, socketExists: Bool = true) -> DiskScanner {
         DiskScanner(home: box.home, config: Config(), useOwnerTools: false,
                     dockerPath: fake.path, isSocket: { _ in socketExists })
@@ -617,9 +570,6 @@ final class DockerEngineTests: XCTestCase {
     }
 }
 
-private extension Result where Failure == DockerRefusal {
-    var failureReason: DockerRefusal? { if case .failure(let e) = self { return e } else { return nil } }
-}
 
 // MARK: - Stale limit setting (#4)
 
@@ -688,21 +638,7 @@ final class StaleLimitTests: XCTestCase {
 
 // MARK: - Docker: dangling images (#7)
 
-/// Builds a `docker system df -v --format json` document for tests.
-enum DockerJSON {
-    static func image(_ repo: String, _ tag: String, containers: Int, unique: String, size: String = "100MB") -> String {
-        """
-        {"Repository":"\(repo)","Tag":"\(tag)","ID":"sha256:\(UUID().uuidString)","Size":"\(size)","SharedSize":"0B",\
-        "UniqueSize":"\(unique)","Containers":"\(containers)","CreatedSince":"2 weeks ago","CreatedAt":"2026-10-23 14:21:40 +0530 IST"}
-        """
-    }
-
-    static func inventory(images: [String]) -> String {
-        "{\"Images\":[\(images.joined(separator: ","))],\"Containers\":[],\"Volumes\":[],\"BuildCache\":[]}"
-    }
-}
-
-final class DanglingImageTests: XCTestCase {
+final class DanglingImageTests: DockerTestCase {
     private let socketPath = { (box: Sandbox) in box.home.appendingPathComponent(".orbstack/run/docker.sock").path }
 
     private func fixture(_ box: Sandbox, before: [String], after: [String]? = nil) throws -> (FakeDocker, DiskScanner) {
