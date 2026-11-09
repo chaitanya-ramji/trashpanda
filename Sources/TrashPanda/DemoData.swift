@@ -27,10 +27,12 @@ enum DemoData {
     static func result() -> ScanResult {
         let ago = { (days: Double) in Date().addingTimeInterval(-days * 86_400) }
         func item(_ id: String, _ eco: Ecosystem, _ title: String, _ bytes: Int64, _ tier: Tier,
-                  _ rebuild: Rebuild, place: String = "~/Projects", last: Date? = nil) -> Finding {
+                  _ rebuild: Rebuild, place: String = "~/Projects", last: Date? = nil,
+                  action: Action = .owner(.brewCleanup), note: String? = nil, help: URL? = nil) -> Finding {
             Finding(id: id, ecosystem: eco, title: title, location: place, bytes: bytes, tier: tier,
-                    rebuild: rebuild, action: .owner(.brewCleanup), lastActivity: last)
+                    rebuild: rebuild, action: action, lastActivity: last, note: note, helpURL: help)
         }
+        let dk = "Docker engine: Docker Desktop"
         let findings: [Finding] = [
             item("1", .swift, "Xcode build data", 4_200_000_000, .safe, .minutes),
             item("2", .swift, "Unavailable simulators", 2_100_000_000, .safe, .seconds),
@@ -43,7 +45,15 @@ enum DemoData {
             item("9", .python, "uv cache", 880_000_000, .safe, .download),
             item("10", .python, "Virtual environment · pipeline", 716_000_000, .review, .minutes, last: ago(9)),
             item("11", .go, "Go build cache", 650_000_000, .safe, .minutes),
-            item("12", .docker, "Build cache", 568_000_000, .safe, .minutes, place: "Docker engine: OrbStack"),
+            item("12", .docker, "Build cache", 568_000_000, .safe, .minutes, place: dk),
+            item("14", .docker, "Untagged images", 150_000_000, .safe, .minutes, place: dk),
+            item("15", .docker, "Image · web-api:latest", 290_000_000, .review, .download, place: dk),
+            item("16", .docker, "Stopped container · old-db", 1_200_000, .review, .recreate, place: dk),
+            item("17", .docker, "Unused volume · scratch_data", 40_000_000, .review, .never, place: dk),
+            item("18", .docker, "Volume · app_pgdata", 244_000_000, .review, .never, place: "\(dk) · used by 1 container", action: .inform),
+            item("19", .docker, "Volume · cache_data", 118_000_000, .review, .never, place: "\(dk) · used by 1 container", action: .inform),
+            item("20", .docker, "Docker Desktop disk image", 6_400_000_000, .review, .never, place: dk, action: .inform,
+                 note: "Holds 3.0 GB of data. The file can stay large after a clean.", help: DockerDesktopDisk.helpURL),
             item("13", .homebrew, "Old downloads and versions", 412_000_000, .safe, .download),
         ]
         return ScanResult(findings: findings.sorted { $0.bytes > $1.bytes },

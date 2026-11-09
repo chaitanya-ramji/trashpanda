@@ -291,6 +291,22 @@ public final class DiskScanner {
             }
         }
 
+        // Docker Desktop keeps all its data in one disk image. Show its real size next to the data inside.
+        // This is information only. The app never changes the file.
+        if engine.kind == "Docker Desktop", let disk = DockerDesktopDisk.find(home: home), disk.allocatedBytes > 0 {
+            let inside = engine.summary().filter { ["Images", "Containers", "Local Volumes", "Build Cache"].contains($0.key) }
+                .values.reduce(Int64(0)) { $0 + $1.size }
+            // Finder shows the full size of a sparse file. We say so in the tooltip, to avoid confusion.
+            let finder = disk.logicalBytes > disk.allocatedBytes * 2
+                ? " · Finder may show \(Self.megabytesText(disk.logicalBytes))" : ""
+            out.append(Finding(
+                id: "docker.vmdisk", ecosystem: .docker, title: "Docker Desktop disk image",
+                location: "\(place) · \(disk.url.path)\(finder)", bytes: disk.allocatedBytes, tier: .review,
+                rebuild: .never, action: .inform,
+                note: "Holds \(Self.megabytesText(inside)) of data. The file can stay large after a clean.",
+                helpURL: DockerDesktopDisk.helpURL))
+        }
+
         // Volumes. They can hold databases, so a removable one is offered one by one, with a strong warning.
         // A volume that a container uses is shown for information only. It has no action.
         for v in inventory.volumes where DockerAction.isVolumeName(v.name) {
@@ -394,6 +410,15 @@ public final class DiskScanner {
     }
 
     // MARK: Helpers
+
+    /// "4.1 GB". The same words as the menu uses.
+    static func megabytesText(_ bytes: Int64) -> String {
+        let v = Double(max(0, bytes))
+        if v >= 1e10 { return String(format: "%.0f GB", v / 1e9) }
+        if v >= 1e9 { return String(format: "%.1f GB", v / 1e9) }
+        if v >= 1e6 { return String(format: "%.0f MB", v / 1e6) }
+        return String(format: "%.0f KB", v / 1e3)
+    }
 
     /// Parses "1.2GB (100%)" or "512kB" from Docker output. Docker uses decimal units.
     static func parseDockerSize(_ text: String) -> Int64? {

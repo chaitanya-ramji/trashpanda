@@ -86,8 +86,8 @@ final class FakeDocker {
     /// A context and inventory from fixture files. The local context points to the sandbox socket.
     convenience init(box: Sandbox, contextFixture: String, inventoryFixture: String,
                      summaryFixture: String? = nil, inventoryAfterFixture: String? = nil,
-                     tagTimesFixture: String? = nil) throws {
-        let socket = box.home.appendingPathComponent(".orbstack/run/docker.sock").path
+                     tagTimesFixture: String? = nil, socketInHome: String = ".orbstack/run/docker.sock") throws {
+        let socket = box.home.appendingPathComponent(socketInHome).path
         let context = try FakeDocker.fixture(contextFixture).replacingOccurrences(of: "__SOCKET__", with: socket)
         try self.init(box: box, context: context,
                       inventory: try FakeDocker.fixture(inventoryFixture),
@@ -612,5 +612,94 @@ final class DockerVolumeTests: DockerTestCase {
                 XCTFail("\(file.lastPathComponent) contains \"\(name)\". It removes more than the list shows.")
             }
         }
+    }
+}
+
+// MARK: - Docker: the Docker Desktop disk image (#12)
+
+final class DockerDesktopDiskTests: DockerTestCase {
+    private let diskPath = "Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"
+
+    /// A file that Finder shows as `logical` bytes but that uses only `written` bytes. Docker Desktop's file is like this.
+    @discardableResult
+    private func sparseFile(_ box: Sandbox, _ relative: String, logical: UInt64, written: Int) throws -> URL {
+        let url = box.home.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: 7, count: written).write(to: url)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: logical)
+        try handle.close()
+        return url
+    }
+
+    private func scanner(_ box: Sandbox, socket: String) throws -> (FakeDocker, DiskScanner) {
+        let fake = try FakeDocker(box: box, contextFixture: "context-local", inventoryFixture: "inventory-full",
+                                  summaryFixture: "summary-full", tagTimesFixture: "tagtimes-full", socketInHome: socket)
+        return (fake, DiskScanner(home: box.home, config: Config(), useOwnerTools: false, dockerPath: fake.path,
+                                  isSocket: { _ in true }))
+    }
+
+    func testShowsTheRealSizeNextToTheDataInside() throws {
+        let box = try Sandbox()
+        try sparseFile(box, diskPath, logical: 8_000_000_000, written: 1_000_000)
+        let (_, s) = try scanner(box, socket: ".docker/run/docker.sock")      // a Docker Desktop socket
+        let item = try XCTUnwrap(s.scanDocker().first { $0.id == "docker.vmdisk" })
+
+        XCTAssertEqual(item.title, "Docker Desktop disk image")
+        XCTAssertGreaterThan(item.bytes, 0)
+        XCTAssertLessThan(item.bytes, 2_000_000, "The size is what the file uses on this Mac, not the 8 GB that Finder shows")
+        XCTAssertFalse(item.isActionable, "Information only")
+        XCTAssertTrue(item.note?.contains("Holds 3.0 GB of data") == true, item.note ?? "nil")   // images + containers + volumes + cache
+        XCTAssertTrue(item.note?.contains("can stay large after a clean") == true)
+        XCTAssertTrue(item.location.contains("Finder may show 8.0 GB"), item.location)
+        XCTAssertEqual(item.helpURL?.host, "docs.docker.com")
+    }
+
+    func testOnlyForDockerDesktop() throws {
+        let box = try Sandbox()
+        try sparseFile(box, diskPath, logical: 8_000_000_000, written: 1_000_000)
+        let (_, s) = try scanner(box, socket: ".orbstack/run/docker.sock")     // OrbStack
+        XCTAssertNil(s.scanDocker().first { $0.id == "docker.vmdisk" }, "No disk line for another engine")
+    }
+
+    func testNothingWhenThereIsNoFileOrItIsALink() throws {
+        let box = try Sandbox()
+        let (_, s) = try scanner(box, socket: ".docker/run/docker.sock")
+        XCTAssertNil(s.scanDocker().first { $0.id == "docker.vmdisk" }, "No file")
+
+        let real = try sparseFile(box, "elsewhere/Docker.raw", logical: 8_000_000_000, written: 1_000_000)
+        let link = box.home.appendingPathComponent(diskPath)
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        XCTAssertNil(s.scanDocker().first { $0.id == "docker.vmdisk" }, "A link is never followed")
+    }
+
+    func testNoTotalIncludesTheDiskImage() throws {
+        let box = try Sandbox()
+        try sparseFile(box, diskPath, logical: 8_000_000_000, written: 3_000_000)
+        let found = try scanner(box, socket: ".docker/run/docker.sock").1.scanDocker()
+        let result = ScanResult(findings: found, disk: DiskUsage(total: 10, free: 5))
+        XCTAssertEqual(result.reclaimable + result.reviewable, found.filter(\.isActionable).reduce(0) { $0 + $1.bytes })
+    }
+
+    /// The app must never change this file. Lowering Docker's disk limit deletes it and all containers and images.
+    func testTheAppCanNeverDeleteTheDiskImage() throws {
+        let box = try Sandbox()
+        let file = try sparseFile(box, diskPath, logical: 8_000_000_000, written: 1_000_000)
+        let guardian = PathGuard(home: box.home)
+        XCTAssertEqual(guardian.check(file), .protectedData("Library/Containers"))
+
+        let forged: [Action] = [.removeContents(file.deletingLastPathComponent()), .removeArtifact(file), .removeContents(file)]
+        for action in forged {
+            let item = Finding(id: "x", ecosystem: .docker, title: "x", location: "x", bytes: 1, tier: .review,
+                               rebuild: .never, action: action)
+            XCTAssertEqual(Cleaner(guardian: guardian).clean([item]).removed, 0)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "The file is still there")
+    }
+
+    func testTheHelpLinkIsTheOfficialPage() {
+        XCTAssertEqual(DockerDesktopDisk.helpURL.absoluteString,
+                       "https://docs.docker.com/desktop/troubleshoot-and-support/faqs/macfaqs/")
     }
 }

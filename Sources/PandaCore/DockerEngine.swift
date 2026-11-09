@@ -66,6 +66,20 @@ public struct DockerEngine: Sendable, Equatable {
         Shell.run(dockerPath, ["--host", host] + args, timeout: timeout, unsetEnvironment: Self.scrubbedEnvironment)
     }
 
+    /// The size and the reclaimable size of each kind of data, from `docker system df`.
+    public func summary() -> [String: (size: Int64, reclaimable: Int64)] {
+        let r = run(["system", "df", "--format", "{{json .}}"], timeout: 8)
+        guard r.status == 0 else { return [:] }
+        var out: [String: (size: Int64, reclaimable: Int64)] = [:]
+        for line in r.stdout.split(separator: "\n") {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let type = obj["Type"] as? String else { continue }
+            out[type] = (DiskScanner.parseDockerSize(DockerInventory.string(obj["Size"])) ?? 0,
+                         DiskScanner.parseDockerSize(DockerInventory.string(obj["Reclaimable"])) ?? 0)
+        }
+        return out
+    }
+
     /// Reads everything the engine holds. Returns nil when Docker does not answer in the expected format.
     public func inventory() -> DockerInventory? {
         let r = run(["system", "df", "-v", "--format", "json"], timeout: 20)

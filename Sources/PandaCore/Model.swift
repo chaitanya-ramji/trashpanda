@@ -162,6 +162,10 @@ public struct Finding: Identifiable, Sendable {
     public let rebuild: Rebuild
     public let action: Action
     public let lastActivity: Date?
+    /// One short line that the menu shows under the item.
+    public let note: String?
+    /// A page that explains the item. The menu offers it as a link.
+    public let helpURL: URL?
 
     /// False for an information line. It has no action, so it is not part of any total.
     public var isActionable: Bool {
@@ -170,7 +174,10 @@ public struct Finding: Identifiable, Sendable {
     }
 
     public init(id: String, ecosystem: Ecosystem, title: String, location: String, bytes: Int64,
-                tier: Tier, rebuild: Rebuild, action: Action, lastActivity: Date? = nil) {
+                tier: Tier, rebuild: Rebuild, action: Action, lastActivity: Date? = nil,
+                note: String? = nil, helpURL: URL? = nil) {
+        self.note = note
+        self.helpURL = helpURL
         self.id = id
         self.ecosystem = ecosystem
         self.title = title

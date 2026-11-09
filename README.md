@@ -76,6 +76,7 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - For Homebrew, the app asks `brew` what it would remove. Homebrew keeps its own index files, and the app does not count them.
 - The app asks the owning tool to clean its own data when it can. It runs fixed commands only.
 - Docker volumes can hold databases. The app removes a volume only when no container uses it and it is a local volume. Each volume needs its own confirmation, and the default button keeps it. A volume in use is shown but cannot be removed.
+- Docker Desktop keeps all its data in one disk image file. The app shows the size that the file really uses, next to the size of the data inside. It never changes the file. Lowering the disk limit in Docker Desktop deletes the file and all containers and images, so the app never suggests it.
 - The app never prunes all Docker images. It removes a named image only by its exact name, never forced.
 - Docker runs on a local engine only (OrbStack, Docker Desktop, Colima, or Rancher Desktop). The app refuses remote engines and unknown sockets. It ignores `DOCKER_HOST` and `DOCKER_CONTEXT`.
 
@@ -203,7 +204,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Docker: remove unused images older than N days ([#9](https://github.com/chaitanya-ramji/trashpanda/issues/9))
 - [x] Docker: show volumes and remove dangling ones ([#10](https://github.com/chaitanya-ramji/trashpanda/issues/10))
 - [x] Docker: test with a fake docker tool ([#11](https://github.com/chaitanya-ramji/trashpanda/issues/11))
-- [ ] Docker: explain a VM disk that does not shrink ([#12](https://github.com/chaitanya-ramji/trashpanda/issues/12))
+- [x] Docker: explain a VM disk that does not shrink ([#12](https://github.com/chaitanya-ramji/trashpanda/issues/12))
 
 ### Next: v0.4 App and browser caches
 - [ ] Clean stale app update downloads ([#13](https://github.com/chaitanya-ramji/trashpanda/issues/13))

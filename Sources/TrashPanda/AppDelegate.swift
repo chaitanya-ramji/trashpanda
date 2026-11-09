@@ -45,6 +45,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let i = args.firstIndex(of: "--dialog"), i + 1 < args.count else { return nil }
         return args[i + 1]
     }()
+    /// `--submenu docker` pops that submenu open in demo mode, for screenshots.
+    private let demoSubmenu: String? = {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--submenu"), i + 1 < args.count else { return nil }
+        return args[i + 1].lowercased()
+    }()
     private let demoStyle: String? = {
         let args = CommandLine.arguments
         guard let i = args.firstIndex(of: "--demo") else { return nil }
@@ -74,6 +80,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     NSApp.activate(ignoringOtherApps: true)
                     _ = self.makeAlert(for: self.dialog(for: item)).alert.runModal()
                     NSApp.terminate(nil)
+                } else if let name = self.demoSubmenu,
+                          let item = self.menu.items.first(where: { $0.attributedTitle?.string.lowercased().hasPrefix(name) == true }),
+                          let sub = item.submenu {
+                    sub.appearance = self.menu.appearance
+                    sub.popUp(positioning: nil, at: NSPoint(x: 700, y: 800), in: nil)
                 } else {
                     self.statusItem.button?.performClick(nil)
                 }
@@ -237,13 +248,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if !info.isEmpty {
             if !safe.isEmpty || !review.isEmpty { sub.addItem(.separator()) }
-            sub.addItem(disabled("In use. Cannot be removed."))
+            sub.addItem(disabled("Information only. Cannot be removed here."))
             for f in info.prefix(12) {
                 let item = NSMenuItem(title: f.title, action: nil, keyEquivalent: "")
                 item.attributedTitle = line(f.title, Format.bytes(f.bytes))
                 item.isEnabled = false
                 item.toolTip = f.location
                 sub.addItem(item)
+                if let note = f.note {
+                    let n = NSMenuItem(title: note, action: nil, keyEquivalent: "")
+                    n.attributedTitle = NSAttributedString(string: "  " + note, attributes: [
+                        .font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+                    n.isEnabled = false
+                    sub.addItem(n)
+                }
+                if let url = f.helpURL {
+                    let link = NSMenuItem(title: "Read the official steps…", action: #selector(openHelp(_:)), keyEquivalent: "")
+                    link.target = self
+                    link.representedObject = url
+                    sub.addItem(link)
+                }
             }
             if info.count > 12 { sub.addItem(disabled("+ \(info.count - 12) more")) }
         }
@@ -338,6 +362,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func rescan() {
         Log.info("user: scan again")
         scan()
+    }
+
+    @objc private func openHelp(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { NSWorkspace.shared.open(url) }
     }
 
     @objc private func showLog() {
