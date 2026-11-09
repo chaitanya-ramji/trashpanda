@@ -81,6 +81,9 @@ public struct PathGuard: Sendable {
         if relative.split(separator: "/").count < 2 { return .tooShallow }
 
         for tree in Self.protectedHomeTrees where relative == tree || relative.hasPrefix(tree + "/") {
+            // The one exception: a cache folder of a browser, in the exact shape <root>/<profile>/<cache name>.
+            // Cookies, logins, history, and every other folder of the profile stay protected.
+            if BrowserCaches.isCacheShape(relative: relative) { break }
             return .protectedData(tree)
         }
 

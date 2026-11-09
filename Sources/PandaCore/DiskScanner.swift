@@ -121,6 +121,7 @@ public final class DiskScanner {
             { add(self.scanArchives()) },
             { add(self.scanDeviceSupport()) },
             { add(self.scanUpdateDownloads()) },
+            { add(self.scanBrowserCaches()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -163,6 +164,8 @@ public final class DiskScanner {
             case .removeVolume(let name):
                 return inventory.volumes.contains { $0.name == name } ? finding.bytes : 0
             }
+        case .removeBrowserCaches(let id):
+            return BrowserCaches.browser(id: id).map { BrowserCaches.bytes(of: $0, home: home) } ?? finding.bytes
         case .removeUpdateDownloads(let url):
             return UpdateDownloads.staleBytes(in: url, now: now())
         case .removeArchive(let url), .removeDeviceSupport(let url):
@@ -310,6 +313,19 @@ public final class DiskScanner {
     /// A path with `~` for the home folder of this scanner. It does not use the home folder of the user who runs the test.
     private func tilde(_ path: String) -> String {
         path.hasPrefix(home.path + "/") ? "~" + path.dropFirst(home.path.count) : path
+    }
+
+    /// The caches of Chromium browsers. One safe item for each browser. The browser must be closed.
+    func scanBrowserCaches() -> [Finding] {
+        BrowserCaches.browsers.compactMap { b in
+            let targets = BrowserCaches.targets(of: b, home: home).filter { guardian.check($0) == nil }
+            let bytes = targets.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+            guard bytes > 0 else { return nil }
+            return Finding(id: "browser.cache:\(b.id)", ecosystem: .browsers, title: "Browser caches · \(b.name)",
+                           location: "\(b.roots.map { "~/" + $0 }.joined(separator: " and ")) · pages load again the first time",
+                           bytes: bytes, tier: .safe, rebuild: .download,
+                           action: .removeBrowserCaches(browserID: b.id), owner: b.owner)
+        }
     }
 
     /// Old update files that apps leave behind. One item for each app. The app that owns them must be closed.

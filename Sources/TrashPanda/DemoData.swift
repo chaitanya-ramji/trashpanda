@@ -77,6 +77,7 @@ enum DemoData {
                  place: "Xcode simulators", action: .inform),
             item("26", .swift, "iOS 18.2 runtime · in use", 8_000_000_000, .review, .download,
                  place: "Xcode simulators", action: .inform),
+            item("30", .browsers, "Browser caches · Arc", 228_000_000, .safe, .download, place: "~/Library/Caches/Arc/User Data"),
             item("14", .docker, "Untagged images", 150_000_000, .safe, .minutes, place: dk),
             item("15", .docker, "Image · web-api:latest", 290_000_000, .review, .download, place: dk),
             item("16", .docker, "Stopped container · old-db", 1_200_000, .review, .recreate, place: dk),

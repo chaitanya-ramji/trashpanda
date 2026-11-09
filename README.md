@@ -54,6 +54,7 @@ Trash Panda looks in two places:
 | Elixir, Erlang | Hex packages, rebar3 | `_build`, `deps`, `.elixir_ls` |
 | Zig | Global cache | `.zig-cache`, `zig-out` |
 | Homebrew | Downloads and old versions | None |
+| Chromium browsers | Cache, code cache, and GPU caches of Chrome, Arc, Brave, Edge, Vivaldi, and Opera | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |
 | Docker | Build cache, untagged images (safe). Stopped containers, old unused images, and unused volumes (review). | None |
 
@@ -75,6 +76,7 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app always shows a list and asks you before it deletes.
 - A project folder counts only when a marker file is next to it. For example, `node_modules` needs `package.json`.
 - The app skips a project when a running process uses it.
+- For a browser, the app removes only eight named cache folders inside each profile (`Default` or `Profile N`). It never touches cookies, logins, history, local storage, IndexedDB, extensions, preferences, sessions, or Service Worker storage. A browser that is open is skipped.
 - The app removes an update download only when it is older than 7 days, and it reads the age again when you confirm. It touches only the `Installation` and `PersistentDownloads` folders of an app, never the rest of its cache. It refuses a cache folder that is a link.
 - The app does not clean a cache while the app that uses it runs. For example, Xcode build data waits until you quit Xcode. The menu shows which app to quit, and the cleaner checks again before each item.
 - The app marks a project as review when someone changed it in the last 30 days. You can change this limit (see Settings).
@@ -224,7 +226,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Xcode: iOS device support files, one item for each iOS version ([#41](https://github.com/chaitanya-ramji/trashpanda/issues/41))
 - [ ] Xcode: keep the device support folder of a connected device ([#43](https://github.com/chaitanya-ramji/trashpanda/issues/43))
 - [x] Clean stale app update downloads ([#13](https://github.com/chaitanya-ramji/trashpanda/issues/13))
-- [ ] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))
+- [x] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))
 - [ ] Browser caches: Firefox ([#15](https://github.com/chaitanya-ramji/trashpanda/issues/15))
 - [x] Do not clean an app while it runs ([#16](https://github.com/chaitanya-ramji/trashpanda/issues/16))
 - [ ] Browser Service Worker storage (review only) ([#17](https://github.com/chaitanya-ramji/trashpanda/issues/17))

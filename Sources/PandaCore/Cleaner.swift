@@ -85,6 +85,9 @@ public final class Cleaner {
             case .removeDeviceSupport(let url):
                 removeDeviceSupport(url, finding: finding, into: &report)
 
+            case .removeBrowserCaches(let id):
+                removeBrowserCaches(id, finding: finding, into: &report)
+
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
 
@@ -217,6 +220,34 @@ public final class Cleaner {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
         }
+    }
+
+    /// The caches of one browser. We find the folders again now, from a fixed list of names. Nothing else is touched.
+    private func removeBrowserCaches(_ id: String, finding: Finding, into report: inout CleanReport) {
+        guard let browser = BrowserCaches.browser(id: id) else { skip(finding, "unknown browser", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for url in BrowserCaches.targets(of: browser, home: home) {
+            guard BrowserCaches.isTarget(url, of: browser, home: home), UpdateDownloads.isPlainPath(url) else {
+                report.skipped.append("\(url.path): not a cache folder of the browser"); continue
+            }
+            if let reason = guardian.check(url) {
+                Log.warn("skip \(url.path): \(reason)")
+                report.skipped.append("\(url.path): \(reason)"); continue
+            }
+            let size = Sizer.size(of: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) cache folders, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
     }
 
     /// The old update files of one app. We look at the age again now, so that an update that started after the scan stays.
