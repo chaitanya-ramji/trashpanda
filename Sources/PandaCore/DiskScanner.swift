@@ -124,7 +124,8 @@ public final class DiskScanner {
         DispatchQueue.concurrentPerform(iterations: jobs.count) { jobs[$0]() }
 
         // Tiny items add noise to the menu and free almost nothing.
-        let sorted = findings.filter { $0.bytes >= Self.minimumBytes }.sorted { $0.bytes > $1.bytes }
+        // Information lines are not part of any total, so they are always shown.
+        let sorted = findings.filter { $0.bytes >= Self.minimumBytes || !$0.isActionable }.sorted { $0.bytes > $1.bytes }
         let result = ScanResult(findings: sorted, disk: DiskUsage.current(for: home))
         for f in sorted {
             Log.info("found [\(f.tier == .safe ? "safe" : "review")] \(f.id) \(f.bytes) bytes — \(f.location)")
@@ -149,7 +150,11 @@ public final class DiskScanner {
             case .removeImage(let refs):
                 let left = inventory.images.contains { refs.contains("\($0.repository):\($0.tag)") }
                 return left ? finding.bytes : 0
+            case .removeVolume(let name):
+                return inventory.volumes.contains { $0.name == name } ? finding.bytes : 0
             }
+        case .inform:
+            return finding.bytes
         case .owner(let command):
             switch command {
             case .brewCleanup: return brewReclaimableBytes()
@@ -283,6 +288,23 @@ public final class DiskScanner {
                                    location: "\(place) · on this Mac for \(days) days",
                                    bytes: g.uniqueBytes, tier: .review, rebuild: .download,
                                    action: .docker(.removeImage(refs: g.refs)), lastActivity: since))
+            }
+        }
+
+        // Volumes. They can hold databases, so a removable one is offered one by one, with a strong warning.
+        // A volume that a container uses is shown for information only. It has no action.
+        for v in inventory.volumes where DockerAction.isVolumeName(v.name) {
+            let label = v.isAnonymous ? "Anonymous volume · \(v.name.prefix(12))…" : "Volume · \(v.name)"
+            if v.isRemovable {
+                out.append(Finding(id: "docker.volume:\(v.name)", ecosystem: .docker, title: "Unused \(label.prefix(1).lowercased() + label.dropFirst())",
+                                   location: "\(place) · no container uses it", bytes: v.bytes, tier: .review,
+                                   rebuild: .never, action: .docker(.removeVolume(name: v.name))))
+            } else {
+                let why = v.links > 0 ? "used by \(v.links) container\(v.links == 1 ? "" : "s")"
+                    : (v.driver != "local" ? "driver \(v.driver), may not be on this Mac" : "Docker did not say if it is used")
+                out.append(Finding(id: "docker.volume.info:\(v.name)", ecosystem: .docker, title: label,
+                                   location: "\(place) · \(why)", bytes: v.bytes, tier: .review,
+                                   rebuild: .never, action: .inform))
             }
         }
         return out

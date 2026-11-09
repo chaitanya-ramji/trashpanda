@@ -47,9 +47,9 @@ Trash Panda looks in two places:
 | Elixir, Erlang | Hex packages, rebar3 | `_build`, `deps`, `.elixir_ls` |
 | Zig | Global cache | `.zig-cache`, `zig-out` |
 | Homebrew | Downloads and old versions | None |
-| Docker | Build cache, untagged images, stopped containers and old unused images (review) | None |
+| Docker | Build cache, untagged images (safe). Stopped containers, old unused images, and unused volumes (review). | None |
 
-Trash Panda does **not** touch your Docker volumes, documents, or app data. It removes a Docker image only when no container uses it, running or stopped. An old named image is a review item.
+Trash Panda does **not** touch your documents or app data. It removes a Docker image only when no container uses it, running or stopped. An old named image is a review item.
 
 ## Safe and Review
 
@@ -75,6 +75,7 @@ Trash Panda deletes files for good. They do not go to the Trash. These rules red
 - The app counts only space that a delete frees. A file with more than one hard link frees no space.
 - For Homebrew, the app asks `brew` what it would remove. Homebrew keeps its own index files, and the app does not count them.
 - The app asks the owning tool to clean its own data when it can. It runs fixed commands only.
+- Docker volumes can hold databases. The app removes a volume only when no container uses it and it is a local volume. Each volume needs its own confirmation, and the default button keeps it. A volume in use is shown but cannot be removed.
 - The app never prunes all Docker images. It removes a named image only by its exact name, never forced.
 - Docker runs on a local engine only (OrbStack, Docker Desktop, Colima, or Rancher Desktop). The app refuses remote engines and unknown sockets. It ignores `DOCKER_HOST` and `DOCKER_CONTEXT`.
 
@@ -200,7 +201,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Docker: remove dangling images ([#7](https://github.com/chaitanya-ramji/trashpanda/issues/7))
 - [x] Docker: remove stopped containers ([#8](https://github.com/chaitanya-ramji/trashpanda/issues/8))
 - [x] Docker: remove unused images older than N days ([#9](https://github.com/chaitanya-ramji/trashpanda/issues/9))
-- [ ] Docker: show volumes and remove dangling ones ([#10](https://github.com/chaitanya-ramji/trashpanda/issues/10))
+- [x] Docker: show volumes and remove dangling ones ([#10](https://github.com/chaitanya-ramji/trashpanda/issues/10))
 - [x] Docker: test with a fake docker tool ([#11](https://github.com/chaitanya-ramji/trashpanda/issues/11))
 - [ ] Docker: explain a VM disk that does not shrink ([#12](https://github.com/chaitanya-ramji/trashpanda/issues/12))
 

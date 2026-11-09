@@ -11,12 +11,16 @@ final class FindingBox: NSObject {
     let footer: String?
     /// Text of the confirm button. When nil, it says "Free up <size>".
     let confirmTitle: String?
-    init(_ findings: [Finding], title: String, body: String, footer: String? = nil, confirmTitle: String? = nil) {
+    /// When true, the first (default) button keeps the item. The Return key then cannot delete it.
+    let cancelIsDefault: Bool
+    init(_ findings: [Finding], title: String, body: String, footer: String? = nil, confirmTitle: String? = nil,
+         cancelIsDefault: Bool = false) {
         self.findings = findings
         self.title = title
         self.body = body
         self.footer = footer
         self.confirmTitle = confirmTitle
+        self.cancelIsDefault = cancelIsDefault
     }
 }
 
@@ -36,6 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var spinnerStep = 0
     private let panda = PandaArt.menuBarIcon()
     /// `--demo light` or `--demo dark` shows made-up data and opens the menu. It never scans or deletes.
+    private let demoDialog: String? = {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--dialog"), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }()
     private let demoStyle: String? = {
         let args = CommandLine.arguments
         guard let i = args.firstIndex(of: "--demo") else { return nil }
@@ -59,7 +68,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             refreshStatusItem()
             rebuildMenu()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                self?.statusItem.button?.performClick(nil)
+                guard let self else { return }
+                // `--dialog volume|container|safe` shows that dialog. It deletes nothing, even if you confirm.
+                if let kind = self.demoDialog, let item = DemoData.dialogFinding(kind) {
+                    NSApp.activate(ignoringOtherApps: true)
+                    _ = self.makeAlert(for: self.dialog(for: item)).alert.runModal()
+                    NSApp.terminate(nil)
+                } else {
+                    self.statusItem.button?.performClick(nil)
+                }
             }
             return
         }
@@ -177,13 +194,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func addEcosystems(_ findings: [Finding]) {
         let grouped = Dictionary(grouping: findings, by: \.ecosystem)
-        let ordered = grouped.sorted { a, b in
-            a.value.reduce(0) { $0 + $1.bytes } > b.value.reduce(0) { $0 + $1.bytes }
-        }
+        // Information lines (for example a volume that is in use) are not part of any total.
+        func total(_ items: [Finding]) -> Int64 { items.filter(\.isActionable).reduce(0) { $0 + $1.bytes } }
+        let ordered = grouped.sorted { total($0.value) > total($1.value) }
         for (ecosystem, items) in ordered {
-            let total = items.reduce(Int64(0)) { $0 + $1.bytes }
+            let amount = total(items)
             let parent = NSMenuItem()
-            parent.attributedTitle = line(ecosystem.name, Format.bytes(total))
+            parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : "info")
             parent.submenu = submenu(for: ecosystem, items: items)
             menu.addItem(parent)
         }
@@ -195,8 +212,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sub.addItem(disabled(engine.replacingOccurrences(of: "Docker engine: ", with: "Engine: ") + " (local)"))
             sub.addItem(.separator())
         }
-        let safe = items.filter { $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
-        let review = items.filter { $0.tier == .review }.sorted { $0.bytes > $1.bytes }
+        let safe = items.filter { $0.isActionable && $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
+        let review = items.filter { $0.isActionable && $0.tier == .review }.sorted { $0.bytes > $1.bytes }
+        let info = items.filter { !$0.isActionable }.sorted { $0.bytes > $1.bytes }
 
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.bytes }
@@ -217,6 +235,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for f in review.prefix(12) { sub.addItem(findingItem(f)) }
             if review.count > 12 { sub.addItem(disabled("+ \(review.count - 12) more")) }
         }
+        if !info.isEmpty {
+            if !safe.isEmpty || !review.isEmpty { sub.addItem(.separator()) }
+            sub.addItem(disabled("In use. Cannot be removed."))
+            for f in info.prefix(12) {
+                let item = NSMenuItem(title: f.title, action: nil, keyEquivalent: "")
+                item.attributedTitle = line(f.title, Format.bytes(f.bytes))
+                item.isEnabled = false
+                item.toolTip = f.location
+                sub.addItem(item)
+            }
+            if info.count > 12 { sub.addItem(disabled("+ \(info.count - 12) more")) }
+        }
         return sub
     }
 
@@ -224,14 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: f.title, action: #selector(confirmAndClean(_:)), keyEquivalent: "")
         item.attributedTitle = line(f.title, Format.bytes(f.bytes))
         item.target = self
-        // Something that cannot be rebuilt gets its own words. "Your tools will rebuild it" would be wrong.
-        let cannotRebuild = f.rebuild == .recreate
-        item.representedObject = FindingBox(
-            [f],
-            title: cannotRebuild ? "Remove this container?" : "Free up \(Format.bytes(f.bytes))?",
-            body: singleBody(f),
-            footer: cannotRebuild ? "A container can hold data that is stored nowhere else. This can't be undone." : nil,
-            confirmTitle: cannotRebuild ? "Remove" : nil)
+        item.representedObject = dialog(for: f)
         var tip = "\(f.location)\n\(f.rebuild.label)"
         if isProject(f), let days = daysSinceActivity(f) {
             tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")"
@@ -240,9 +263,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
+    /// The words of the dialog for one item. Something that cannot be rebuilt gets its own words.
+    /// "Your tools will rebuild it" would be wrong for a container or a volume.
+    private func dialog(for f: Finding) -> FindingBox {
+        switch f.rebuild {
+        case .never:
+            return FindingBox(
+                [f], title: "Delete this volume?", body: singleBody(f),
+                footer: "Databases and files inside a volume are lost for good. If it holds a database, export it first. This can't be undone.",
+                confirmTitle: "Delete volume", cancelIsDefault: true)
+        case .recreate:
+            return FindingBox(
+                [f], title: "Remove this container?", body: singleBody(f),
+                footer: "A container can hold data that is stored nowhere else. This can't be undone.",
+                confirmTitle: "Remove")
+        default:
+            return FindingBox([f], title: "Free up \(Format.bytes(f.bytes))?", body: singleBody(f))
+        }
+    }
+
     private func singleBody(_ f: Finding) -> String {
-        var text = f.rebuild == .recreate
-            ? "\(f.title)\n\(f.location)\n\(f.rebuild.label)."
+        // A volume's warning is in the footer. We do not say the same thing twice.
+        var text = f.rebuild == .never ? "\(f.title)\n\(f.location)"
+            : f.rebuild == .recreate ? "\(f.title)\n\(f.location)\n\(f.rebuild.label)."
             : "\(f.title)\n\(f.rebuild.label)."
         if isProject(f), f.tier == .review, let days = daysSinceActivity(f), days < scanner.config.staleDays {
             text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")."
@@ -314,21 +357,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// One short dialog. It says what happens and that it cannot be undone. Nothing more.
-    @objc private func confirmAndClean(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? FindingBox, !cleaning, demoStyle == nil else { return }
+    /// `confirmed` is the button response that means "yes, delete". It is not always the first button.
+    private func makeAlert(for box: FindingBox) -> (alert: NSAlert, confirmed: NSApplication.ModalResponse) {
         let total = box.findings.reduce(Int64(0)) { $0 + $1.bytes }
-
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = box.title
         let footer = box.footer
             ?? "Your code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
         alert.informativeText = box.body + "\n\n" + footer
-        let confirm = alert.addButton(withTitle: box.confirmTitle ?? "Free up \(Format.bytes(total))")
-        confirm.hasDestructiveAction = true
+        let confirmTitle = box.confirmTitle ?? "Free up \(Format.bytes(total))"
+        if box.cancelIsDefault {
+            // "Keep it" is first, so it is the default button. The Return key keeps the item.
+            alert.addButton(withTitle: "Keep it")
+            alert.addButton(withTitle: confirmTitle).hasDestructiveAction = true
+            return (alert, .alertSecondButtonReturn)
+        }
+        alert.addButton(withTitle: confirmTitle).hasDestructiveAction = true
         alert.addButton(withTitle: "Not now")
+        return (alert, .alertFirstButtonReturn)
+    }
+
+    @objc private func confirmAndClean(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? FindingBox, !cleaning, demoStyle == nil else { return }
+        let total = box.findings.reduce(Int64(0)) { $0 + $1.bytes }
+        let (alert, confirmed) = makeAlert(for: box)
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else {
+        guard alert.runModal() == confirmed else {
             Log.info("user: cancelled clean of \(box.findings.count) items")
             return
         }

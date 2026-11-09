@@ -36,6 +36,12 @@ swift run trashpanda --demo light
 swift run trashpanda --demo dark
 ```
 
+To see one confirmation dialog, add `--dialog volume`, `--dialog container`, or `--dialog safe`. Use it to check the wording. It deletes nothing.
+
+```sh
+swift run trashpanda --demo light --dialog volume
+```
+
 ## How the code is organized
 
 | Folder | Content |

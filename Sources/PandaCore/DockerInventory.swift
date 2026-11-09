@@ -35,8 +35,24 @@ public struct DockerInventory: Sendable {
         public var isStopped: Bool { ["exited", "created", "dead"].contains(state) }
     }
 
+    public struct Volume: Sendable, Equatable {
+        public let name: String
+        public let bytes: Int64
+        /// How many containers use the volume. -1 means that Docker did not say. We treat that as "in use".
+        public let links: Int
+        public let driver: String
+
+        /// Docker names an anonymous volume with 64 hex characters.
+        public var isAnonymous: Bool { name.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil }
+
+        /// A volume that we may offer to remove: on this Mac (the local driver) and used by no container.
+        /// A volume of another driver can live on a network share or another machine.
+        public var isRemovable: Bool { driver == "local" && links == 0 }
+    }
+
     public let images: [Image]
     public let containers: [Container]
+    public let volumes: [Volume]
 
     public static func parse(_ text: String) -> DockerInventory? {
         guard let data = text.data(using: .utf8),
@@ -55,7 +71,12 @@ public struct DockerInventory: Sendable {
                              state: string(item["State"]), status: string(item["Status"]),
                              writableBytes: bytes(item["Size"]))
         }
-        return DockerInventory(images: images, containers: containers)
+        let volumes = (root["Volumes"] as? [[String: Any]] ?? []).map { item in
+            Volume(name: string(item["Name"]), bytes: bytes(item["Size"]),
+                   links: Int(string(item["Links"])) ?? (item["Links"] as? Int) ?? -1,
+                   driver: string(item["Driver"]))
+        }
+        return DockerInventory(images: images, containers: containers, volumes: volumes)
     }
 
     /// Containers that are stopped. A running container never appears here.

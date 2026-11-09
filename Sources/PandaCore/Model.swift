@@ -17,6 +17,8 @@ public enum Rebuild: Sendable {
     case download
     /// The item cannot be rebuilt. The user must make it again, for example a container.
     case recreate
+    /// The data is gone for good. Used for Docker volumes, which can hold databases.
+    case never
 
     public var label: String {
         switch self {
@@ -24,6 +26,7 @@ public enum Rebuild: Sendable {
         case .minutes: return "Rebuilds in a few minutes"
         case .download: return "Downloads again when needed"
         case .recreate: return "You would need to recreate it"
+        case .never: return "Cannot be recovered"
         }
     }
 }
@@ -99,6 +102,8 @@ public enum DockerAction: Sendable, Equatable {
     case removeContainer(id: String)
     /// Removes an image by all of its `repository:tag` names. Never forced.
     case removeImage(refs: [String])
+    /// Removes one volume that no container uses. Never forced. The data is lost for good.
+    case removeVolume(name: String)
 
     /// The arguments, or nil when the identifier is not valid. A name can hold any text.
     /// We use the hex identifier, and we accept nothing else.
@@ -108,6 +113,7 @@ public enum DockerAction: Sendable, Equatable {
         case .removeImage(let refs):
             guard !refs.isEmpty, refs.count <= 20, refs.allSatisfy(Self.isImageRef) else { return nil }
             return ["image", "rm"] + refs
+        case .removeVolume(let name): return Self.isVolumeName(name) ? ["volume", "rm", name] : nil
         }
     }
 
@@ -117,6 +123,11 @@ public enum DockerAction: Sendable, Equatable {
     static func isImageRef(_ ref: String) -> Bool {
         ref.range(of: "^[a-z0-9]([a-z0-9._/:-]*[a-z0-9])?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
                   options: .regularExpression) != nil
+    }
+
+    /// Docker volume names start with a letter or a digit. This also keeps a name from looking like a flag.
+    static func isVolumeName(_ name: String) -> Bool {
+        name.count <= 255 && name.range(of: "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$", options: .regularExpression) != nil
     }
 
     static func isImageID(_ id: String) -> Bool {
@@ -129,6 +140,8 @@ public enum DockerAction: Sendable, Equatable {
 }
 
 public enum Action: Sendable {
+    /// Information only. Nothing can be deleted. The menu shows it as a line that cannot be chosen.
+    case inform
     /// One Docker object. The cleaner checks the engine and the object again before it runs.
     case docker(DockerAction)
     /// Delete everything inside a directory. Keep the directory.
@@ -149,6 +162,12 @@ public struct Finding: Identifiable, Sendable {
     public let rebuild: Rebuild
     public let action: Action
     public let lastActivity: Date?
+
+    /// False for an information line. It has no action, so it is not part of any total.
+    public var isActionable: Bool {
+        if case .inform = action { return false }
+        return true
+    }
 
     public init(id: String, ecosystem: Ecosystem, title: String, location: String, bytes: Int64,
                 tier: Tier, rebuild: Rebuild, action: Action, lastActivity: Date? = nil) {
@@ -194,8 +213,8 @@ public struct ScanResult: Sendable {
     public let disk: DiskUsage
     public let date: Date
 
-    public var reclaimable: Int64 { findings.filter { $0.tier == .safe }.reduce(0) { $0 + $1.bytes } }
-    public var reviewable: Int64 { findings.filter { $0.tier == .review }.reduce(0) { $0 + $1.bytes } }
+    public var reclaimable: Int64 { findings.filter { $0.isActionable && $0.tier == .safe }.reduce(0) { $0 + $1.bytes } }
+    public var reviewable: Int64 { findings.filter { $0.isActionable && $0.tier == .review }.reduce(0) { $0 + $1.bytes } }
 
     public init(findings: [Finding], disk: DiskUsage, date: Date = Date()) {
         self.findings = findings

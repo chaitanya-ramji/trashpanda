@@ -8,7 +8,7 @@ if CommandLine.arguments.contains("--scan") {
     print("\(Format.bytes(result.disk.free)) free of \(Format.bytes(result.disk.total))")
     print("Reclaim now: \(Format.bytes(result.reclaimable)) · To review: \(Format.bytes(result.reviewable))\n")
     for f in result.findings {
-        let tier = f.tier == .safe ? "safe  " : "review"
+        let tier = !f.isActionable ? "info  " : (f.tier == .safe ? "safe  " : "review")
         print("\(tier)  \(Format.bytes(f.bytes).padding(toLength: 9, withPad: " ", startingAt: 0))"
               + "\(f.ecosystem.name.padding(toLength: 24, withPad: " ", startingAt: 0))\(f.title)  [\(f.location)]")
     }

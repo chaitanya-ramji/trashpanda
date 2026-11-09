@@ -455,3 +455,162 @@ final class DockerOldImageTests: DockerTestCase {
         XCTAssertTrue(inventory.danglingImages.isEmpty, "Unknown count: the dangling image is left alone")
     }
 }
+
+// MARK: - Docker: volumes (#10)
+
+final class DockerVolumeTests: DockerTestCase {
+    private func setup(_ box: Sandbox, after: String? = nil) throws -> (FakeDocker, DiskScanner) {
+        let fake = try FakeDocker(box: box, contextFixture: "context-local", inventoryFixture: "inventory-full",
+                                  summaryFixture: "summary-full", tagTimesFixture: "tagtimes-full")
+        if let after {
+            try after.write(toFile: (fake.path as NSString).deletingLastPathComponent + "/inventory-after.json",
+                            atomically: true, encoding: .utf8)
+        }
+        return (fake, DiskScanner(home: box.home, config: Config(), useOwnerTools: false, dockerPath: fake.path,
+                                  isSocket: { _ in true }))
+    }
+
+    private func cleaner(_ s: DiskScanner) -> Cleaner {
+        Cleaner(guardian: s.guardian, remaining: s.remainingBytes(of:), dockerEngine: { s.dockerEngine() })
+    }
+
+    private func volumeFindings(_ s: DiskScanner) -> [Finding] { s.scanDocker().filter { $0.id.hasPrefix("docker.volume") } }
+
+    private func fullInventory(editing change: (inout [[String: Any]]) -> Void) throws -> String {
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try FakeDocker.fixture("inventory-full").utf8)) as? [String: Any])
+        var volumes = root["Volumes"] as? [[String: Any]] ?? []
+        change(&volumes)
+        root["Volumes"] = volumes
+        return String(decoding: try JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+    }
+
+    func testOnlyUnusedLocalVolumesCanBeRemoved() throws {
+        let box = try Sandbox()
+        let found = volumeFindings(try setup(box).1)
+        let removable = found.filter(\.isActionable)
+
+        XCTAssertEqual(Set(removable.map(\.id)),
+                       ["docker.volume:scratch_data",
+                        "docker.volume:fe11eb3b691c945aebe4b3e02a00dbbf130f4f8326526edcbb76d3644b64dcb3"])
+        XCTAssertEqual(Set(removable.map(\.title)),
+                       ["Unused volume · scratch_data", "Unused anonymous volume · fe11eb3b691c…"])
+        XCTAssertTrue(removable.allSatisfy { $0.tier == .review && $0.rebuild == .never })
+        XCTAssertEqual(removable.first { $0.title.contains("scratch") }?.bytes, 40_000_000)
+    }
+
+    func testEveryOtherVolumeIsShownForInformationOnly() throws {
+        let box = try Sandbox()
+        let info = volumeFindings(try setup(box).1).filter { !$0.isActionable }
+
+        XCTAssertEqual(Set(info.map(\.title)),
+                       ["Volume · app_pgdata", "Volume · old_pgdata", "Volume · remote_data", "Volume · mystery_vol"])
+        XCTAssertTrue(info.allSatisfy { if case .inform = $0.action { return true } else { return false } })
+        func why(_ name: String) -> String { info.first { $0.title.hasSuffix(name) }?.location ?? "" }
+        XCTAssertTrue(why("app_pgdata").contains("used by 1 container"))
+        XCTAssertTrue(why("remote_data").contains("driver rclone"), "A non-local volume is never removable")
+        XCTAssertTrue(why("mystery_vol").contains("did not say"), "Unknown use counts as in use")
+    }
+
+    func testInformationLinesAreNotInAnyTotal() throws {
+        let box = try Sandbox()
+        let found = try setup(box).1.scanDocker()
+        let result = ScanResult(findings: found, disk: DiskUsage(total: 1_000_000_000_000, free: 500_000_000_000))
+        let infoBytes = found.filter { !$0.isActionable }.reduce(Int64(0)) { $0 + $1.bytes }
+
+        XCTAssertGreaterThan(infoBytes, 800_000_000)
+        XCTAssertEqual(result.reclaimable + result.reviewable,
+                       found.filter(\.isActionable).reduce(Int64(0)) { $0 + $1.bytes })
+        XCTAssertEqual(result.reviewable, found.filter { $0.isActionable && $0.tier == .review }.reduce(0) { $0 + $1.bytes })
+    }
+
+    func testDeletingOneVolumeRunsOneExactCommandAndMeasuresIt() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box, after: try fullInventory { $0.removeAll { $0["Name"] as? String == "scratch_data" } })
+        let target = try XCTUnwrap(volumeFindings(scanner).first { $0.title.hasSuffix("scratch_data") })
+
+        let report = cleaner(scanner).clean([target])
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(report.freed, 40_000_000)
+        XCTAssertEqual(fake.calls.filter { $0.contains("volume") },
+                       ["--host unix://\(box.home.path)/.orbstack/run/docker.sock volume rm scratch_data"])
+        XCTAssertFalse(fake.calls.contains { $0.contains("prune") || $0.contains(" -f") || $0.contains("--all") },
+                       "Never prune and never force: \(fake.calls)")
+    }
+
+    func testAVolumeThatBecomesUsedAfterTheScanIsSkipped() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box)
+        let target = try XCTUnwrap(volumeFindings(scanner).first { $0.title.hasSuffix("scratch_data") })
+
+        // Between the scan and the clean, a container starts to use the volume.
+        try fake.setInventory(try fullInventory { volumes in
+            volumes = volumes.map { var v = $0; if v["Name"] as? String == "scratch_data" { v["Links"] = "1" }; return v }
+        })
+        let report = cleaner(scanner).clean([target])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertTrue(report.skipped.joined().contains("in use"))
+        XCTAssertFalse(fake.calls.contains { $0.contains("volume rm") })
+    }
+
+    func testNoForgedFindingCanRemoveAVolumeThatIsInUseOrNotLocalOrUnknown() throws {
+        for name in ["app_pgdata", "old_pgdata", "remote_data", "mystery_vol"] {
+            let box = try Sandbox()
+            let (fake, scanner) = try setup(box)
+            let forged = Finding(id: "x", ecosystem: .docker, title: name, location: "x", bytes: 1, tier: .review,
+                                 rebuild: .never, action: .docker(.removeVolume(name: name)))
+            let report = cleaner(scanner).clean([forged])
+            XCTAssertEqual(report.removed, 0, name)
+            XCTAssertFalse(fake.calls.contains { $0.contains("volume rm") }, "\(name): \(fake.calls)")
+        }
+    }
+
+    func testAnInformationLineCannotBeCleaned() throws {
+        let box = try Sandbox()
+        let (fake, scanner) = try setup(box)
+        let info = try XCTUnwrap(volumeFindings(scanner).first { !$0.isActionable })
+        let report = cleaner(scanner).clean([info])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertFalse(fake.calls.contains { $0.contains(" rm ") })
+    }
+
+    func testBadVolumeNamesGiveNoCommand() {
+        for bad in ["", "-f", "--all", "-v", "a b", "x;rm -rf /", "../x", ".hidden", "_x", "name\n--force",
+                    String(repeating: "a", count: 256)] {
+            XCTAssertNil(DockerAction.removeVolume(name: bad).arguments, "\"\(bad)\"")
+        }
+        XCTAssertEqual(DockerAction.removeVolume(name: "app_pgdata").arguments, ["volume", "rm", "app_pgdata"])
+        XCTAssertNotNil(DockerAction.removeVolume(name: "my-project.data_1").arguments)
+    }
+
+    func testRemoteEngineShowsNoVolumes() throws {
+        let box = try Sandbox()
+        let fake = try FakeDocker(box: box, contextFixture: "context-remote-tcp", inventoryFixture: "inventory-full")
+        let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false, dockerPath: fake.path,
+                                  isSocket: { _ in true })
+        XCTAssertTrue(scanner.scanDocker().isEmpty)
+    }
+
+    /// A guard for the future. These commands remove more than the list shows. No code may use them.
+    func testTheCodeNeverContainsABulkDeleteCommand() throws {
+        let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Sources")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
+        XCTAssertGreaterThan(files.count, 5, "The test must find the source files")
+
+        let forbidden: [(String, String)] = [
+            ("volume prune", #"volume["\s,]+prune"#),
+            ("system prune", #"system["\s,]+prune"#),
+            ("--volumes", #"--volumes"#),
+            ("image prune with -a or --all", #"image["\s,]+prune["\s,]+[^\n]*("-a"|"--all"|\s-a\b)"#),
+            ("container prune", #"container["\s,]+prune"#),
+        ]
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for (name, pattern) in forbidden where text.range(of: pattern, options: .regularExpression) != nil {
+                XCTFail("\(file.lastPathComponent) contains \"\(name)\". It removes more than the list shows.")
+            }
+        }
+    }
+}

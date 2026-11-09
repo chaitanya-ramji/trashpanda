@@ -53,6 +53,9 @@ public final class Cleaner {
 
             case .docker(let action):
                 runDocker(action, finding: finding, into: &report)
+
+            case .inform:
+                skip(finding, "this item is information only", &report)
             }
         }
 
@@ -99,6 +102,14 @@ public final class Cleaner {
             // A container may use the image now, or Docker may not say (-1). Then we leave it.
             guard entries.allSatisfy({ $0.containers == 0 }) else {
                 skip(finding, "a container uses this image", &report); return
+            }
+        case .removeVolume(let name):
+            guard let volume = current.volumes.first(where: { $0.name == name }) else {
+                skip(finding, "the volume is already gone", &report); return
+            }
+            // A container may use the volume now, or Docker may not say. Docker also refuses by itself.
+            guard volume.isRemovable else {
+                skip(finding, "the volume is in use, or it is not a local volume", &report); return
             }
         }
 

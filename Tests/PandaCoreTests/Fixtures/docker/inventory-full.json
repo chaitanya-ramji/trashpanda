@@ -279,6 +279,30 @@
       "Availability": "",
       "Group": "",
       "Status": ""
+    },
+    {
+      "Name": "remote_data",
+      "Size": "500MB",
+      "Links": "0",
+      "Driver": "rclone",
+      "Scope": "local",
+      "Mountpoint": "",
+      "Labels": "",
+      "Availability": "",
+      "Group": "",
+      "Status": ""
+    },
+    {
+      "Name": "mystery_vol",
+      "Size": "30MB",
+      "Links": "N/A",
+      "Driver": "local",
+      "Scope": "local",
+      "Mountpoint": "",
+      "Labels": "",
+      "Availability": "",
+      "Group": "",
+      "Status": ""
     }
   ],
   "BuildCache": [

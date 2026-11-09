@@ -4,6 +4,26 @@ import PandaCore
 /// Made-up scan results for screenshots (`trashpanda --demo light` or `--demo dark`).
 /// They contain no real project names. Demo mode never scans and never deletes.
 enum DemoData {
+    /// One made-up item for `--demo light --dialog volume|container|safe`. It is used to check the wording.
+    static func dialogFinding(_ kind: String) -> Finding? {
+        let place = "Docker engine: OrbStack"
+        switch kind {
+        case "volume":
+            return Finding(id: "v", ecosystem: .docker, title: "Unused volume · scratch_data",
+                           location: "\(place) · no container uses it", bytes: 40_000_000, tier: .review,
+                           rebuild: .never, action: .docker(.removeVolume(name: "scratch_data")))
+        case "container":
+            return Finding(id: "c", ecosystem: .docker, title: "Stopped container · old-db",
+                           location: "\(place) · image postgres:17 · Exited (0) 4 months ago", bytes: 217_000,
+                           tier: .review, rebuild: .recreate, action: .docker(.removeContainer(id: "0123456789ab")))
+        case "safe":
+            return Finding(id: "s", ecosystem: .javascript, title: "node_modules · storefront",
+                           location: "~/Projects/storefront/node_modules", bytes: 1_300_000_000, tier: .safe,
+                           rebuild: .minutes, action: .removeArtifact(URL(fileURLWithPath: "/tmp/none")))
+        default: return nil
+        }
+    }
+
     static func result() -> ScanResult {
         let ago = { (days: Double) in Date().addingTimeInterval(-days * 86_400) }
         func item(_ id: String, _ eco: Ecosystem, _ title: String, _ bytes: Int64, _ tier: Tier,
