@@ -65,19 +65,8 @@ public struct Confirmation: Equatable, Sendable {
                 let days = max(0, Int(now.timeIntervalSince(d) / 86_400))
                 if days < staleDays { text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")." }
             }
-            return Confirmation(title: "Free up \(sizeText(f.bytes))?", body: text, footer: nil,
+            return Confirmation(title: "Free up \(ByteText.string(f.bytes))?", body: text, footer: nil,
                                 confirmTitle: nil, cancelIsDefault: false)
         }
-    }
-
-    /// The same words as the menu uses.
-    static func sizeText(_ bytes: Int64) -> String {
-        let v = Double(max(0, bytes))
-        if v >= 1e12 { return String(format: "%.1f TB", v / 1e12) }
-        if v >= 1e10 { return String(format: "%.0f GB", v / 1e9) }
-        if v >= 1e9 { return String(format: "%.1f GB", v / 1e9) }
-        if v >= 1e6 { return String(format: "%.0f MB", v / 1e6) }
-        if v >= 1e3 { return String(format: "%.0f KB", v / 1e3) }
-        return "0 KB"
     }
 }

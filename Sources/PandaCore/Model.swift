@@ -35,6 +35,27 @@ public enum Rebuild: Sendable {
 public enum Ecosystem: String, CaseIterable, Sendable {
     case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker
 
+    /// A short name for places with little room, such as the legend of the bar.
+    public var shortName: String {
+        switch self {
+        case .swift: return "Xcode"
+        case .javascript: return "JavaScript"
+        case .python: return "Python"
+        case .jvm: return "Java"
+        case .dotnet: return ".NET"
+        case .cpp: return "C/C++"
+        case .go: return "Go"
+        case .rust: return "Rust"
+        case .php: return "PHP"
+        case .ruby: return "Ruby"
+        case .dart: return "Dart"
+        case .elixir: return "Elixir"
+        case .zig: return "Zig"
+        case .homebrew: return "Homebrew"
+        case .docker: return "Docker"
+        }
+    }
+
     public var name: String {
         switch self {
         case .swift: return "Xcode & Swift"

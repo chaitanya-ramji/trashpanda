@@ -39,6 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var spinnerTimer: Timer?
     private var spinnerStep = 0
     private let panda = PandaArt.menuBarIcon()
+    /// Demo mode with `--backdrop` puts a plain window behind the menu, so that a screenshot does not show other windows.
+    private var backdrop: NSWindow?
     /// What runs now. The menu reads it each time it is built, so that "quit Xcode" is always up to date.
     private var running = RunningSnapshot(apps: [])
     private lazy var runningApps: RunningApps = {
@@ -58,6 +60,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let i = args.firstIndex(of: "--submenu"), i + 1 < args.count else { return nil }
         return args[i + 1].lowercased()
     }()
+    private func showBackdrop(dark: Bool) {
+        guard let frame = statusItem.button?.window?.frame, let screen = NSScreen.main else { return }
+        let area = NSRect(x: frame.minX - 60, y: screen.frame.maxY - 24 - 520, width: 460, height: 520)
+        let window = NSWindow(contentRect: area, styleMask: .borderless, backing: .buffered, defer: false)
+        window.backgroundColor = dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.91, alpha: 1)
+        window.level = .floating
+        window.ignoresMouseEvents = true
+        window.hasShadow = false
+        window.orderFrontRegardless()
+        backdrop = window
+    }
+
+    /// `--hover N` and `--click N` act on the Nth part of the split bar in demo mode.
+    private func demoNumber(_ flag: String) -> Int? {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+        return Int(args[i + 1])
+    }
     private let demoStyle: String? = {
         let args = CommandLine.arguments
         guard let i = args.firstIndex(of: "--demo") else { return nil }
@@ -76,12 +96,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         if let style = demoStyle {
             menu.appearance = NSAppearance(named: style == "dark" ? .darkAqua : .aqua)
+
             result = DemoData.result()
             disk = result!.disk
             refreshStatusItem()
             rebuildMenu()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
                 guard let self else { return }
+                // The status item has its place by now, so the backdrop can go right under it.
+                if CommandLine.arguments.contains("--backdrop") { self.showBackdrop(dark: style == "dark") }
                 // `--dialog volume|container|safe` shows that dialog. It deletes nothing, even if you confirm.
                 if let kind = self.demoDialog, let item = DemoData.dialogFinding(kind) {
                     NSApp.activate(ignoringOtherApps: true)
@@ -93,7 +116,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     sub.appearance = self.menu.appearance
                     sub.popUp(positioning: nil, at: NSPoint(x: 700, y: 800), in: nil)
                 } else {
-                    self.statusItem.button?.performClick(nil)
+                    // While a menu is open, the run loop is in tracking mode. Plain dispatch blocks do not run then,
+                    // so these timers use the common modes. Opening the menu resets the header, so they wait for it.
+                    func later(_ seconds: Double, _ work: @escaping () -> Void) {
+                        let t = Timer(timeInterval: seconds, repeats: false) { _ in work() }
+                        RunLoop.main.add(t, forMode: .common)
+                    }
+                    if let n = self.demoNumber("--hover") { later(1.2) { self.header.simulateHover(n) } }
+                    if let n = self.demoNumber("--click") { later(1.6) { self.header.simulateClick(n) } }
+                    // A short wait, so that the backdrop is on screen before the menu opens over it.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.statusItem.button?.performClick(nil) }
                 }
             }
             return
@@ -167,16 +199,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         running = runningApps.take()
 
-        let headerItem = NSMenuItem()
-        headerItem.view = header
-        menu.addItem(headerItem)
         // The numbers count only what can be cleaned now. An item of a running app is not in them.
         let usable = (result?.findings ?? []).filter { $0.isActionable && blockers($0).isEmpty }
         let usableSafe = usable.filter { $0.tier == .safe }
         let usableReview = usable.filter { $0.tier == .review }
         let safeBytes = usableSafe.reduce(Int64(0)) { $0 + $1.bytes }
+        // The split bar shows the same data: what can be cleaned now, by group.
+        let segments = cleaning ? [] : SplitBar.segments(from: result?.findings ?? [], isBlocked: { !blockers($0).isEmpty })
         header.update(disk: disk, reclaimable: safeBytes, reviewable: usableReview.reduce(Int64(0)) { $0 + $1.bytes },
-                      activity: activity)
+                      activity: activity, segments: segments)
+        header.onSelect = { [weak self] segment in self?.showGroup(segment) }
+        let headerItem = NSMenuItem()
+        headerItem.view = header
+        menu.addItem(headerItem)
         menu.addItem(.separator())
 
         if cleaning {
@@ -228,13 +263,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             items.filter { $0.isActionable && blockers($0).isEmpty }.reduce(0) { $0 + $1.bytes }
         }
         let ordered = grouped.sorted { total($0.value) > total($1.value) }
-        for (ecosystem, items) in ordered {
-            let amount = total(items)
-            let parent = NSMenuItem()
-            let waiting = items.contains { $0.isActionable && !blockers($0).isEmpty }
-            parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : (waiting ? "app open" : "info"))
-            parent.submenu = submenu(for: ecosystem, items: items)
-            menu.addItem(parent)
+        for (ecosystem, items) in ordered { menu.addItem(ecosystemItem(ecosystem, items)) }
+    }
+
+    /// One row for a group, with its items as a submenu.
+    private func ecosystemItem(_ ecosystem: Ecosystem, _ items: [Finding]) -> NSMenuItem {
+        let amount = items.filter { $0.isActionable && blockers($0).isEmpty }.reduce(Int64(0)) { $0 + $1.bytes }
+        let waiting = items.contains { $0.isActionable && !blockers($0).isEmpty }
+        let parent = NSMenuItem()
+        parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : (waiting ? "app open" : "info"))
+        parent.submenu = submenu(for: ecosystem, items: items)
+        return parent
+    }
+
+    /// The user clicked a part of the split bar. The menu closes, and the items of that group open under the icon.
+    private func showGroup(_ segment: SplitSegment) {
+        guard let result else { return }
+        let popup = NSMenu()
+        popup.appearance = menu.appearance
+        if let only = segment.ecosystems.first, !segment.isOther {
+            popup.items = submenu(for: only, items: result.findings.filter { $0.ecosystem == only }).items
+        } else {
+            // "Other" is several groups. Each one is a row, so the user can open it.
+            for eco in segment.ecosystems {
+                popup.addItem(ecosystemItem(eco, result.findings.filter { $0.ecosystem == eco }))
+            }
+        }
+        Log.info("user: opened \(segment.name) from the split bar")
+        menu.cancelTracking()
+        DispatchQueue.main.async { [weak self] in
+            guard let button = self?.statusItem.button else { return }
+            popup.popUp(positioning: nil, at: NSPoint(x: 0, y: button.isFlipped ? button.bounds.height + 4 : -4), in: button)
         }
     }
 

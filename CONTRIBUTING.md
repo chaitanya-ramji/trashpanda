@@ -36,6 +36,13 @@ swift run trashpanda --demo light
 swift run trashpanda --demo dark
 ```
 
+Other demo options, for screenshots:
+
+- `--hover N` shows the mouse over the Nth part of the split bar. `--click N` clicks it.
+- `--submenu docker` opens the submenu of one group.
+- `--backdrop` puts a plain window behind the menu, so that other windows do not show through it.
+- Move the real mouse away before you capture, because a real mouse move changes the hover.
+
 To see one confirmation dialog, add `--dialog volume`, `--dialog container`, or `--dialog safe`. Use it to check the wording. It deletes nothing.
 
 ```sh

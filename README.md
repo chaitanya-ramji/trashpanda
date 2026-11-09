@@ -11,7 +11,7 @@ The app has no window. It has only a menu.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/menu-dark.png">
-    <img src="assets/menu-light.png" width="340" alt="The Trash Panda menu. It shows 61 GB free of 245 GB, a bar, a button to free up 13 GB, and one line for each language.">
+    <img src="assets/menu-light.png" width="340" alt="The Trash Panda menu. It shows 61 GB free of 245 GB, a bar for the disk, a second bar that splits the data you can clean by language, a button to free up 9.3 GB, and one line for each language.">
   </picture>
 </p>
 
@@ -21,8 +21,15 @@ Click the panda in the menu bar. The menu shows:
 
 - The free space and the total space of your disk.
 - A bar that splits the disk into used, review, reclaimable, and free space.
+- A second bar that shows where the data that you can clean is. Its whole width is that data. It is split by language or tool, and a short legend names the largest three.
 - The space that you can reclaim now.
 - One line for each language or tool. Open a line to see each item.
+
+**Hover** a part of the second bar to see its name, its size, its share, and how much of it is safe. **Click** a part to open the items of that language or tool. An item of an app that is open, and a line that is for information only, are not in the bar.
+
+<p align="center">
+  <img src="assets/menu-hover.png" width="340" alt="The same menu with the mouse over the JavaScript part of the second bar. The line under the title reads JavaScript and TypeScript, 3.7 GB, 15 percent, 2.2 GB safe.">
+</p>
 
 ## What it cleans
 
@@ -228,7 +235,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Show the Trash size and offer to empty it ([#23](https://github.com/chaitanya-ramji/trashpanda/issues/23))
 - [ ] Old installers in Downloads (DMG, PKG, ZIP) ([#24](https://github.com/chaitanya-ramji/trashpanda/issues/24))
 - [ ] Docker: say when freed space is not back on the Mac yet ([#40](https://github.com/chaitanya-ramji/trashpanda/issues/40))
-- [ ] Menu: show the full split of reclaimable data as an interactive bar ([#42](https://github.com/chaitanya-ramji/trashpanda/issues/42))
+- [x] Menu: show the full split of reclaimable data as an interactive bar ([#42](https://github.com/chaitanya-ramji/trashpanda/issues/42))
 
 ### Later: v0.6 Old tools
 - [ ] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
