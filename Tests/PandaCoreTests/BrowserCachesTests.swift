@@ -258,6 +258,9 @@ final class BrowserCachesTests: XCTestCase {
         let b = BrowserCaches.browsers
         XCTAssertEqual(Set(b.map(\.bundleID)).count, b.count)
         XCTAssertEqual(Set(b.map(\.id)).count, b.count)
-        XCTAssertTrue(b.allSatisfy { $0.roots.count == 2 && $0.roots[0].hasPrefix("Library/Application Support/") && $0.roots[1].hasPrefix("Library/Caches/") })
+        XCTAssertTrue(b.filter { $0.kind == .chromium }.allSatisfy {
+            $0.roots.count == 2 && $0.roots[0].hasPrefix("Library/Application Support/") && $0.roots[1].hasPrefix("Library/Caches/") })
+        XCTAssertEqual(b.filter { $0.kind == .firefox }.map(\.roots), [["Library/Caches/Firefox/Profiles"]],
+                       "Firefox is cleaned only in Library/Caches. Its profile folder holds user data.")
     }
 }
