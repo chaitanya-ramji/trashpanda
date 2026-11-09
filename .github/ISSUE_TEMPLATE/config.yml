@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/chaitanya-ramji/trashpanda/security/advisories/new
+    about: Use this for any case where the app removes something that it must not remove. Do not use a public issue.
