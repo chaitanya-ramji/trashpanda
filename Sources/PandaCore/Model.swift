@@ -197,6 +197,8 @@ public enum Action: Sendable {
     case simulator(SimulatorAction)
     /// One Xcode archive. It must be `Archives/<date>/<name>.xcarchive` in the home folder.
     case removeArchive(URL)
+    /// The old versions of the browsers that one test tool downloaded. The newest of each kind stays.
+    case removeOldTestBrowsers(toolID: String)
     /// The Service Worker storage of one browser. Offline web apps keep their files there. Review only.
     case removeServiceWorkerStorage(browserID: String)
     /// The caches of one browser. The cleaner finds the folders again from the browser id, by a fixed list of names.

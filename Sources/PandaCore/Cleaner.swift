@@ -14,12 +14,16 @@ public final class Cleaner {
     private let runningApps: RunningApps
     /// Finds `simctl` at clean time. Tests give a fake one.
     private let simctl: () -> Simctl?
+    /// The programs that run now, with their full paths. A test browser that runs is not removed.
+    private let programPaths: () -> [String]
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
-                runningApps: RunningApps = .system, simctl: (() -> Simctl?)? = nil) {
+                runningApps: RunningApps = .system, simctl: (() -> Simctl?)? = nil,
+                programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths) {
         self.guardian = guardian
         self.runningApps = runningApps
+        self.programPaths = programPaths
         self.simctl = simctl ?? { Shell.resolve("xcrun").map { Simctl(xcrun: $0) } }
         self.remaining = remaining
         self.dockerEngine = dockerEngine ?? {
@@ -90,6 +94,9 @@ public final class Cleaner {
 
             case .removeServiceWorkerStorage(let id):
                 removeServiceWorkerStorage(id, finding: finding, into: &report)
+
+            case .removeOldTestBrowsers(let id):
+                removeOldTestBrowsers(id, finding: finding, into: &report)
 
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
@@ -223,6 +230,39 @@ public final class Cleaner {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
         }
+    }
+
+    /// The old versions of the test browsers of one tool. We find them again now. A version that a program runs from stays.
+    private func removeOldTestBrowsers(_ id: String, finding: Finding, into report: inout CleanReport) {
+        guard let tool = TestBrowsers.tool(id: id) else { skip(finding, "unknown tool", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        let programs = programPaths()
+        var removed = 0, failures = 0
+        for url in TestBrowsers.oldVersions(of: tool, home: home) {
+            guard TestBrowsers.isVersionFolder(url, of: tool, home: home), UpdateDownloads.isPlainPath(url) else {
+                report.skipped.append("\(url.path): not a version folder of the tool"); continue
+            }
+            if TestBrowsers.isInUse(url, programs: programs) {
+                Log.warn("skip \(url.path): a program runs from it")
+                report.skipped.append("\(url.path): a program runs from it"); continue
+            }
+            if let reason = guardian.check(url) {
+                Log.warn("skip \(url.path): \(reason)")
+                report.skipped.append("\(url.path): \(reason)"); continue
+            }
+            let size = Sizer.size(of: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) old versions, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
     }
 
     /// The `Service Worker/CacheStorage` folders of one browser. Nothing else of the profile is touched.

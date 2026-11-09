@@ -84,8 +84,7 @@ enum Catalog {
                   paths: [".bun/install/cache"], tier: .safe, rebuild: .download),
         CacheSpec(id: "pnpm.store", title: "pnpm store", ecosystem: .javascript,
                   paths: ["Library/pnpm/store", "Library/Caches/pnpm"], tier: .review, rebuild: .download),
-        CacheSpec(id: "playwright.browsers", title: "Playwright browsers", ecosystem: .javascript,
-                  paths: ["Library/Caches/ms-playwright"], tier: .review, rebuild: .download),
+        // Playwright, Cypress, and Puppeteer browsers are listed by version (see TestBrowsers). The newest stays.
 
         // Python
         CacheSpec(id: "pip.cache", title: "pip cache", ecosystem: .python,

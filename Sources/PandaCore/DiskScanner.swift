@@ -123,6 +123,7 @@ public final class DiskScanner {
             { add(self.scanUpdateDownloads()) },
             { add(self.scanBrowserCaches()) },
             { add(self.scanServiceWorkerStorage()) },
+            { add(self.scanTestBrowsers()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -169,6 +170,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.bytes(of: $0, home: home) } ?? finding.bytes
         case .removeServiceWorkerStorage(let id):
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
+        case .removeOldTestBrowsers(let id):
+            return TestBrowsers.tool(id: id).map { TestBrowsers.bytes(of: $0, home: home) } ?? finding.bytes
         case .removeUpdateDownloads(let url):
             return UpdateDownloads.staleBytes(in: url, now: now())
         case .removeArchive(let url), .removeDeviceSupport(let url):
@@ -328,6 +331,18 @@ public final class DiskScanner {
                            location: "\(b.roots.map { "~/" + $0 }.joined(separator: " and ")) · pages load again the first time",
                            bytes: bytes, tier: .safe, rebuild: .download,
                            action: .removeBrowserCaches(browserID: b.id), owner: b.owner)
+        }
+    }
+
+    /// Old versions of the browsers that Playwright, Cypress, and Puppeteer downloaded. The newest of each kind stays.
+    func scanTestBrowsers() -> [Finding] {
+        TestBrowsers.tools.compactMap { tool in
+            let old = TestBrowsers.oldVersions(of: tool, home: home).filter { guardian.check($0) == nil }
+            let bytes = old.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+            guard bytes > 0 else { return nil }
+            return Finding(id: "testbrowsers:\(tool.id)", ecosystem: .javascript, title: "Old test browsers · \(tool.name)",
+                           location: "~/\(tool.root) · \(old.count) older version\(old.count == 1 ? "" : "s") · the newest of each kind stays",
+                           bytes: bytes, tier: .safe, rebuild: .download, action: .removeOldTestBrowsers(toolID: tool.id))
         }
     }
 
