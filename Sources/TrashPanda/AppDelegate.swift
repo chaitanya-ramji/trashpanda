@@ -13,8 +13,11 @@ final class FindingBox: NSObject {
     let confirmTitle: String?
     /// When true, the first (default) button keeps the item. The Return key then cannot delete it.
     let cancelIsDefault: Bool
+    /// Text of the button that keeps things as they are, when it is first. When nil, it says "Keep it".
+    let cancelTitle: String?
     init(_ findings: [Finding], title: String, body: String, footer: String? = nil, confirmTitle: String? = nil,
-         cancelIsDefault: Bool = false) {
+         cancelIsDefault: Bool = false, cancelTitle: String? = nil) {
+        self.cancelTitle = cancelTitle
         self.findings = findings
         self.title = title
         self.body = body
@@ -338,10 +341,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.toolTip = f.location
                 sub.addItem(item)
                 let names = blockers(f).joined(separator: " and ")
-                let note = NSMenuItem(title: "Quit \(names) to clean this.", action: nil, keyEquivalent: "")
-                note.attributedTitle = NSAttributedString(string: "  Quit \(names) to clean this.", attributes: [
-                    .font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
-                note.isEnabled = false
+                let note = NSMenuItem(title: "Quit \(names) and clean…", action: #selector(confirmQuitAndClean(_:)), keyEquivalent: "")
+                note.attributedTitle = NSAttributedString(string: "  Quit \(names) and clean…", attributes: [
+                    .font: NSFont.menuFont(ofSize: 12), .foregroundColor: NSColor.controlAccentColor])
+                note.target = self
+                note.representedObject = FindingBox(
+                    [f], title: "Quit \(names) and clean?",
+                    body: "Trash Panda will ask \(names) to quit, then free \(Format.bytes(f.bytes)). If \(names) asks to save your work, answer it first.",
+                    footer: "Trash Panda never forces an app to quit. If it stays open, nothing is removed.",
+                    confirmTitle: "Quit \(names) and clean", cancelIsDefault: true, cancelTitle: "Not now")
                 sub.addItem(note)
             }
             if blocked.count > 12 { sub.addItem(disabled("+ \(blocked.count - 12) more")) }
@@ -474,7 +482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let confirmTitle = box.confirmTitle ?? "Free up \(Format.bytes(total))"
         if box.cancelIsDefault {
             // "Keep it" is first, so it is the default button. The Return key keeps the item.
-            alert.addButton(withTitle: "Keep it")
+            alert.addButton(withTitle: box.cancelTitle ?? "Keep it")
             alert.addButton(withTitle: confirmTitle).hasDestructiveAction = true
             return (alert, .alertSecondButtonReturn)
         }
@@ -494,6 +502,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         Log.info("user: confirmed clean of \(box.findings.count) items, \(total) bytes: \(box.findings.map(\.id).joined(separator: ", "))")
         perform(box.findings)
+    }
+
+    /// Asks the owner app to quit, politely, and cleans when it has. An app that stays open is left alone.
+    @objc private func confirmQuitAndClean(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? FindingBox, let finding = box.findings.first, let owner = finding.owner,
+              !cleaning, demoStyle == nil else { return }
+        let (alert, confirmed) = makeAlert(for: box)
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == confirmed else {
+            Log.info("user: cancelled quit and clean of \(finding.id)")
+            return
+        }
+        Log.info("user: confirmed quit and clean of \(finding.id)")
+        cleaning = true
+        busyChanged()
+        let quitter = AppQuitter(running: runningApps, ask: { ids in
+            // Main thread. terminate() is the polite request, the same as choosing Quit in the app.
+            DispatchQueue.main.sync {
+                for id in ids {
+                    for app in NSRunningApplication.runningApplications(withBundleIdentifier: id) where app.activationPolicy == .regular {
+                        _ = app.terminate()
+                    }
+                }
+            }
+        })
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = quitter.quit(owner)
+            DispatchQueue.main.async {
+                switch outcome {
+                case .quit:
+                    self.perform([finding])
+                case .stillOpen(let names):
+                    self.cleaning = false
+                    self.busyChanged()
+                    let alert = NSAlert()
+                    let list = names.joined(separator: " and ")
+                    alert.messageText = "\(list) is still open"
+                    alert.informativeText = "It may be asking you to save. Finish that, or quit it yourself, then clean again. Nothing was removed."
+                    NSApp.activate(ignoringOtherApps: true)
+                    alert.runModal()
+                    self.scan()
+                }
+            }
+        }
     }
 
     private func perform(_ findings: [Finding]) {
