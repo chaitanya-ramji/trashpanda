@@ -277,13 +277,13 @@ public enum RuntimeVersions {
             let byTool = Dictionary(grouping: all, by: \.tool)
             for (tool, list) in byTool {
                 let wanted = (projectRequests + defaults).filter { $0.tool == tool }
-                let keepsAll = wanted.contains { keepsAll(spec: $0.spec, tool: tool) }
+                let keepEveryVersion = wanted.contains { keepsAll(spec: $0.spec, tool: tool) }
                 // The newest version stays, when the names are versions. Rust channels are updated in place, so they have no newest.
                 let keys = Dictionary(uniqueKeysWithValues: list.map { ($0.name, versionKey($0.name)) })
                 let newest = store.id == "rustup" ? nil : ClaudeVersions.newest(of: keys.values.compactMap { $0 })
                 for v in list {
                     let key = "\(store.id)/\(v.key)"
-                    if keepsAll { kept[key] = "a request keeps every version of \(tool)"; continue }
+                    if keepEveryVersion { kept[key] = "a request keeps every version of \(tool)"; continue }
                     if defaults.contains(where: { $0.tool == tool && matches(spec: $0.spec, version: v.name) }) { kept[key] = "default"; continue }
                     if projectRequests.contains(where: { $0.tool == tool && matches(spec: $0.spec, version: v.name) }) { kept[key] = "a project asks for it"; continue }
                     if let n = newest, keys[v.name] ?? nil == n { kept[key] = "newest"; continue }
