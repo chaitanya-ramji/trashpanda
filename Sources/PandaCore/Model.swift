@@ -100,7 +100,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .aiAgents: return "AI agents & local models"
         case .runtimes: return "Old language runtimes"
         case .snapshots: return "Time Machine local snapshots"
-        case .cacheExplorer: return "Largest caches (read only)"
+        case .cacheExplorer: return "Largest caches"
         case .lua: return "Lua"
         case .perl: return "Perl"
         case .clojure: return "Clojure"
@@ -230,6 +230,8 @@ public enum SimulatorAction: Sendable, Equatable {
 }
 
 public enum Action: Sendable {
+    /// The contents of one folder in `~/Library/Caches`, by its name. The cleaner checks the name, the labels, and the app again. The folder stays.
+    case removeCacheFolderContents(name: String)
     /// One version of a language runtime that a version manager installed. The cleaner decides again whether it may go.
     case removeRuntime(storeID: String, tool: String, name: String)
     /// One global package of npm, pnpm, Yarn, or Bun. The manager removes it. The cleaner checks it again first.

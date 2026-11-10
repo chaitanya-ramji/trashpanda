@@ -31,10 +31,10 @@ final class CacheExplorerTests: XCTestCase {
         func l(_ f: String) -> CacheLabel { CacheExplorer.label(for: f, cleanable: cleanable).0 }
         XCTAssertEqual(l("pnpm"), .canClean)
         XCTAssertEqual(l("com.apple.dt.Xcode"), .canClean, "An item of its own comes before the Apple rule")
-        for keep in ["CloudKit", "com.apple.bird", "com.apple.Safari", "com.apple.photolibraryd", "com.apple.mail", "com.apple.helpd", "com.apple.anything.else", "FamilyCircle"] {
+        for keep in ["CloudKit", "GeoServices", "com.apple.bird", "com.apple.Safari", "com.apple.photolibraryd", "com.apple.mail", "com.apple.helpd", "com.apple.anything.else", "FamilyCircle"] {
             XCTAssertEqual(l(keep), .keep, keep)
         }
-        for unknown in ["Adobe", "GeoServices", "company.thebrowser.Browser", "SomeApp", "com.example.app", "apple", "com.applesauce"] {
+        for unknown in ["Adobe", "company.thebrowser.Browser", "SomeApp", "com.example.app", "apple", "com.applesauce"] {
             XCTAssertEqual(l(unknown), .unknown, unknown)
         }
     }
@@ -42,7 +42,7 @@ final class CacheExplorerTests: XCTestCase {
     func testAnUnknownFolderHasAnHonestReasonAndNoOtherLabelIsInvented() {
         let (label, reason) = CacheExplorer.label(for: "Adobe", cleanable: [])
         XCTAssertEqual(label, .unknown)
-        XCTAssertTrue(reason.contains("never remove"), reason)
+        XCTAssertTrue(reason.contains("do not know"), reason)
         XCTAssertEqual(Set(["can clean", "keep", "unknown"]), Set([CacheLabel.canClean, .keep, .unknown].map(\.rawValue)))
     }
 
@@ -99,27 +99,27 @@ final class CacheExplorerTests: XCTestCase {
         try makeCaches(box, [("CloudKit", 30 * mb), ("pnpm", 20 * mb), ("Adobe", 15 * mb)])
         let found = scanner(box).scanCacheExplorer()
         XCTAssertEqual(found.count, 3)
+        XCTAssertEqual(Set(found.map(\.title)), ["CloudKit · keep", "pnpm · can clean", "Adobe · cache folder"])
         for f in found {
-            XCTAssertFalse(f.isActionable, f.title)
             XCTAssertEqual(f.ecosystem, .cacheExplorer)
-            if case .inform = f.action {} else { XCTFail("\(f.title) must be information only") }
             XCTAssertNotNil(f.note)
+            XCTAssertEqual(f.isActionable, f.title.hasSuffix("cache folder"), "Only a folder with an unknown owner has an action: \(f.title)")
         }
         let result = ScanResult(findings: found, disk: DiskUsage(total: 1, free: 1))
-        XCTAssertEqual(result.reclaimable, 0)
-        XCTAssertEqual(result.reviewable, 0)
-        XCTAssertEqual(Set(found.map(\.title)), ["CloudKit · keep", "pnpm · can clean", "Adobe · unknown"])
+        XCTAssertEqual(result.reclaimable, 0, "Never in the one-click clean")
+        XCTAssertTrue(result.reviewable >= 15 * mb_() && result.reviewable < 15 * mb_() + 100_000, "Only the folder with an unknown owner is a review item: \(result.reviewable)")
     }
 
-    func testNothingCanBeRemovedFromTheList() throws {
+    private func mb_() -> Int64 { 1_500_000 }
+
+    func testNothingCanBeRemovedFromTheListThatIsKeepOrHasAnItem() throws {
         let box = try Sandbox()
         try makeCaches(box, [("CloudKit", 30 * mb), ("Adobe", 20 * mb)])
-        let found = scanner(box).scanCacheExplorer()
+        let found = scanner(box).scanCacheExplorer().filter { !$0.title.hasSuffix("cache folder") }
         let report = Cleaner(guardian: PathGuard(home: box.home)).clean(found)
         XCTAssertEqual(report.removed, 0)
         XCTAssertEqual(report.freed, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: box.home.appendingPathComponent("Library/Caches/CloudKit/data").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: box.home.appendingPathComponent("Library/Caches/Adobe/data").path))
     }
 
     func testFoldersThatHaveAnItemAreCanClean() throws {
@@ -127,13 +127,13 @@ final class CacheExplorerTests: XCTestCase {
         try makeCaches(box, [("Homebrew", 30 * mb), ("go-build", 20 * mb), ("ms-playwright", 25 * mb), ("Yarn", 15 * mb), ("pypoetry", 12 * mb), ("Adobe", 11 * mb)])
         let labels = Dictionary(uniqueKeysWithValues: scanner(box).scanCacheExplorer().map { ($0.location.replacingOccurrences(of: "~/Library/Caches/", with: ""), $0.title) })
         for name in ["Homebrew", "go-build", "ms-playwright", "Yarn", "pypoetry"] { XCTAssertTrue(labels[name]?.hasSuffix("can clean") == true, "\(name): \(labels[name] ?? "")") }
-        XCTAssertTrue(labels["Adobe"]?.hasSuffix("unknown") == true)
+        XCTAssertTrue(labels["Adobe"]?.hasSuffix("cache folder") == true)
     }
 
     func testTwoFoldersWithTheSameAppNameCanBeToldApart() throws {
         let box = try Sandbox()
         try makeCaches(box, [("company.thebrowser.Browser", 30 * mb), ("Arc", 20 * mb)])
         let found = DiskScanner(home: box.home, config: Config(), useOwnerTools: false, appName: { $0 == "company.thebrowser.Browser" ? "Arc" : nil }).scanCacheExplorer()
-        XCTAssertEqual(Set(found.map(\.title)), ["Arc (company.thebrowser.Browser) · unknown", "Arc · can clean"])
+        XCTAssertEqual(Set(found.map(\.title)), ["Arc (company.thebrowser.Browser) · cache folder", "Arc · can clean"])
     }
 }

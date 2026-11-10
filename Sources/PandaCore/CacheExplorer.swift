@@ -1,8 +1,13 @@
 import Foundation
 
-/// A read-only list of the largest folders in `~/Library/Caches`.
-/// Most of that folder has an owner that we do not know. On the author's Mac, 27 GB is `CloudKit`, which is iCloud data and not safe to delete.
-/// The list shows what is there. It never deletes anything, and it has no action: an `unknown` folder is never removed.
+/// The largest folders in `~/Library/Caches`. Most of that folder has an owner that we do not know.
+/// On the author's Mac, 27 GB is `CloudKit`, which is iCloud data and not safe to delete.
+///
+/// - `can clean`: Trash Panda has an item for it in the group of its tool. The row only points to it.
+/// - `keep`: not ours to empty (iCloud data, Apple system caches). No action, with the reason.
+/// - `unknown`: we do not know the owner. This is a review item: the user may empty the folder (the contents, not the folder).
+///   Apple says that apps must be able to re-create the files in a caches folder, so this is allowed, but some apps keep
+///   logins or offline files there, so it is never in the one-click clean, and the default button of the dialog keeps the data.
 public enum CacheLabel: String, Sendable, Equatable {
     /// Trash Panda already has an item for it, in its own group.
     case canClean = "can clean"
@@ -13,7 +18,7 @@ public enum CacheLabel: String, Sendable, Equatable {
 }
 
 public enum CacheExplorer {
-    public static let limit = 10
+    public static let limit = 30
     /// A folder under this size is not worth a line.
     public static let minimumBytes: Int64 = 10_000_000
 
@@ -26,6 +31,7 @@ public enum CacheExplorer {
         "com.apple.photolibraryd": "The caches of your Photos library. They are slow to rebuild.",
         "com.apple.mail": "Mail data. Deleting it can lose messages that are not synced.",
         "FamilyCircle": "Family Sharing data from iCloud.",
+        "GeoServices": "Map data of macOS. macOS manages it.",
     ]
 
     /// The reason to keep a folder, or nil. Any other Apple cache is managed by macOS.
@@ -64,7 +70,7 @@ public enum CacheExplorer {
         // An item that Trash Panda already has comes first. It has its own checks (an app that is open, the age, and so on).
         if cleanable.contains(folder) { return (.canClean, "Trash Panda has an item for it. Look in the group of its tool.") }
         if let why = keepReason(folder) { return (.keep, why) }
-        return (.unknown, "We do not know what owns it, so we never remove it.")
+        return (.unknown, "We do not know what owns it. You can empty it, and you choose.")
     }
 
     /// The largest folders. A link, a file, and a folder under the minimum are left out. Nothing is read except the sizes.
@@ -82,5 +88,26 @@ public enum CacheExplorer {
             let (label, reason) = label(for: folder, cleanable: cleanable)
             return Entry(folder: folder, displayName: displayName(folder, appName: appName), bytes: bytes, label: label, reason: reason)
         }
+    }
+
+    /// The folders that have an item of their own: the catalog, the browsers, the test browsers, and the tools that clean themselves.
+    public static func catalogNames() -> Set<String> {
+        cleanableNames(paths: Catalog.caches.flatMap(\.paths) + BrowserCaches.browsers.flatMap(\.roots) + TestBrowsers.tools.map(\.root) + selfCleaningTools)
+    }
+
+    /// A name that can be one folder directly in `Library/Caches`: one path part, and not hidden.
+    public static func isFolderName(_ name: String) -> Bool {
+        !name.isEmpty && name.count <= 255 && name != "." && name != ".." && !name.hasPrefix(".")
+            && !name.contains("/") && !name.contains("\0") && !name.contains("\n")
+    }
+
+    /// A reverse-DNS name such as `company.thebrowser.Browser` can be the bundle ID of an app, so the app can be checked.
+    public static func looksLikeBundleID(_ name: String) -> Bool {
+        name.range(of: #"^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9_-]*){2,}\z"#, options: .regularExpression) != nil
+    }
+
+    /// True when the folder may be emptied through the explorer: a real name, not kept, and no other item owns it.
+    public static func isRemovable(_ name: String) -> Bool {
+        isFolderName(name) && keepReason(name) == nil && !catalogNames().contains(name)
     }
 }
