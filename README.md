@@ -281,7 +281,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
 - [x] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
 - [ ] Unused global JavaScript packages: npm, pnpm, Bun, Yarn ([#51](https://github.com/chaitanya-ramji/trashpanda/issues/51))
-- [ ] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
+- [x] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
 - [x] More languages (phase 2b): Scala, Haskell, R, Julia, Nim, OCaml, Crystal, Clojure, Perl, Lua ([#29](https://github.com/chaitanya-ramji/trashpanda/issues/29))
 
 ### Later: v1.0 Signed and stable
