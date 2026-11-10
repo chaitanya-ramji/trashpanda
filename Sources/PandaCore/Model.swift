@@ -33,7 +33,7 @@ public enum Rebuild: Sendable {
 
 /// Language or tool group. Phase 1 groups ship now. Phase 2 groups are planned.
 public enum Ecosystem: String, CaseIterable, Sendable {
-    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash, installers, logs, scala, haskell, r, julia, nim, ocaml, crystal, clojure, perl, lua
+    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash, installers, logs, scala, haskell, r, julia, nim, ocaml, crystal, clojure, perl, lua, aiAgents
 
     /// A short name for places with little room, such as the legend of the bar.
     public var shortName: String {
@@ -58,6 +58,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .trash: return "Trash"
         case .installers: return "Installers"
         case .logs: return "Logs"
+        case .aiAgents: return "AI agents"
         case .lua: return "Lua"
         case .perl: return "Perl"
         case .clojure: return "Clojure"
@@ -93,6 +94,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .trash: return "Trash"
         case .installers: return "Old installers"
         case .logs: return "Logs & crash reports"
+        case .aiAgents: return "AI agents & local models"
         case .lua: return "Lua"
         case .perl: return "Perl"
         case .clojure: return "Clojure"
@@ -219,6 +221,8 @@ public enum SimulatorAction: Sendable, Equatable {
 }
 
 public enum Action: Sendable {
+    /// One action of the AI agents group. The cleaner finds the targets again at clean time.
+    case agent(AgentAction)
     /// One Homebrew formula that no other formula needs. Brew removes it. The cleaner checks it again first.
     case brew(BrewAction)
     /// The old files of one group in `~/Library/Logs`. The cleaner finds the files again from the group.
