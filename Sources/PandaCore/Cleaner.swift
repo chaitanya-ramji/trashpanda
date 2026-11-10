@@ -130,6 +130,9 @@ public final class Cleaner {
             case .removeBrowserCaches(let id):
                 removeBrowserCaches(id, finding: finding, into: &report)
 
+            case .removeServiceWorkerSite(let id, let profile, let folder):
+                removeServiceWorkerSite(id, profile, folder, finding: finding, into: &report)
+
             case .removeServiceWorkerStorage(let id):
                 removeServiceWorkerStorage(id, finding: finding, into: &report)
 
@@ -834,6 +837,30 @@ public final class Cleaner {
         if removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(removed) Service Worker folders, failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
+    /// One website of the Service Worker storage. We find its folder again now, and remove that folder only.
+    private func removeServiceWorkerSite(_ id: String, _ profile: String, _ folder: String, finding: Finding, into report: inout CleanReport) {
+        guard let browser = BrowserCaches.browser(id: id) else { skip(finding, "unknown browser", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        guard let site = ServiceWorkerSites.site(browser: browser, profile: profile, folder: folder, home: home) else {
+            skip(finding, "that website has no saved files any more, or the name is not valid", &report); return
+        }
+        let size = Sizer.size(of: site.url)          // measure first, check last (see removeFolders)
+        let prefix = home.standardizedFileURL.path + "/"
+        guard site.url.standardizedFileURL.path.hasPrefix(prefix),
+              ServiceWorkerSites.isSiteShape(relative: String(site.url.standardizedFileURL.path.dropFirst(prefix.count))),
+              UpdateDownloads.isPlainPath(site.url) else { skip(finding, "not a website folder of the browser", &report); return }
+        if let reason = guardian.check(site.url) { skip(finding, "\(reason)", &report); return }
+        do {
+            try FileManager.default.removeItem(at: site.url)
+            report.freed += size
+            report.removed += 1
+            Log.info("clean \(finding.id): removed \(size) bytes — \(site.url.path)")
+        } catch {
+            Log.error("remove failed \(site.url.path): \(error.localizedDescription)")
+            report.failed.append("\(site.url.path): \(error.localizedDescription)")
+        }
     }
 
     /// The caches of one browser. We find the folders again now, from a fixed list of names. Nothing else is touched.

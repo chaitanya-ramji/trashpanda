@@ -2,13 +2,15 @@ import XCTest
 @testable import PandaCore
 
 final class ServiceWorkerTests: XCTestCase {
+    private let site1 = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    private let site2 = "b2c3d4e5f60718293a4b5c6d7e8f901234567890"
     private let support = "Library/Application Support/Arc/User Data"
     private let caches = "Library/Caches/Arc/User Data"
 
     private func makeArc(_ box: Sandbox, profiles: [String] = ["Default"]) throws {
         for p in profiles {
-            try box.file("\(support)/\(p)/Service Worker/CacheStorage/origin1/index.txt", bytes: 4_000_000)
-            try box.file("\(support)/\(p)/Service Worker/CacheStorage/origin2/0_0", bytes: 3_000_000)
+            try box.file("\(support)/\(p)/Service Worker/CacheStorage/\(site1)/index.txt", bytes: 4_000_000)
+            try box.file("\(support)/\(p)/Service Worker/CacheStorage/\(site2)/0_0", bytes: 3_000_000)
             try box.file("\(support)/\(p)/Service Worker/Database/000003.log", bytes: 50_000)
             try box.file("\(support)/\(p)/Service Worker/ScriptCache/abc", bytes: 1_000_000)
             try box.file("\(support)/\(p)/GPUCache/data_0", bytes: 2_000_000)
@@ -28,20 +30,20 @@ final class ServiceWorkerTests: XCTestCase {
 
     // MARK: The item
 
-    func testAReviewItemThatNeverJoinsTheOneClickClean() throws {
+    func testEachWebsiteIsAReviewItemThatNeverJoinsTheOneClickClean() throws {
         let box = try Sandbox()
         try makeArc(box)
         let all = scanner(box).scanServiceWorkerStorage()
-        let item = try XCTUnwrap(all.first)
-        XCTAssertEqual(all.count, 1)
-        XCTAssertEqual(item.title, "Service Worker storage · Arc")
-        XCTAssertEqual(item.tier, .review, "Offline web apps keep their files here")
-        XCTAssertEqual(item.id, "browser.sw:arc")
-        XCTAssertTrue(item.bytes >= 7_000_000 && item.bytes < 8_000_000, "Only CacheStorage: \(item.bytes)")
-        XCTAssertTrue(item.location.contains("work offline"))
+        XCTAssertEqual(all.count, 2, "Two websites, two items")
+        let big = try XCTUnwrap(all.first { $0.id.hasSuffix(":\(site1)") })
+        XCTAssertEqual(big.title, "Offline website · Unknown site (Arc)", "No proven name, so no name")
+        XCTAssertEqual(big.tier, .review, "Offline web apps keep their files here")
+        XCTAssertEqual(big.id, "browser.sw:arc:Default:\(site1)")
+        XCTAssertTrue(big.bytes >= 4_000_000 && big.bytes < 4_500_000, "Only that site: \(big.bytes)")
+        XCTAssertTrue(big.location.contains("works offline"))
         let result = ScanResult(findings: all + scanner(box).scanBrowserCaches(), disk: DiskUsage(total: 10, free: 5))
         XCTAssertEqual(result.reclaimable, scanner(box).scanBrowserCaches().reduce(0) { $0 + $1.bytes }, "Only the real caches are safe")
-        XCTAssertEqual(result.reviewable, item.bytes)
+        XCTAssertEqual(result.reviewable, all.reduce(0) { $0 + $1.bytes })
     }
 
     func testOnlyCacheStorageIsATarget() throws {
@@ -74,9 +76,11 @@ final class ServiceWorkerTests: XCTestCase {
         let s = scanner(box)
         let report = cleaner(s).clean(s.scanServiceWorkerStorage())
 
-        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(report.removed, 2)
         XCTAssertGreaterThan(report.freed, 6_000_000)
-        XCTAssertFalse(exists(box, "\(support)/Default/Service Worker/CacheStorage"))
+        XCTAssertFalse(exists(box, "\(support)/Default/Service Worker/CacheStorage/\(site1)"))
+        XCTAssertFalse(exists(box, "\(support)/Default/Service Worker/CacheStorage/\(site2)"))
+        XCTAssertTrue(exists(box, "\(support)/Default/Service Worker/CacheStorage"), "Only the site folders are removed")
         for keep in ["Service Worker/Database/000003.log", "Service Worker/ScriptCache/abc", "Service Worker", "GPUCache/data_0",
                      "Cookies", "Login Data", "History", "IndexedDB/a/x", "Local Storage/leveldb/x", "Extensions/e/manifest.json"] {
             XCTAssertTrue(exists(box, "\(support)/Default/\(keep)"), "\(keep) must stay")
@@ -90,7 +94,7 @@ final class ServiceWorkerTests: XCTestCase {
         try makeArc(box)
         let s = scanner(box)
         _ = cleaner(s).clean(s.scanBrowserCaches())
-        XCTAssertTrue(exists(box, "\(support)/Default/Service Worker/CacheStorage/origin1/index.txt"), "Cleaning the caches keeps Service Worker data")
+        XCTAssertTrue(exists(box, "\(support)/Default/Service Worker/CacheStorage/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/index.txt"), "Cleaning the caches keeps Service Worker data")
         XCTAssertFalse(exists(box, "\(caches)/Default/Cache"))
     }
 
@@ -101,7 +105,7 @@ final class ServiceWorkerTests: XCTestCase {
         let r = cleaner(s, running: [RunningApp(bundleID: "company.thebrowser.Browser", name: "Arc")]).clean(s.scanServiceWorkerStorage())
         XCTAssertEqual(r.removed, 0)
         XCTAssertEqual(r.blockedApps, ["Arc"])
-        XCTAssertTrue(exists(box, "\(support)/Default/Service Worker/CacheStorage/origin1/index.txt"))
+        XCTAssertTrue(exists(box, "\(support)/Default/Service Worker/CacheStorage/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/index.txt"))
     }
 
     func testLinksAreNeverFollowed() throws {
@@ -134,22 +138,26 @@ final class ServiceWorkerTests: XCTestCase {
         let f = Finding(id: "x", ecosystem: .browsers, title: "x", location: "x", bytes: 1, tier: .review, rebuild: .download,
                         action: .removeServiceWorkerStorage(browserID: "nope"))
         XCTAssertEqual(cleaner(scanner(box)).clean([f]).removed, 0)
-        XCTAssertTrue(exists(box, "\(support)/Default/Service Worker/CacheStorage/origin1/index.txt"))
+        XCTAssertTrue(exists(box, "\(support)/Default/Service Worker/CacheStorage/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/index.txt"))
     }
 
     // MARK: The guard and the shapes
 
-    func testTheGuardAllowsOnlyTheCacheStorageFolderItself() throws {
+    func testTheGuardAllowsOnlyTheCacheStorageFolderAndOneSiteFolder() throws {
         let box = try Sandbox()
         try makeArc(box)
         let g = PathGuard(home: box.home)
         func check(_ rel: String) -> Refusal? { g.check(box.home.appendingPathComponent("\(support)/Default/\(rel)")) }
         XCTAssertNil(check("Service Worker/CacheStorage"))
-        for refused in ["Service Worker", "Service Worker/Database", "Service Worker/ScriptCache", "Service Worker/CacheStorage/origin1",
-                        "Service Worker/CacheStorage/origin1/index.txt", "Service Worker/cachestorage2", "Cookies", "IndexedDB", "Extensions"] {
+        XCTAssertNil(check("Service Worker/CacheStorage/\(site1)"), "One website: 40 hex characters")
+        for refused in ["Service Worker", "Service Worker/Database", "Service Worker/ScriptCache", "Service Worker/CacheStorage/\(site1)/index.txt",
+                        "Service Worker/CacheStorage/\(site1)/deeper/x", "Service Worker/CacheStorage/origin1",
+                        "Service Worker/CacheStorage/\(site1)0", "Service Worker/CacheStorage/\(String(site1.dropLast()))", "Service Worker/CacheStorage/../Database",
+                        "Service Worker/cachestorage2", "Cookies", "IndexedDB", "Extensions"] {
             XCTAssertNotNil(check(refused), "\(refused) must be refused")
         }
         XCTAssertNotNil(g.check(box.home.appendingPathComponent("\(support)/Guest Profile/Service Worker/CacheStorage")), "Not a profile that we clean")
+        XCTAssertNotNil(g.check(box.home.appendingPathComponent("\(support)/Guest Profile/Service Worker/CacheStorage/\(site1)")))
     }
 
     func testServiceWorkerShape() {

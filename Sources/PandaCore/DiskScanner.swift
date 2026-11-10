@@ -188,6 +188,8 @@ public final class DiskScanner {
             case .removeVolume(let name):
                 return inventory.volumes.contains { $0.name == name } ? finding.bytes : 0
             }
+        case .removeServiceWorkerSite(let id, let profile, let folder):
+            return BrowserCaches.browser(id: id).flatMap { ServiceWorkerSites.site(browser: $0, profile: profile, folder: folder, home: home) }?.bytes ?? 0
         case .removeBrowserCaches(let id):
             return BrowserCaches.browser(id: id).map { BrowserCaches.bytes(of: $0, home: home) } ?? finding.bytes
         case .removeServiceWorkerStorage(let id):
@@ -447,15 +449,20 @@ public final class DiskScanner {
     }
 
     /// Service Worker storage of Chromium browsers. Offline web apps keep their files there, so this is a review item.
+    /// One review item for each website. The user can keep the one web app that works offline and clear the rest (#44).
+    /// The host name is shown only when it is proven by the name of the folder. Otherwise the item is "Unknown site".
     func scanServiceWorkerStorage() -> [Finding] {
-        BrowserCaches.browsers.filter { $0.kind == .chromium }.compactMap { b in
-            let targets = BrowserCaches.serviceWorkerTargets(of: b, home: home).filter { guardian.check($0) == nil }
-            let bytes = targets.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
-            guard bytes > 0 else { return nil }
-            return Finding(id: "browser.sw:\(b.id)", ecosystem: .browsers, title: "Service Worker storage · \(b.name)",
-                           location: "\(b.roots.map { "~/" + $0 }.first ?? "") · saved files of websites that work offline",
-                           bytes: bytes, tier: .review, rebuild: .download,
-                           action: .removeServiceWorkerStorage(browserID: b.id), owner: b.owner)
+        BrowserCaches.browsers.filter { $0.kind == .chromium }.flatMap { b -> [Finding] in
+            let profiles = Set(ServiceWorkerSites.sites(of: b, home: home).map(\.profile)).count
+            return ServiceWorkerSites.sites(of: b, home: home).compactMap { s in
+                guard s.bytes > 0, guardian.check(s.url) == nil else { return nil }
+                let where_ = profiles > 1 ? " · profile \(s.profile)" : ""
+                return Finding(id: "browser.sw:\(b.id):\(s.profile):\(s.folder)", ecosystem: .browsers,
+                               title: "Offline website · \(s.title) (\(b.name))",
+                               location: "Saved files of one website that works offline\(where_)",
+                               bytes: s.bytes, tier: .review, rebuild: .download,
+                               action: .removeServiceWorkerSite(browserID: b.id, profile: s.profile, folder: s.folder), owner: b.owner)
+            }
         }
     }
 

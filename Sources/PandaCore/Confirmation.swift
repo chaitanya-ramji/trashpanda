@@ -28,7 +28,7 @@ public struct Confirmation: Equatable, Sendable {
         case .simulator(.deleteDevice): return .simulatorDevice
         case .removeArchive: return .archive
         case .removeDeviceSupport: return .deviceSupport
-        case .removeServiceWorkerStorage: return .serviceWorker
+        case .removeServiceWorkerStorage, .removeServiceWorkerSite: return .serviceWorker
         case .globalPackage: return .globalPackage
         case .removeRuntime: return .runtime
         case .emptyTrash: return .trash
