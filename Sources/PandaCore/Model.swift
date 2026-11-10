@@ -354,5 +354,11 @@ public struct CleanReport: Sendable {
     public var failed: [String] = []
     /// Apps that were running, so that their items were skipped. The user must quit them.
     public var blockedApps: [String] = []
+    /// What the Docker items freed inside Docker. The Mac may not show it at once (see `DockerSpaceNote`).
+    public var dockerFreed: Int64 = 0
+    /// The change of the free space of the Mac during the clean. Kept apart from `freed`, so that the two can be compared.
+    public var volumeChange: Int64 = 0
+    /// A short sentence for the user when the Mac did not gain the space that Docker freed. nil when nothing needs to be said.
+    public var dockerNote: String?
     public init() {}
 }

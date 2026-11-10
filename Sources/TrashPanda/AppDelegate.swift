@@ -647,6 +647,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
+        if let note = report.dockerNote {
+            let alert = NSAlert()
+            alert.messageText = note
+            alert.informativeText = "Docker keeps its data in one disk file, and the file can give the space back slowly."
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Read the steps")
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertSecondButtonReturn { NSWorkspace.shared.open(DockerDesktopDisk.helpURL) }
+        }
         if !report.failed.isEmpty {
             let alert = NSAlert()
             alert.messageText = "A few things couldn't be cleaned"
