@@ -52,6 +52,7 @@ Trash Panda looks in two places:
 | Dart, Flutter | Pub packages, analysis cache | `.dart_tool`, Flutter `build` |
 | Elixir, Erlang | Hex packages, rebar3 | `_build`, `deps`, `.elixir_ls` |
 | Zig | Global cache | `.zig-cache`, `zig-out` |
+| Scala | Coursier cache (safe). Ivy cache (review). | `target` (sbt), `.bloop`, `.bsp`, `.metals`, `out` (Mill) |
 | Homebrew | Downloads and old versions (safe). Review: each package that no other package needs (`brew leaves`), with its install date. Brew removes it. | None |
 | Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia): cache, code cache, and GPU caches. Firefox and Zen: `cache2` and `startupCache`. Dia and Zen are not checked on a real install yet. Review: Service Worker storage. | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |

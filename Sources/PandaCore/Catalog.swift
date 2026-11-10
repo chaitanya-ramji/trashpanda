@@ -165,6 +165,12 @@ enum Catalog {
         // Zig
         CacheSpec(id: "zig.global", title: "Zig global cache", ecosystem: .zig,
                   paths: [".cache/zig"], tier: .safe, rebuild: .minutes),
+
+        // Scala
+        CacheSpec(id: "scala.coursier", title: "Coursier cache", ecosystem: .scala,
+                  paths: ["Library/Caches/Coursier"], tier: .safe, rebuild: .download),
+        CacheSpec(id: "scala.ivy", title: "Ivy cache", ecosystem: .scala,
+                  paths: [".ivy2/cache"], tier: .review, rebuild: .download),
     ]
 
     // MARK: Project build outputs
@@ -222,6 +228,14 @@ enum Catalog {
         // Zig
         ArtifactRule([".zig-cache", "zig-cache"], markers: ["build.zig"], .zig, "Build cache"),
         ArtifactRule(["zig-out"], markers: ["build.zig"], .zig, "Build output"),
+
+        // Scala
+        ArtifactRule(["target"],
+                     markers: ["build.sbt"], .scala, "sbt build output"),
+        ArtifactRule([".bloop", ".bsp", ".metals"],
+                     markers: ["build.sbt", "build.sc", "build.mill"], .scala, "Build server and editor cache", rebuild: .seconds),
+        ArtifactRule(["out"],
+                     markers: ["build.sc", "build.mill"], .scala, "Mill build output"),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
