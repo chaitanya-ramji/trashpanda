@@ -58,6 +58,7 @@ Trash Panda looks in two places:
 | Julia | Precompiled code (safe). Packages and artifacts (review). | None |
 | Nim | Build cache (safe). | `nimcache` |
 | OCaml | Dune cache (safe). | `_build` (dune), `_opam` (review) |
+| Crystal | Compiler cache (safe). | None (`lib` is left out: see the PR) |
 | Homebrew | Downloads and old versions (safe). Review: each package that no other package needs (`brew leaves`), with its install date. Brew removes it. | None |
 | Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia): cache, code cache, and GPU caches. Firefox and Zen: `cache2` and `startupCache`. Dia and Zen are not checked on a real install yet. Review: Service Worker storage. | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |

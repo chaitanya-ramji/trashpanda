@@ -203,6 +203,10 @@ enum Catalog {
         // OCaml
         CacheSpec(id: "ocaml.dune.cache", title: "Dune cache", ecosystem: .ocaml,
                   paths: [".cache/dune/db"], tier: .safe, rebuild: .minutes),
+
+        // Crystal
+        CacheSpec(id: "crystal.cache", title: "Crystal compiler cache", ecosystem: .crystal,
+                  paths: [".cache/crystal"], tier: .safe, rebuild: .minutes),
     ]
 
     // MARK: Project build outputs
