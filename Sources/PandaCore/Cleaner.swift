@@ -24,6 +24,8 @@ public final class Cleaner {
     private let brew: () -> Brew?
     /// The program files that `claude` processes execute now. nil means that we cannot tell, and then no version is removed.
     private let openClaudeBinaries: ([String]) -> [String]?
+    /// Finds `ollama` at clean time. Tests give a fake one.
+    private let ollama: () -> Ollama?
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
@@ -32,7 +34,9 @@ public final class Cleaner {
                 emptyTrash: @escaping () -> Result<Void, TrashRefusal> = TrashBin.emptyWithFinder,
                 mountedImages: @escaping () -> [String] = Installers.mountedImagePaths,
                 brew: (() -> Brew?)? = nil,
-                openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:)) {
+                openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
+                ollama: (() -> Ollama?)? = nil) {
+        self.ollama = ollama ?? { Shell.resolve("ollama").map { Ollama(path: $0) } }
         self.openClaudeBinaries = openClaudeBinaries
         self.brew = brew ?? { Shell.resolve("brew").map { Brew(path: $0) } }
         self.mountedImages = mountedImages
@@ -274,6 +278,7 @@ public final class Cleaner {
                           finding: finding, into: &report)
         case .removeAgentCaches(let id): removeAgentCaches(id, finding: finding, into: &report)
         case .removeEditorCaches(let id): removeEditorCaches(id, finding: finding, into: &report)
+        case .removeOllamaModel(let name): removeOllamaModel(name, finding: finding, into: &report)
         case .removeObsoleteExtensions(let id): removeObsoleteExtensions(id, finding: finding, into: &report)
         case .removeClaudeVMBundle:
             removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
@@ -310,6 +315,32 @@ public final class Cleaner {
         if removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
+    /// One Ollama model, removed by Ollama. We check the name, that the model is still there, and that it is not loaded.
+    private func removeOllamaModel(_ name: String, finding: Finding, into report: inout CleanReport) {
+        guard Ollama.removeArguments(name) != nil else { skip(finding, "the model name is not valid", &report); return }
+        guard let tool = ollama() else { skip(finding, "ollama not found", &report); return }
+        guard let models = tool.models(), let model = models.first(where: { $0.name == name }) else {
+            skip(finding, "\(name) is not in the list of Ollama, or Ollama did not answer", &report); return
+        }
+        guard let loaded = tool.loaded() else { skip(finding, "could not tell if \(name) is loaded", &report); return }
+        if loaded.contains(name) {
+            report.skipped.append("\(finding.location): the model is loaded now. Stop it with ollama stop and try again."); return
+        }
+        let folder = Ollama.modelsFolder(home: URL(fileURLWithPath: guardian.home))
+        let measured = FileManager.default.fileExists(atPath: folder.path)
+        let before = measured ? Sizer.size(of: folder) : 0
+        let result = tool.remove(name)            // run once: never run a remove twice
+        guard let result, result.status == 0, !result.timedOut else {
+            report.failed.append("\(finding.title): ollama rm failed"); return
+        }
+        // A layer that another model uses stays, so the freed size can be smaller than the model. We measure the folder when we can.
+        let gone = tool.models()?.contains { $0.name == name } == false
+        let freed = measured ? max(0, before - Sizer.size(of: folder)) : (gone ? model.bytes : 0)
+        report.freed += freed
+        report.removed += 1
+        Log.info("clean \(finding.id): ollama rm \(name), freed \(freed)")
     }
 
     /// The cache folders and old logs of one editor. We find them again now, with the age of each log.
