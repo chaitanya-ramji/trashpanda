@@ -284,6 +284,7 @@ public final class Cleaner {
         case .removeOllamaModel(let name): removeOllamaModel(name, finding: finding, into: &report)
         case .removeHuggingFaceRepo(let id): removeHuggingFaceRepo(id, finding: finding, into: &report)
         case .removeLocalModel(let storeID, let name): removeLocalModel(storeID, name, finding: finding, into: &report)
+        case .removeFixedFolders(let id): removeFixedFolders(id, finding: finding, into: &report)
         case .removeObsoleteExtensions(let id): removeObsoleteExtensions(id, finding: finding, into: &report)
         case .removeClaudeVMBundle:
             removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
@@ -315,6 +316,31 @@ public final class Cleaner {
             } catch {
                 failures += 1
                 Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
+    /// The fixed folders of one app. We find them again now, from the table, and check each one last.
+    private func removeFixedFolders(_ id: String, finding: Finding, into report: inout CleanReport) {
+        guard let app = FixedFolders.app(id: id) else { skip(finding, "unknown app", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for url in FixedFolders.targets(of: app, home: home) {
+            let size = Sizer.size(of: url)           // measure first, check last (see removeFolders)
+            guard FixedFolders.isTarget(url, of: app, home: home), UpdateDownloads.isPlainPath(url) else {
+                report.skipped.append("\(url.path): not a folder of the app"); continue
+            }
+            if let reason = guardian.check(url) { report.skipped.append("\(url.path): \(reason)"); continue }
+            do {
+                try FileManager.default.removeItem(at: url)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
             }
         }
         if removed > 0 { report.removed += 1 }

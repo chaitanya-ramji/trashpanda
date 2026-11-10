@@ -185,6 +185,9 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeFixedFolders(let id)):
+            guard let app = FixedFolders.app(id: id) else { return finding.bytes }
+            return FixedFolders.targets(of: app, home: home).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
         case .agent(.removeLocalModel(let storeID, let name)):
             return LocalModels.model(storeID: storeID, name: name, home: home)?.bytes ?? 0
         case .agent(.removeHuggingFaceRepo(let id)):
@@ -506,7 +509,20 @@ public final class DiskScanner {
 
     /// The AI agents group. Each product has its own function, and its items start with the product name.
     func scanAgents() -> [Finding] {
-        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches() + scanHuggingFace() + scanLocalModels()
+        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches() + scanHuggingFace() + scanLocalModels() + scanFixedFolders()
+    }
+
+    /// Apps with a few fixed rebuildable folders (Zed). One safe item for each app, and the app must be closed.
+    func scanFixedFolders() -> [Finding] {
+        FixedFolders.apps.compactMap { app in
+            let targets = FixedFolders.targets(of: app, home: home).filter { guardian.check($0) == nil }
+            let bytes = targets.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+            guard bytes > 0 else { return nil }
+            return Finding(id: "agent.folders:\(app.id)", ecosystem: .aiAgents, title: app.title,
+                           location: targets.map { "~/" + $0.path.dropFirst(home.standardizedFileURL.path.count + 1) }.joined(separator: ", "),
+                           bytes: bytes, tier: .safe, rebuild: .download, action: .agent(.removeFixedFolders(appID: app.id)),
+                           note: "Your settings, extensions, and chats stay.", owner: app.owner)
+        }
     }
 
     /// The models of LM Studio, Jan, and GPT4All. One review item for each model, and the app must be closed.
