@@ -376,7 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sub.addItem(disabled("Information only. Cannot be removed here."))
             for f in info.prefix(12) {
                 let item = NSMenuItem(title: f.title, action: nil, keyEquivalent: "")
-                item.attributedTitle = line(f.title, Format.bytes(f.bytes))
+                item.attributedTitle = line(f.title, f.bytes > 0 ? Format.bytes(f.bytes) : "")
                 item.isEnabled = false
                 item.toolTip = f.location
                 sub.addItem(item)
