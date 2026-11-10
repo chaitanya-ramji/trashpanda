@@ -83,6 +83,7 @@ public final class DiskScanner {
     /// Path of `xcrun`. Tests set it to a fake tool. The default finds the real one.
     private let xcrunOverride: String?
     private let brewOverride: String?
+    private let ollamaOverride: String?
     /// The program files that `claude` processes execute now. Tests give a list. nil means that we cannot tell.
     private let openClaudeBinaries: ([String]) -> [String]?
     /// The current time. Tests set a fixed time, so that ages do not change from day to day.
@@ -93,12 +94,13 @@ public final class DiskScanner {
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
                 isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
-                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil, openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
+                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil, ollamaPath: String? = nil, openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
                 appName: @escaping (String) -> String? = UpdateDownloads.systemAppName(for:)) {
         self.now = now
         self.appName = appName
         self.xcrunOverride = xcrunPath
         self.brewOverride = brewPath
+        self.ollamaOverride = ollamaPath
         self.openClaudeBinaries = openClaudeBinaries
         self.home = home
         self.config = config
@@ -139,6 +141,7 @@ public final class DiskScanner {
                 { add(self.scanSimulators()) },
                 { add(self.scanHomebrew()) },
                 { add(self.scanBrewLeaves()) },
+                { add(self.scanOllama()) },
                 { add(self.scanDocker()) },
                 { add(self.scanGo()) },
                 { add(self.scanUv()) },
@@ -182,6 +185,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeOllamaModel(let name)):
+            return ollamaTool()?.models()?.first { $0.name == name }?.bytes ?? 0
         case .agent(.removeEditorCaches(let id)):
             guard let app = EditorCaches.app(id: id) else { return finding.bytes }
             return EditorCaches.targets(of: app, home: home, now: now()).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
@@ -523,6 +528,21 @@ public final class DiskScanner {
             }
         }
         return out
+    }
+
+    func ollamaTool() -> Ollama? { (ollamaOverride ?? Shell.resolve("ollama")).map { Ollama(path: $0) } }
+
+    /// The models of Ollama that nobody changed for the stale limit and that are not loaded. One review item for each model.
+    /// If Ollama does not answer (its server may be off), there is no item.
+    func scanOllama() -> [Finding] {
+        guard let tool = ollamaTool(), let models = tool.models(), let loaded = tool.loaded() else { return [] }
+        return models.compactMap { m in
+            guard let age = m.ageDays, age >= config.staleDays, !loaded.contains(m.name), m.bytes > 0 else { return nil }
+            return Finding(id: "agent.ollama:\(m.name)", ecosystem: .aiAgents, title: "Ollama · model \(m.name)",
+                           location: "Ollama · pulled \(age) days ago · layers that other models share stay", bytes: m.bytes,
+                           tier: .review, rebuild: .download, action: .agent(.removeOllamaModel(name: m.name)),
+                           note: "Downloaded again when you need it.")
+        }
     }
 
     /// The Chromium cache folders of the Electron apps in the table. One safe item for each app.

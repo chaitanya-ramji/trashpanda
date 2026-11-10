@@ -34,6 +34,8 @@ public struct PathGuard: Sendable {
         "Library/Mail", "Library/Messages", "Library/Safari", "Library/Preferences",
         "Library/Application Support", "Library/Group Containers", "Library/Containers",
         ".ssh", ".gnupg", ".aws", ".kube", ".docker", ".orbstack", ".config",
+        // Ollama models are shared layers. Only `ollama rm` may remove a model, so no path in this folder is ever deleted by us.
+        ".ollama",
         // Package manager stores that hold the only copy of some data.
         ".yarn/berry", ".local/share/jupyter", "Library/Jupyter",
         // Installed Dart tools. Deleting them breaks the commands that the user installed.
