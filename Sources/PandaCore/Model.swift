@@ -33,7 +33,7 @@ public enum Rebuild: Sendable {
 
 /// Language or tool group. Phase 1 groups ship now. Phase 2 groups are planned.
 public enum Ecosystem: String, CaseIterable, Sendable {
-    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash, installers, logs, scala, haskell, r, julia
+    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash, installers, logs, scala, haskell, r, julia, nim
 
     /// A short name for places with little room, such as the legend of the bar.
     public var shortName: String {
@@ -58,6 +58,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .trash: return "Trash"
         case .installers: return "Installers"
         case .logs: return "Logs"
+        case .nim: return "Nim"
         case .julia: return "Julia"
         case .r: return "R"
         case .haskell: return "Haskell"
@@ -87,6 +88,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .trash: return "Trash"
         case .installers: return "Old installers"
         case .logs: return "Logs & crash reports"
+        case .nim: return "Nim"
         case .julia: return "Julia"
         case .r: return "R"
         case .haskell: return "Haskell"
