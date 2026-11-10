@@ -269,7 +269,38 @@ public final class Cleaner {
         switch action {
         case .removeCodexRuntime(let url): removeCodexRuntime(url, finding: finding, into: &report)
         case .removeOldClaudeVersions: removeOldClaudeVersions(finding: finding, into: &report)
+        case .removeOldClaudeDesktopRuntimes:
+            removeFolders(ClaudeDesktop.oldRuntimes(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
+        case .removeClaudeVMBundle:
+            removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
         }
+    }
+
+    /// Removes folders that the caller found again just now. Each one must have an allowed shape, and passes the guard.
+    private func removeFolders(_ entries: [ClaudeDesktop.Entry], finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for entry in entries {
+            let relative = String(entry.url.standardizedFileURL.path.dropFirst(home.standardizedFileURL.path.count + 1))
+            guard AgentCaches.isCleanableShape(relative: relative), UpdateDownloads.isPlainPath(entry.url) else {
+                report.skipped.append("\(entry.url.path): not a folder that we clean"); continue
+            }
+            if let reason = guardian.check(entry.url) {
+                report.skipped.append("\(entry.url.path): \(reason)"); continue
+            }
+            let size = Sizer.size(of: entry.url)
+            do {
+                try FileManager.default.removeItem(at: entry.url)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
     }
 
     /// The old versions of the Claude Code tool. We list them again now and ask which ones run. If we cannot ask, nothing is removed.

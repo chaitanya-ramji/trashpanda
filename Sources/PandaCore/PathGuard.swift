@@ -91,7 +91,7 @@ public struct PathGuard: Sendable {
             // The one exception: a cache folder of a browser, in the exact shape <root>/<profile>/<cache name>.
             // Cookies, logins, history, and every other folder of the profile stay protected.
             // Service Worker storage is the second one. It is only offered as a review item.
-            if BrowserCaches.isCleanableShape(relative: relative) { break }
+            if BrowserCaches.isCleanableShape(relative: relative) || AgentCaches.isCleanableShape(relative: relative) { break }
             return .protectedData(tree)
         }
 
