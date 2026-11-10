@@ -14,24 +14,42 @@ public enum ClaudeVersions {
 
     public static func directoryURL(home: URL) -> URL { home.appendingPathComponent(directory, isDirectory: true) }
 
-    /// A version name such as `2.1.321` or `2.2.0-beta.1`. It cannot hold a slash or start with a dot.
+    /// A version name such as `2.1.321` or `2.2.0-beta.1`: three numbers, and an optional pre-release part after a dash.
+    /// A fourth number, a dot suffix (`2.1.10.tmp`), or a number with more than nine digits is not a version name,
+    /// so that a leftover file can never tie with a real version.
     public static func isVersionName(_ name: String) -> Bool {
-        name.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$"#, options: .regularExpression) != nil
+        name.range(of: #"^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[A-Za-z0-9]+(\.[A-Za-z0-9]+)*)?$"#, options: .regularExpression) != nil
     }
 
-    /// Compares by number, part by part. `2.1.9` is older than `2.1.10`. A name with a suffix is older than the plain version.
+    /// Orders two version names like semantic versions. `2.1.9` is older than `2.1.10`. A pre-release is older than
+    /// its plain version. Pre-release parts are compared one by one: numbers by value, and a number before a word.
     public static func isNewer(_ a: String, than b: String) -> Bool {
-        func parts(_ s: String) -> ([Int], Bool) {
-            let main = s.split(separator: "-", maxSplits: 1).first.map(String.init) ?? s
-            let nums = main.split(separator: ".").map { Int($0) ?? 0 }
-            return (nums, s.contains("-"))
+        func split(_ s: String) -> ([Int], [String]) {
+            let halves = s.split(separator: "-", maxSplits: 1).map(String.init)
+            let nums = halves[0].split(separator: ".").map { Int($0) ?? 0 }
+            let pre = halves.count > 1 ? halves[1].split(separator: ".").map(String.init) : []
+            return (nums, pre)
         }
-        let (x, xs) = parts(a), (y, ys) = parts(b)
+        let (x, xp) = split(a), (y, yp) = split(b)
         for i in 0..<max(x.count, y.count) {
             let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
             if p != q { return p > q }
         }
-        return !xs && ys
+        if xp.isEmpty || yp.isEmpty { return xp.isEmpty && !yp.isEmpty }
+        for i in 0..<min(xp.count, yp.count) where xp[i] != yp[i] {
+            switch (Int(xp[i]), Int(yp[i])) {
+            case let (m?, n?): return m > n
+            case (_?, nil): return false
+            case (nil, _?): return true
+            default: return xp[i] > yp[i]
+            }
+        }
+        return xp.count > yp.count
+    }
+
+    /// The newest of some version names. When two names mean the same version, the larger text wins, so the answer never depends on the order.
+    public static func newest(of names: [String]) -> String? {
+        names.max { a, b in isNewer(b, than: a) || (!isNewer(a, than: b) && a < b) }
     }
 
     public struct Entry: Equatable, Sendable {
@@ -56,18 +74,18 @@ public enum ClaudeVersions {
 
     /// The version that `~/.local/bin/claude` points to, or nil.
     public static func linkedVersion(home: URL) -> String? {
-        let link = home.appendingPathComponent(linkPath).path
-        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: link) else { return nil }
-        let absolute = target.hasPrefix("/") ? target : URL(fileURLWithPath: link).deletingLastPathComponent().appendingPathComponent(target).path
-        let resolved = URL(fileURLWithPath: absolute).standardizedFileURL
-        guard resolved.deletingLastPathComponent().path == directoryURL(home: home).standardizedFileURL.path else { return nil }
+        let link = home.appendingPathComponent(linkPath)
+        // Resolve every link on the way: a folder above the link may be a link, and a link may point to another link.
+        guard (try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) != nil else { return nil }
+        let resolved = link.resolvingSymlinksInPath()
+        guard resolved.deletingLastPathComponent().path == directoryURL(home: home).resolvingSymlinksInPath().path else { return nil }
         return resolved.lastPathComponent
     }
 
     /// The versions that we remove, and the names that stay. `running` holds the version files that are open now.
     public static func old(home: URL, running: [String]) -> (old: [Entry], kept: [String]) {
         let all = entries(home: home)
-        guard let newest = all.map(\.name).max(by: { isNewer($1, than: $0) }) else { return ([], []) }
+        guard let newest = newest(of: all.map(\.name)) else { return ([], []) }
         let dir = directoryURL(home: home).standardizedFileURL.path + "/"
         var keep: Set<String> = [newest]
         if let linked = linkedVersion(home: home) { keep.insert(linked) }
@@ -86,8 +104,13 @@ public enum ClaudeVersions {
     public static func openBinaryPaths(among files: [String]) -> [String]? {
         guard !files.isEmpty else { return [] }
         let r = Shell.run("/usr/sbin/lsof", ["-Fn", "--"] + files, timeout: 20, quiet: true)
-        // lsof exits with 1 when none of the files is open. Any other failure, or a timeout, means that we do not know.
-        guard !r.timedOut, r.status == 0 || r.status == 1 else { return nil }
-        return Array(Set(r.stdout.split(separator: "\n").compactMap { $0.hasPrefix("n/") ? String($0.dropFirst()) : nil }))
+        return interpret(status: r.status, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut)
+    }
+
+    /// Reads the answer of lsof. Exit status 1 with no message means that none of the files is open.
+    /// Exit status 1 with a message is an error, and then we do not know. Tests call this with made-up answers.
+    static func interpret(status: Int32, stdout: String, stderr: String, timedOut: Bool) -> [String]? {
+        guard !timedOut, status == 0 || (status == 1 && stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) else { return nil }
+        return Array(Set(stdout.split(separator: "\n").compactMap { $0.hasPrefix("n/") ? String($0.dropFirst()) : nil }))
     }
 }

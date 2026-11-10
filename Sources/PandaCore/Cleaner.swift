@@ -268,27 +268,34 @@ public final class Cleaner {
     private func runAgent(_ action: AgentAction, finding: Finding, into report: inout CleanReport) {
         switch action {
         case .removeCodexRuntime(let url): removeCodexRuntime(url, finding: finding, into: &report)
-        case .removeOldClaudeVersions: removeOldClaudeVersions(finding: finding, into: &report)
-        case .removeOldClaudeDesktopRuntimes:
-            removeFolders(ClaudeDesktop.oldRuntimes(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
+        case .removeOldClaudeVersions(let names): removeOldClaudeVersions(names, finding: finding, into: &report)
+        case .removeOldClaudeDesktopRuntimes(let names):
+            removeFolders(ClaudeDesktop.oldRuntimes(home: URL(fileURLWithPath: guardian.home)).filter { names.contains(ClaudeDesktop.runtimeName($0)) },
+                          finding: finding, into: &report)
+        case .removeAgentCaches(let id): removeAgentCaches(id, finding: finding, into: &report)
         case .removeClaudeVMBundle:
             removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
         }
     }
 
     /// Removes folders that the caller found again just now. Each one must have an allowed shape, and passes the guard.
+    /// We measure first, and check last: the check runs right before the delete, so a link that replaced a folder
+    /// during the measuring is caught.
     private func removeFolders(_ entries: [ClaudeDesktop.Entry], finding: Finding, into report: inout CleanReport) {
         let home = URL(fileURLWithPath: guardian.home)
+        let homePrefix = home.standardizedFileURL.path + "/"
         var removed = 0, failures = 0
         for entry in entries {
-            let relative = String(entry.url.standardizedFileURL.path.dropFirst(home.standardizedFileURL.path.count + 1))
-            guard AgentCaches.isCleanableShape(relative: relative), UpdateDownloads.isPlainPath(entry.url) else {
+            let path = entry.url.standardizedFileURL.path
+            let size = Sizer.size(of: entry.url)
+            guard path.hasPrefix(homePrefix),
+                  AgentCaches.isCleanableShape(relative: String(path.dropFirst(homePrefix.count))),
+                  UpdateDownloads.isPlainPath(entry.url) else {
                 report.skipped.append("\(entry.url.path): not a folder that we clean"); continue
             }
             if let reason = guardian.check(entry.url) {
                 report.skipped.append("\(entry.url.path): \(reason)"); continue
             }
-            let size = Sizer.size(of: entry.url)
             do {
                 try FileManager.default.removeItem(at: entry.url)
                 report.freed += size
@@ -303,15 +310,42 @@ public final class Cleaner {
         if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
     }
 
+    /// The cache folders of one Electron app. We find them again now, from the table, and check each one.
+    private func removeAgentCaches(_ id: String, finding: Finding, into report: inout CleanReport) {
+        guard let app = AgentCaches.electronApp(id: id) else { skip(finding, "unknown app", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for url in AgentCaches.targets(of: app, home: home) {
+            let size = Sizer.size(of: url)           // measure first, check last (see removeFolders)
+            guard AgentCaches.isTarget(url, of: app, home: home), UpdateDownloads.isPlainPath(url) else {
+                report.skipped.append("\(url.path): not a cache folder of the app"); continue
+            }
+            if let reason = guardian.check(url) {
+                report.skipped.append("\(url.path): \(reason)"); continue
+            }
+            do {
+                try FileManager.default.removeItem(at: url)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) cache folders, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
     /// The old versions of the Claude Code tool. We list them again now and ask which ones run. If we cannot ask, nothing is removed.
-    private func removeOldClaudeVersions(finding: Finding, into report: inout CleanReport) {
+    private func removeOldClaudeVersions(_ names: [String], finding: Finding, into report: inout CleanReport) {
         let home = URL(fileURLWithPath: guardian.home)
         let files = ClaudeVersions.entries(home: home).map { $0.url.path }
         guard let running = openClaudeBinaries(files) else {
             skip(finding, "could not tell which versions run", &report); return
         }
         var removed = 0, failures = 0
-        for entry in ClaudeVersions.old(home: home, running: running).old {
+        for entry in ClaudeVersions.old(home: home, running: running).old where names.contains(entry.name) {
             guard ClaudeVersions.isVersionName(entry.name), UpdateDownloads.isPlainPath(entry.url) else {
                 report.skipped.append("\(entry.url.path): not a version file"); continue
             }
@@ -335,6 +369,7 @@ public final class Cleaner {
     /// One folder of the Codex runtime cache. We read the kind and the age again now. A running program keeps it.
     private func removeCodexRuntime(_ url: URL, finding: Finding, into report: inout CleanReport) {
         let home = URL(fileURLWithPath: guardian.home)
+        let before = Sizer.size(of: url)             // measure first, check last (see removeFolders)
         guard let kind = CodexRuntimes.kind(of: url, home: home) else {
             skip(finding, "not a folder of the Codex runtime cache", &report); return
         }
@@ -345,7 +380,6 @@ public final class Cleaner {
         if CodexRuntimes.isInUse(url, programs: programPaths()) {
             report.skipped.append("\(finding.location): a program runs from it. Quit Codex and try again."); return
         }
-        let before = Sizer.size(of: url)
         do {
             try FileManager.default.removeItem(at: url)
             report.freed += before

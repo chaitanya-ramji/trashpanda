@@ -6,11 +6,15 @@ public enum AgentAction: Sendable, Equatable {
     /// One folder of the Codex runtime cache: a leftover install, or the downloaded runtime itself.
     case removeCodexRuntime(URL)
     /// The old versions of the Claude Code command line tool. The cleaner finds them again, and keeps the newest, the linked one, and any that runs.
-    case removeOldClaudeVersions
+    /// `names` are the versions that the preview showed. The cleaner removes only those that are still old now.
+    case removeOldClaudeVersions(names: [String])
     /// The old runtimes of Claude Desktop (all but the newest of each family). The cleaner finds them again.
-    case removeOldClaudeDesktopRuntimes
+    /// `names` are the runtimes that the preview showed (`claude-code/2.1.309`). The cleaner removes only those that are still old now.
+    case removeOldClaudeDesktopRuntimes(names: [String])
     /// The Cowork VM folders of Claude Desktop. The cleaner finds them again from fixed names.
     case removeClaudeVMBundle
+    /// The cache folders of one Electron app (see `AgentCaches.electronApps`). The cleaner finds them again from the app id.
+    case removeAgentCaches(appID: String)
 }
 
 /// The apps that own the folders of the AI agents group. An open app blocks its items (see #16 and #47).
@@ -20,6 +24,10 @@ public enum AgentOwners {
     /// The `codex` command line tool uses the same runtime folders.
     /// Claude Desktop. The bundle ID is checked on a real Mac.
     public static let claudeDesktop = AppOwner(name: "Claude", bundleIDs: [ClaudeDesktop.bundleID + "*"])
+
+    /// Antigravity and its IDE. The bundle IDs are checked on a real Mac.
+    public static let antigravity = AppOwner(name: "Antigravity", bundleIDs: ["com.google.antigravity", "com.google.antigravity.helper*"])
+    public static let antigravityIDE = AppOwner(name: "Antigravity IDE", bundleIDs: ["com.google.antigravity-ide", "com.google.antigravity-ide.helper*"])
 
     public static let codex = AppOwner(name: "Codex", bundleIDs: ["com.openai.codex*"], processNames: ["codex"])
 }
@@ -67,5 +75,15 @@ public enum AgentProduct {
 
     public static func info(forTitle title: String) -> Info? {
         name(ofTitle: title).flatMap { n in all.first { $0.name == n } }
+    }
+}
+
+extension Action {
+    /// The names inside an agent action that carries a preview list. Tests use it.
+    var agentNames: [String]? {
+        switch self {
+        case .agent(.removeOldClaudeVersions(let names)), .agent(.removeOldClaudeDesktopRuntimes(let names)): return names
+        default: return nil
+        }
     }
 }
