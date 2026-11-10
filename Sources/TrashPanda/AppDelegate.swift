@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var cleaning = false
     private var flash: String?
     private var timer: Timer?
+    private let updates = UpdateController()
     private var spinnerTimer: Timer?
     private var spinnerStep = 0
     private let panda = PandaArt.menuBarIcon()
@@ -97,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.imagePosition = .imageLeading
         menu.delegate = self
         statusItem.menu = menu
+        if demoStyle == nil {
+            updates.onChange = { [weak self] in self?.rebuildMenu() }
+            updates.start()
+        }
         if let style = demoStyle {
             menu.appearance = NSAppearance(named: style == "dark" ? .darkAqua : .aqua)
 
@@ -239,6 +244,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        if let update = updates.available {
+            let item = NSMenuItem(title: "Update available: \(update.version)…", action: #selector(openUpdate), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
         let rescan = NSMenuItem(title: scanning ? "Scanning…" : "Scan again", action: #selector(rescan), keyEquivalent: "r")
         rescan.target = self
         rescan.isEnabled = !scanning && !cleaning
@@ -250,6 +260,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         log.isAlternate = true
         log.target = self
         menu.addItem(log)
+
+        let check = NSMenuItem(title: "Check for updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        check.target = self
+        menu.addItem(check)
+        let auto = NSMenuItem(title: "Check for updates every day", action: #selector(toggleUpdateCheck), keyEquivalent: "")
+        auto.target = self
+        auto.state = updates.isEnabled ? .on : .off
+        menu.addItem(auto)
 
         let login = NSMenuItem(title: "Open at login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
@@ -539,6 +557,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showLog() {
         NSWorkspace.shared.activateFileViewerSelecting([Log.fileURL])
+    }
+
+    @objc private func openUpdate() { if let release = updates.available { updates.open(release) } }
+    @objc private func checkForUpdates() { updates.checkNow() }
+    @objc private func toggleUpdateCheck() {
+        updates.isEnabled.toggle()
+        rebuildMenu()
     }
 
     @objc private func toggleLogin() {
