@@ -45,7 +45,7 @@ public enum LocalModels {
     /// One path part: letters, digits, and `. _ + ( ) -` and spaces inside. It cannot start with a dot or a space, so `.internal` is out.
     static func isPart(_ text: String) -> Bool {
         text.count <= 200 && !text.contains("..") && !text.hasSuffix(" ")
-            && text.range(of: #"^[A-Za-z0-9][A-Za-z0-9._+() -]*$"#, options: .regularExpression) != nil
+            && text.range(of: #"^[A-Za-z0-9][A-Za-z0-9._+() -]*\z"#, options: .regularExpression) != nil
     }
 
     public struct Model: Equatable, Sendable {

@@ -50,7 +50,7 @@ public enum EditorCaches {
     public static func app(id: String) -> EditorApp? { apps.first { $0.id == id } }
 
     static func isLogName(_ name: String) -> Bool {
-        name.range(of: #"^[0-9]{8}T[0-9]{6}$"#, options: .regularExpression) != nil
+        name.range(of: #"^[0-9]{8}T[0-9]{6}\z"#, options: .regularExpression) != nil
     }
 
     /// True when `relative` is a folder of an editor that we may delete: `<root>/<name>` or `<root>/logs/<timestamp>`.
@@ -105,7 +105,7 @@ public enum EditorCaches {
 
     /// An extension folder name, such as `ms-python.python-2025.1.0-darwin-arm64`. It cannot start with a dot or hold a slash.
     static func isExtensionFolderName(_ name: String) -> Bool {
-        name.range(of: #"^[A-Za-z0-9][A-Za-z0-9._+-]*$"#, options: .regularExpression) != nil && !name.contains("..")
+        name.range(of: #"^[A-Za-z0-9][A-Za-z0-9._+-]*\z"#, options: .regularExpression) != nil && !name.contains("..")
     }
 
     /// The folders that the editor itself marks as obsolete in `<extensions>/.obsolete`. A folder that `extensions.json`
@@ -116,7 +116,8 @@ public enum EditorCaches {
         guard isPlainFolder(dir),
               let data = try? Data(contentsOf: dir.appendingPathComponent(".obsolete")),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
-        let installed = installedNames(in: dir)
+        // If the registry of installed extensions is missing or unreadable, we cannot tell what is installed, so we remove nothing.
+        guard let installed = installedNames(in: dir) else { return [] }
         // Only a real JSON `true` counts. The number 1 is not a boolean here, even if Foundation can read it as one.
         func isTrue(_ value: Any) -> Bool {
             guard let n = value as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return false }
@@ -130,9 +131,9 @@ public enum EditorCaches {
     }
 
     /// The folder names that `extensions.json` lists as installed. We read every string in it, so that a changed format keeps more.
-    static func installedNames(in dir: URL) -> Set<String> {
+    static func installedNames(in dir: URL) -> Set<String>? {
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("extensions.json")),
-              let json = try? JSONSerialization.jsonObject(with: data) else { return [] }
+              let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
         var names: Set<String> = []
         func walk(_ value: Any) {
             switch value {

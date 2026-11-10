@@ -38,7 +38,7 @@ public enum HuggingFace {
     /// `model/org/name` or `model/name`. It cannot start with a dash, and it cannot hold `..`.
     public static func isRepoID(_ text: String) -> Bool {
         text.count <= 200 && !text.contains("..") && !text.contains("--")
-            && text.range(of: "^(model|dataset|space)/\(part)(/\(part))?$", options: .regularExpression) != nil
+            && text.range(of: "^(model|dataset|space)/\(part)(/\(part))?\\z", options: .regularExpression) != nil
     }
 
     /// The folder name of a repository: `models--org--name`. nil when the name has another shape.
@@ -46,7 +46,7 @@ public enum HuggingFace {
         for kind in Kind.allCases where folder.hasPrefix(kind.folderPrefix) {
             let rest = String(folder.dropFirst(kind.folderPrefix.count))
             let pieces = rest.components(separatedBy: "--")
-            guard (1...2).contains(pieces.count), pieces.allSatisfy({ $0.range(of: "^\(part)$", options: .regularExpression) != nil }) else { return nil }
+            guard (1...2).contains(pieces.count), pieces.allSatisfy({ $0.range(of: "^\(part)\\z", options: .regularExpression) != nil }) else { return nil }
             let name = pieces.joined(separator: "/")
             return isRepoID("\(kind.rawValue)/\(name)") ? (kind, name) : nil
         }

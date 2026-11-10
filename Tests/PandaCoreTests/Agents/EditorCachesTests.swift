@@ -265,6 +265,24 @@ final class EditorCachesTests: XCTestCase {
         }
     }
 
+    func testWithoutTheRegistryNothingIsRemoved() throws {
+        let box = try Sandbox()
+        try makeExtensions(box)
+        let registry = box.home.appendingPathComponent("\(ext)/extensions.json")
+        XCTAssertEqual(EditorCaches.obsoleteExtensions(of: app, home: box.home).count, 1)
+        try FileManager.default.removeItem(at: registry)
+        XCTAssertTrue(EditorCaches.obsoleteExtensions(of: app, home: box.home).isEmpty, "We cannot tell what is installed")
+        try "this is not json".write(to: registry, atomically: true, encoding: .utf8)
+        XCTAssertTrue(EditorCaches.obsoleteExtensions(of: app, home: box.home).isEmpty)
+        try "".write(to: registry, atomically: true, encoding: .utf8)
+        XCTAssertTrue(EditorCaches.obsoleteExtensions(of: app, home: box.home).isEmpty)
+        XCTAssertTrue(items(box).filter { $0.id.hasPrefix("agent.extensions") }.isEmpty)
+        let f = Finding(id: "x", ecosystem: .aiAgents, title: "x", location: "x", bytes: 1, tier: .safe, rebuild: .download,
+                        action: .agent(.removeObsoleteExtensions(appID: "vscode")))
+        XCTAssertEqual(cleaner(box).clean([f]).removed, 0)
+        XCTAssertTrue(exists(box, "\(ext)/pub.old-1.0.0/package.json"))
+    }
+
     func testAnExtensionFolderThatIsALinkIsNotFollowed() throws {
         let box = try Sandbox()
         try box.file("proj/precious", bytes: 400_000)

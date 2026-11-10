@@ -34,6 +34,9 @@ public struct PathGuard: Sendable {
         "Library/Mail", "Library/Messages", "Library/Safari", "Library/Preferences",
         "Library/Application Support", "Library/Group Containers", "Library/Containers",
         ".ssh", ".gnupg", ".aws", ".kube", ".docker", ".orbstack", ".config",
+        // Chats, settings, and history of coding tools. No cleaner touches them. These are backstops against a future mistake.
+        ".lmstudio/conversations", ".lmstudio/settings.json", ".claude/settings.json", ".claude/history.jsonl",
+        ".codex/config.toml", ".codex/history.jsonl", ".codex/skills", ".codex/memories",
         // Ollama models are shared layers. Only `ollama rm` may remove a model, so no path in this folder is ever deleted by us.
         ".ollama",
         // Package manager stores that hold the only copy of some data.
@@ -104,6 +107,8 @@ public struct PathGuard: Sendable {
         // The auto memory of Claude Code: `.claude/projects/<project>/memory` and everything in it.
         let pieces = relative.split(separator: "/")
         if pieces.count >= 4, pieces[0] == ".claude", pieces[1] == "projects", pieces[3] == "memory" { return .protectedData(".claude/projects/*/memory") }
+        // The folders that hold those memory folders: deleting one of them would delete the memory with it.
+        if pieces.count == 2 || pieces.count == 3, pieces[0] == ".claude", pieces[1] == "projects" { return .protectedData(".claude/projects") }
 
         for file in Self.protectedFiles where relative == file || relative.hasPrefix(file + "/") || file.hasPrefix(relative + "/") {
             return .protectedData(file)

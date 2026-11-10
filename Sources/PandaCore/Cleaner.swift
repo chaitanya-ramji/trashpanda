@@ -285,7 +285,8 @@ public final class Cleaner {
         case .removeHuggingFaceRepo(let id): removeHuggingFaceRepo(id, finding: finding, into: &report)
         case .removeLocalModel(let storeID, let name): removeLocalModel(storeID, name, finding: finding, into: &report)
         case .removeFixedFolders(let id): removeFixedFolders(id, finding: finding, into: &report)
-        case .removeOldSessions(let kind, let cutoff): removeOldSessions(kind, cutoff, finding: finding, into: &report)
+        case .removeOldSessions(let kind, let cutoff, let minimumAgeDays):
+            removeOldSessions(kind, cutoff, minimumAgeDays: minimumAgeDays, finding: finding, into: &report)
         case .removeObsoleteExtensions(let id): removeObsoleteExtensions(id, finding: finding, into: &report)
         case .removeClaudeVMBundle:
             removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
@@ -326,10 +327,13 @@ public final class Cleaner {
 
     /// The transcripts of one agent that are older than the date of the preview. We list them again, read the age again,
     /// and check the shape, the path, and the guard of each file last.
-    private func removeOldSessions(_ kind: AgentSessions.Kind, _ cutoff: Date, finding: Finding, into report: inout CleanReport) {
+    private func removeOldSessions(_ kind: AgentSessions.Kind, _ cutoff: Date, minimumAgeDays: Int, finding: Finding, into report: inout CleanReport) {
         let home = URL(fileURLWithPath: guardian.home)
         var removed = 0, failures = 0
-        for entry in AgentSessions.entries(kind, home: home, olderThan: cutoff) {
+        // The date of the preview is a ceiling, not a promise. If the clock was wrong at the preview (days ahead), a date in the future
+        // would make new sessions look old. So we also never go below the limit now.
+        let effective = min(cutoff, Date().addingTimeInterval(-Double(max(minimumAgeDays, 1)) * 86_400))
+        for entry in AgentSessions.entries(kind, home: home, olderThan: effective) {
             guard AgentSessions.isTranscriptPath(entry.url, kind: kind, home: home), UpdateDownloads.isPlainPath(entry.url) else {
                 report.skipped.append("\(entry.url.path): not a transcript"); continue
             }
@@ -409,8 +413,14 @@ public final class Cleaner {
         }
         if let reason = guardian.check(repo.folder) { skip(finding, "\(reason)", &report); return }
         if let tool = hfTool(), let args = HuggingFace.removeArguments(id) {
-            let result = Shell.run(tool, args, timeout: 300)
+            // The tool picks its cache from these variables. We checked the default folder, so the tool must use that one.
+            let result = Shell.run(tool, args, timeout: 300, unsetEnv: ["HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME"])
             guard result.status == 0, !result.timedOut else { report.failed.append("\(finding.title): hf cache rm failed"); return }
+            // An exit status of 0 is not proof. If the folder that we checked is still there, the tool worked on another cache.
+            if FileManager.default.fileExists(atPath: repo.folder.path) {
+                Log.warn("hf cache rm exited 0, but \(repo.folder.path) is still there")
+                report.failed.append("\(finding.title): hf did not remove the folder that was checked"); return
+            }
         } else {
             do { try FileManager.default.removeItem(at: repo.folder) } catch {
                 Log.error("remove failed \(repo.folder.path): \(error.localizedDescription)")
@@ -443,6 +453,9 @@ public final class Cleaner {
         }
         // A layer that another model uses stays, so the freed size can be smaller than the model. We measure the folder when we can.
         let gone = tool.models()?.contains { $0.name == name } == false
+        guard gone else {
+            report.failed.append("\(finding.title): ollama rm exited 0, but the model is still listed"); return
+        }
         let freed = measured ? max(0, before - Sizer.size(of: folder)) : (gone ? model.bytes : 0)
         report.freed += freed
         report.removed += 1

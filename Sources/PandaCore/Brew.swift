@@ -15,7 +15,7 @@ public struct Brew: Sendable {
     /// It may have a tap in front (`user/tap/name`). It cannot start with a dash, so it can never be read as an option.
     public static func isFormulaName(_ text: String) -> Bool {
         text.count <= 120 && text.range(
-            of: #"^[a-z0-9][a-z0-9@+._-]*(/[a-z0-9][a-z0-9@+._-]*){0,2}$"#, options: .regularExpression) != nil
+            of: #"^[a-z0-9][a-z0-9@+._-]*(/[a-z0-9][a-z0-9@+._-]*){0,2}\z"#, options: .regularExpression) != nil
             && !text.contains("..")
     }
 

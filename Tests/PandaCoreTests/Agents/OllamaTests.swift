@@ -10,7 +10,7 @@ final class FakeOllama {
     var calls: [String] { ((try? String(contentsOf: root.appendingPathComponent("calls.log"), encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
     private let blobs: URL
 
-    init(box: Sandbox, serverUp: Bool = true, psFails: Bool = false, rmFails: Bool = false) throws {
+    init(box: Sandbox, serverUp: Bool = true, psFails: Bool = false, rmFails: Bool = false, rmNoop: Bool = false) throws {
         root = box.home.appendingPathComponent("fakeollama", isDirectory: true)
         blobs = box.home.appendingPathComponent(".ollama/models/blobs", isDirectory: true)
         let fm = FileManager.default
@@ -29,6 +29,7 @@ final class FakeOllama {
           rm)
             [ "$#" = "2" ] || { echo "UNEXPECTED $@" >> "\(r)/calls.log"; exit 2; }
             \(rmFails ? "echo 'Error: model not found' >&2; exit 1" : "")
+            \(rmNoop ? "exit 0" : "")
             /usr/bin/grep -v "^$2 " "\(r)/ls.txt" > "\(r)/ls.tmp"; /bin/mv "\(r)/ls.tmp" "\(r)/ls.txt"
             /bin/rm -f "\(b)/$(echo "$2" | /usr/bin/tr '/:' '__')"
             exit 0 ;;
@@ -236,6 +237,16 @@ final class OllamaTests: SimctlTestCase {
         XCTAssertEqual(report.failed.count, 1)
         XCTAssertEqual(fake.calls.filter { $0.hasPrefix("rm") }.count, 1, "A failed remove is not tried again")
         XCTAssertTrue(fake.listed("old:8b"))
+    }
+
+    func testARemoveThatLeavesTheModelListedIsAFailure() throws {
+        let box = try Sandbox(), fake = try FakeOllama(box: box, rmNoop: true)
+        try fake.add("old:8b")
+        let s = scanner(box, fake)
+        let report = cleaner(s, fake).clean([try XCTUnwrap(s.scanOllama().first)])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(report.freed, 0)
+        XCTAssertTrue(report.failed[0].contains("still listed"), report.failed[0])
     }
 
     func testOllamaMissingAtCleanTimeIsSkipped() throws {

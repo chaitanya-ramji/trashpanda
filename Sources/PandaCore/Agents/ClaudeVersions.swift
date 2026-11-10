@@ -18,7 +18,7 @@ public enum ClaudeVersions {
     /// A fourth number, a dot suffix (`2.1.10.tmp`), or a number with more than nine digits is not a version name,
     /// so that a leftover file can never tie with a real version.
     public static func isVersionName(_ name: String) -> Bool {
-        name.range(of: #"^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[A-Za-z0-9]+(\.[A-Za-z0-9]+)*)?$"#, options: .regularExpression) != nil
+        name.range(of: #"^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[A-Za-z0-9]+(\.[A-Za-z0-9]+)*)?\z"#, options: .regularExpression) != nil
     }
 
     /// Orders two version names like semantic versions. `2.1.9` is older than `2.1.10`. A pre-release is older than

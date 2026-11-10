@@ -180,7 +180,7 @@ final class AgentSessionsTests: XCTestCase {
         XCTAssertFalse(exists(box, ".codex/sessions/a.jsonl"))
         XCTAssertTrue(exists(box, ".codex/sessions/b.jsonl"))
         let later = Finding(id: "l", ecosystem: .aiAgents, title: "x", location: "x", bytes: 1, tier: .review, rebuild: .never,
-                            action: .agent(.removeOldSessions(kind: .codex, olderThan: Date().addingTimeInterval(-30 * 86_400))))
+                            action: .agent(.removeOldSessions(kind: .codex, olderThan: Date().addingTimeInterval(-30 * 86_400), minimumAgeDays: 30)))
         XCTAssertEqual(cleaner(box).clean([later]).removed, 0, "29 days is younger than the date in this action")
     }
 
@@ -188,14 +188,53 @@ final class AgentSessionsTests: XCTestCase {
         let box = try Sandbox()
         try makeCodex(box)
         try makeClaude(box)
-        let far = Date().addingTimeInterval(86_400 * 365)                // a cutoff in the future: every file counts as old
+        let far = Date().addingTimeInterval(86_400 * 365)                // a cutoff in the future: the clock was wrong at the preview
         for kind in AgentSessions.Kind.allCases {
             let f = Finding(id: "f", ecosystem: .aiAgents, title: "x", location: "x", bytes: 1, tier: .review, rebuild: .never,
-                            action: .agent(.removeOldSessions(kind: kind, olderThan: far)))
+                            action: .agent(.removeOldSessions(kind: kind, olderThan: far, minimumAgeDays: 30)))
             _ = cleaner(box).clean([f])
         }
-        for k in keptCodex.filter({ !$0.contains("rollout-new") }) + keptClaude { XCTAssertTrue(exists(box, k), k) }
+        // The floor of the limit now holds: a recent session is never removed, even with a cutoff in the future.
+        for k in keptCodex + keptClaude { XCTAssertTrue(exists(box, k), k) }
+        XCTAssertTrue(exists(box, ".claude/projects/-Users-me-proj/\(uuid2).jsonl"), "3 days old")
         XCTAssertTrue(exists(box, ".codex/auth.json") && exists(box, ".claude/.credentials.json"))
+        XCTAssertFalse(exists(box, ".codex/archived_sessions/rollout-old.jsonl"), "A really old session is still removed")
+    }
+
+    func testAZeroFloorStillKeepsADay() throws {
+        let box = try Sandbox()
+        try box.file(".codex/sessions/today.jsonl", bytes: big, age: 0)
+        let f = Finding(id: "f", ecosystem: .aiAgents, title: "x", location: "x", bytes: 1, tier: .review, rebuild: .never,
+                        action: .agent(.removeOldSessions(kind: .codex, olderThan: Date().addingTimeInterval(86_400), minimumAgeDays: 0)))
+        XCTAssertEqual(cleaner(box).clean([f]).removed, 0)
+        XCTAssertTrue(exists(box, ".codex/sessions/today.jsonl"))
+    }
+
+    // MARK: The retention that the user set
+
+    func testClaudeCodesOwnRetentionIsHonored() throws {
+        let box = try Sandbox()
+        try makeClaude(box)                                                       // a session that is 50 days old
+        XCTAssertNotNil(item(box, .claude))
+        try #"{"cleanupPeriodDays": 90}"#.write(to: box.home.appendingPathComponent(".claude/settings.json"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(AgentSessions.claudeRetentionDays(home: box.home), 90)
+        XCTAssertNil(item(box, .claude), "The user keeps sessions for 90 days")
+        try #"{"cleanupPeriodDays": 10}"#.write(to: box.home.appendingPathComponent(".claude/settings.json"), atomically: true, encoding: .utf8)
+        XCTAssertNotNil(item(box, .claude), "A shorter setting does not lower our own limit of 30 days")
+        let f = try XCTUnwrap(item(box, .claude))
+        XCTAssertTrue(f.location.contains("older than 30 days"), f.location)
+    }
+
+    func testTheRetentionSettingIsReadCarefully() throws {
+        let box = try Sandbox()
+        let file = box.home.appendingPathComponent(".claude/settings.json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        for (json, expected) in [(#"{"cleanupPeriodDays": 45}"#, 45), (#"{"cleanupPeriodDays": 0}"#, nil), (#"{"cleanupPeriodDays": -5}"#, nil),
+                                 (#"{"cleanupPeriodDays": 99999999}"#, nil), (#"{"cleanupPeriodDays": true}"#, nil), (#"{"cleanupPeriodDays": "30"}"#, nil),
+                                 ("not json", nil), ("[]", nil), (#"{"other": 1}"#, nil)] as [(String, Int?)] {
+            try json.write(to: file, atomically: true, encoding: .utf8)
+            XCTAssertEqual(AgentSessions.claudeRetentionDays(home: box.home), expected, json)
+        }
     }
 
     // MARK: The guard
@@ -205,7 +244,9 @@ final class AgentSessionsTests: XCTestCase {
         let g = PathGuard(home: box.home)
         func check(_ rel: String) -> Refusal? { g.check(box.home.appendingPathComponent(rel)) }
         for rel in [".codex/auth.json", ".claude/.credentials.json", ".claude/projects/p/memory", ".claude/projects/p/memory/MEMORY.md",
-                    ".claude/projects/p/memory/deep/x.md"] { XCTAssertNotNil(check(rel), rel) }
+                    ".claude/projects/p/memory/deep/x.md", ".claude/projects", ".claude/projects/p", ".claude/settings.json", ".claude/history.jsonl",
+                    ".codex/config.toml", ".codex/history.jsonl", ".codex/skills/s/SKILL.md", ".codex/memories/m.md", ".lmstudio/conversations/c.json",
+                    ".lmstudio/settings.json"] { XCTAssertNotNil(check(rel), rel) }
         for rel in [".codex/sessions/2026/09/01/rollout-a.jsonl", ".claude/projects/p/\(uuid1).jsonl", ".codex/archived_sessions/x.jsonl"] {
             XCTAssertNil(check(rel), rel)
         }
