@@ -10,6 +10,8 @@ struct CacheSpec {
     let rebuild: Rebuild
     /// The app that uses this folder. Nothing is cleaned while it runs.
     var owner: AppOwner? = nil
+    /// One short line that the menu shows under the item.
+    var note: String? = nil
 }
 
 /// A build output folder inside a project. We find it only when a marker file sits next to it.
@@ -181,6 +183,10 @@ enum Catalog {
                   paths: [".ghcup/cache"], tier: .safe, rebuild: .download),
         CacheSpec(id: "haskell.stack.snapshots", title: "Stack snapshots", ecosystem: .haskell,
                   paths: [".stack/snapshots"], tier: .review, rebuild: .minutes),
+
+        // R
+        CacheSpec(id: "r.renv.cache", title: "renv package cache", ecosystem: .r,
+                  paths: ["Library/Caches/org.R-project.R/R/renv/cache"], tier: .review, rebuild: .minutes, note: "Every renv project that links to it needs renv::restore() to rebuild its library."),
     ]
 
     // MARK: Project build outputs
