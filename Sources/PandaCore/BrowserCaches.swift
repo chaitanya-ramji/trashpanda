@@ -44,9 +44,16 @@ public enum BrowserCaches {
                 roots: ["Library/Application Support/Vivaldi", "Library/Caches/Vivaldi"]),
         Browser(id: "opera", name: "Opera", bundleID: "com.operasoftware.Opera",
                 roots: ["Library/Application Support/com.operasoftware.Opera", "Library/Caches/com.operasoftware.Opera"]),
+        // Not checked on a real install (from public reports): the bundle ID and the folder names of Dia.
+        Browser(id: "dia", name: "Dia", bundleID: "company.thebrowser.dia",
+                roots: ["Library/Application Support/Dia/User Data", "Library/Caches/Dia/User Data"]),
         // Firefox keeps its caches only in Library/Caches. The profile folder holds the user data and is not a root here.
         Browser(id: "firefox", name: "Firefox", bundleID: "org.mozilla.firefox",
                 roots: ["Library/Caches/Firefox/Profiles"], kind: .firefox),
+        // Zen is built on Firefox. Not checked on a real install: the bundle ID and the cache folder come from public reports.
+        // One root only: the folder may be named zen or Zen, and a Mac treats both as the same folder.
+        Browser(id: "zen", name: "Zen", bundleID: "app.zen-browser.zen",
+                roots: ["Library/Caches/zen/Profiles"], kind: .firefox),
     ]
 
     /// The only folder names that we clean inside a profile.

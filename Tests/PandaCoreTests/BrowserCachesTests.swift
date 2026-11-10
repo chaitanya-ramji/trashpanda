@@ -263,7 +263,9 @@ final class BrowserCachesTests: XCTestCase {
         XCTAssertEqual(Set(b.map(\.id)).count, b.count)
         XCTAssertTrue(b.filter { $0.kind == .chromium }.allSatisfy {
             $0.roots.count == 2 && $0.roots[0].hasPrefix("Library/Application Support/") && $0.roots[1].hasPrefix("Library/Caches/") })
-        XCTAssertEqual(b.filter { $0.kind == .firefox }.map(\.roots), [["Library/Caches/Firefox/Profiles"]],
-                       "Firefox is cleaned only in Library/Caches. Its profile folder holds user data.")
+        let firefoxRoots = b.filter { $0.kind == .firefox }.flatMap(\.roots)
+        XCTAssertTrue(firefoxRoots.contains("Library/Caches/Firefox/Profiles"))
+        XCTAssertTrue(firefoxRoots.allSatisfy { $0.hasPrefix("Library/Caches/") && $0.hasSuffix("/Profiles") },
+                      "Firefox-based browsers are cleaned only in Library/Caches. Their profile folders hold user data.")
     }
 }
