@@ -49,6 +49,8 @@ public struct PathGuard: Sendable {
     static let protectedFiles: [String] = [
         // Hugging Face login. The documented place is $HF_HOME/token.
         ".cache/huggingface/token", ".cache/huggingface/stored_tokens",
+        // The login of Codex and of Claude Code.
+        ".codex/auth.json", ".claude/.credentials.json",
     ]
 
     static let criticalExact: Set<String> = [
@@ -96,6 +98,10 @@ public struct PathGuard: Sendable {
             if BrowserCaches.isCleanableShape(relative: relative) || AgentCaches.isCleanableShape(relative: relative) { break }
             return .protectedData(tree)
         }
+
+        // The auto memory of Claude Code: `.claude/projects/<project>/memory` and everything in it.
+        let pieces = relative.split(separator: "/")
+        if pieces.count >= 4, pieces[0] == ".claude", pieces[1] == "projects", pieces[3] == "memory" { return .protectedData(".claude/projects/*/memory") }
 
         for file in Self.protectedFiles where relative == file || relative.hasPrefix(file + "/") || file.hasPrefix(relative + "/") {
             return .protectedData(file)

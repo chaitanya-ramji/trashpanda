@@ -285,6 +285,7 @@ public final class Cleaner {
         case .removeHuggingFaceRepo(let id): removeHuggingFaceRepo(id, finding: finding, into: &report)
         case .removeLocalModel(let storeID, let name): removeLocalModel(storeID, name, finding: finding, into: &report)
         case .removeFixedFolders(let id): removeFixedFolders(id, finding: finding, into: &report)
+        case .removeOldSessions(let kind, let cutoff): removeOldSessions(kind, cutoff, finding: finding, into: &report)
         case .removeObsoleteExtensions(let id): removeObsoleteExtensions(id, finding: finding, into: &report)
         case .removeClaudeVMBundle:
             removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
@@ -321,6 +322,30 @@ public final class Cleaner {
         if removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
+    /// The transcripts of one agent that are older than the date of the preview. We list them again, read the age again,
+    /// and check the shape, the path, and the guard of each file last.
+    private func removeOldSessions(_ kind: AgentSessions.Kind, _ cutoff: Date, finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for entry in AgentSessions.entries(kind, home: home, olderThan: cutoff) {
+            guard AgentSessions.isTranscriptPath(entry.url, kind: kind, home: home), UpdateDownloads.isPlainPath(entry.url) else {
+                report.skipped.append("\(entry.url.path): not a transcript"); continue
+            }
+            if let reason = guardian.check(entry.url) { report.skipped.append("\(entry.url.path): \(reason)"); continue }
+            do {
+                try FileManager.default.removeItem(at: entry.url)
+                report.freed += entry.bytes
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) transcripts, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) files stayed") }
     }
 
     /// The fixed folders of one app. We find them again now, from the table, and check each one last.

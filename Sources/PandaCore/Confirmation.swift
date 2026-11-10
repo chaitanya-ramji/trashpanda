@@ -17,7 +17,7 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -36,6 +36,7 @@ public struct Confirmation: Equatable, Sendable {
         case .agent(.removeCodexRuntime) where f.tier == .review: return .agentRuntime
         case .agent(.removeOldClaudeDesktopRuntimes): return .agentRuntime
         case .agent(.removeClaudeVMBundle): return .vmBundle
+        case .agent(.removeOldSessions): return .agentSessions
         case .agent(.removeOllamaModel), .agent(.removeHuggingFaceRepo), .agent(.removeLocalModel): return .localModel
         default: return .ordinary
         }
@@ -74,6 +75,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Remove saved website data?", body: detail,
                 footer: "Websites that work offline keep their files here. After this, such a site may not open without a network until you visit it online again. This can't be undone.",
                 confirmTitle: "Remove data", cancelIsDefault: true)
+        case .agentSessions:
+            return Confirmation(
+                title: "Delete old sessions?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))",
+                footer: "You can no longer resume these conversations, and the tool may still list them. Only sessions older than the limit are deleted. This can't be undone.",
+                confirmTitle: "Delete sessions", cancelIsDefault: true)
         case .localModel:
             return Confirmation(
                 title: "Remove this model?", body: "\(f.title)\n\(ByteText.string(f.bytes))",
