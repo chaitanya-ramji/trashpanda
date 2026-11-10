@@ -13,6 +13,7 @@
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSDownloadsFolderUsageDescription</key><string>Trash Panda looks in Downloads for old installer files (.dmg and .pkg). It deletes a file only when you choose it.</string>
     <key>NSAppleEventsUsageDescription</key><string>Trash Panda asks Finder to empty the Trash, only when you choose it.</string>
 </dict>
 </plist>

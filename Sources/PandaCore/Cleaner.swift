@@ -18,12 +18,16 @@ public final class Cleaner {
     private let programPaths: () -> [String]
     /// Empties the Trash. The app asks Finder. Tests give a fake one.
     private let emptyTrash: () -> Result<Void, TrashRefusal>
+    /// The disk images that are mounted now. An image that is mounted stays.
+    private let mountedImages: () -> [String]
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
                 runningApps: RunningApps = .system, simctl: (() -> Simctl?)? = nil,
                 programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths,
-                emptyTrash: @escaping () -> Result<Void, TrashRefusal> = TrashBin.emptyWithFinder) {
+                emptyTrash: @escaping () -> Result<Void, TrashRefusal> = TrashBin.emptyWithFinder,
+                mountedImages: @escaping () -> [String] = Installers.mountedImagePaths) {
+        self.mountedImages = mountedImages
         self.emptyTrash = emptyTrash
         self.guardian = guardian
         self.runningApps = runningApps
@@ -104,6 +108,9 @@ public final class Cleaner {
 
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
+
+            case .removeInstaller(let url):
+                removeInstaller(url, finding: finding, into: &report)
 
             case .emptyTrash:
                 runEmptyTrash(finding: finding, into: &report)
@@ -233,6 +240,34 @@ public final class Cleaner {
             report.freed += finding.bytes
             report.removed += 1
             Log.info("clean \(finding.id): removed archive \(finding.bytes) bytes — \(url.path)")
+        } catch {
+            Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            report.failed.append("\(url.path): \(error.localizedDescription)")
+        }
+    }
+
+    /// One old installer. We check the path, the file type, the age, and the mounts again now.
+    private func removeInstaller(_ url: URL, finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        guard Installers.isInstallerPath(url, home: home) else {
+            skip(finding, "not an installer directly in Downloads", &report); return
+        }
+        guard let installer = Installers.read(url, home: home, now: Date()) else {
+            skip(finding, "not a plain file that is old enough", &report); return
+        }
+        if let reason = guardian.check(url) {
+            skip(finding, "\(reason)", &report); return
+        }
+        let real = url.resolvingSymlinksInPath().path
+        if mountedImages().contains(where: { $0 == url.path || $0 == real }) {
+            Log.warn("skip \(url.path): the disk image is mounted")
+            report.skipped.append("\(url.path): the disk image is open. Eject it and try again."); return
+        }
+        do {
+            try FileManager.default.removeItem(at: url)
+            report.freed += installer.bytes
+            report.removed += 1
+            Log.info("clean \(finding.id): removed installer \(installer.bytes) bytes — \(url.path)")
         } catch {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
