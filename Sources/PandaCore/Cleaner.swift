@@ -20,13 +20,17 @@ public final class Cleaner {
     private let emptyTrash: () -> Result<Void, TrashRefusal>
     /// The disk images that are mounted now. An image that is mounted stays.
     private let mountedImages: () -> [String]
+    /// Finds `brew` at clean time. Tests give a fake one.
+    private let brew: () -> Brew?
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
                 runningApps: RunningApps = .system, simctl: (() -> Simctl?)? = nil,
                 programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths,
                 emptyTrash: @escaping () -> Result<Void, TrashRefusal> = TrashBin.emptyWithFinder,
-                mountedImages: @escaping () -> [String] = Installers.mountedImagePaths) {
+                mountedImages: @escaping () -> [String] = Installers.mountedImagePaths,
+                brew: (() -> Brew?)? = nil) {
+        self.brew = brew ?? { Shell.resolve("brew").map { Brew(path: $0) } }
         self.mountedImages = mountedImages
         self.emptyTrash = emptyTrash
         self.guardian = guardian
@@ -108,6 +112,9 @@ public final class Cleaner {
 
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
+
+            case .brew(let action):
+                runBrew(action, finding: finding, into: &report)
 
             case .removeOldLogs(let kind):
                 removeOldLogs(kind, finding: finding, into: &report)
@@ -247,6 +254,32 @@ public final class Cleaner {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
         }
+    }
+
+    /// Removes one Homebrew formula through brew. We read the list of leaves again now, and we skip a formula that runs.
+    private func runBrew(_ action: BrewAction, finding: Finding, into report: inout CleanReport) {
+        guard let args = action.arguments else { skip(finding, "the formula name is not valid", &report); return }
+        guard let brew = brew() else { skip(finding, "brew not found", &report); return }
+        let name = action.name
+        guard let leaves = brew.leaves(), leaves.contains(name) else {
+            skip(finding, "\(name) is not a leaf any more, or brew did not answer", &report); return
+        }
+        let folder = brew.folder(of: name).path
+        if programPaths().contains(where: { $0.hasPrefix(folder + "/") }) {
+            Log.warn("skip \(name): a program runs from it")
+            report.skipped.append("\(finding.location): a program runs from it. Quit it and try again."); return
+        }
+        let before = brew.bytes(of: name)
+        let result = Shell.run(brew.path, args, timeout: action.timeout)
+        guard result.status == 0, !result.timedOut else {
+            let why = result.stderr.split(whereSeparator: \.isNewline).last.map(String.init) ?? "brew failed"
+            report.failed.append("\(finding.title): \(why)")
+            return
+        }
+        let freed = max(0, before - brew.bytes(of: name))
+        report.freed += freed
+        report.removed += 1
+        Log.info("clean \(finding.id): brew uninstall \(name), freed \(freed)")
     }
 
     /// The old files of one group in Logs. We find them again now. Each file passes the guard, and nothing else is touched.

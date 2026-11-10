@@ -17,7 +17,7 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -32,6 +32,7 @@ public struct Confirmation: Equatable, Sendable {
         case .emptyTrash: return .trash
         case .removeInstaller: return .installer
         case .removeOldLogs: return .oldLogs
+        case .brew: return .brewPackage
         default: return .ordinary
         }
     }
@@ -69,6 +70,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Remove saved website data?", body: detail,
                 footer: "Websites that work offline keep their files here. After this, such a site may not open without a network until you visit it online again. This can't be undone.",
                 confirmTitle: "Remove data", cancelIsDefault: true)
+        case .brewPackage:
+            return Confirmation(
+                title: "Uninstall this package?", body: "\(f.title)\n\(f.location)",
+                footer: "Homebrew removes the package. It refuses when another package needs it. You can install it again with brew install. Your own settings stay.",
+                confirmTitle: "Uninstall", cancelIsDefault: true)
         case .oldLogs:
             return Confirmation(
                 title: "Delete \(f.title.lowercased())?", body: "\(f.title)\n\(f.location)",
