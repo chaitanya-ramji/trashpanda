@@ -116,6 +116,8 @@ public enum OwnerCommand: String, Sendable, CaseIterable {
     case dockerImagePrune
     case brewCleanup
     case uvCacheClean
+    /// `uv cache prune`: removes only the entries that nothing uses. We never pass `--force`, which ignores the in-use check.
+    case uvCachePrune
     case goCleanCache
     case goCleanModcache
 
@@ -124,7 +126,7 @@ public enum OwnerCommand: String, Sendable, CaseIterable {
         case .simctlDeleteUnavailable: return "xcrun"
         case .dockerBuilderPrune, .dockerImagePrune: return "docker"
         case .brewCleanup: return "brew"
-        case .uvCacheClean: return "uv"
+        case .uvCacheClean, .uvCachePrune: return "uv"
         case .goCleanCache, .goCleanModcache: return "go"
         }
     }
@@ -136,6 +138,7 @@ public enum OwnerCommand: String, Sendable, CaseIterable {
         case .dockerImagePrune: return ["image", "prune", "-f"]
         case .brewCleanup: return ["cleanup", "--prune=all"]
         case .uvCacheClean: return ["cache", "clean"]
+        case .uvCachePrune: return ["cache", "prune"]
         case .goCleanCache: return ["clean", "-cache"]
         case .goCleanModcache: return ["clean", "-modcache"]
         }
