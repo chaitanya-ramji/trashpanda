@@ -84,6 +84,8 @@ public final class DiskScanner {
     private let xcrunOverride: String?
     private let brewOverride: String?
     private let ollamaOverride: String?
+    /// The programs that run now, with their full paths. A runtime that a program starts from stays.
+    private let programPaths: () -> [String]
     /// The program files that `claude` processes execute now. Tests give a list. nil means that we cannot tell.
     private let openClaudeBinaries: ([String]) -> [String]?
     /// The current time. Tests set a fixed time, so that ages do not change from day to day.
@@ -94,13 +96,14 @@ public final class DiskScanner {
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
                 isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
-                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil, ollamaPath: String? = nil, openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
+                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil, ollamaPath: String? = nil, programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths, openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
                 appName: @escaping (String) -> String? = UpdateDownloads.systemAppName(for:)) {
         self.now = now
         self.appName = appName
         self.xcrunOverride = xcrunPath
         self.brewOverride = brewPath
         self.ollamaOverride = ollamaPath
+        self.programPaths = programPaths
         self.openClaudeBinaries = openClaudeBinaries
         self.home = home
         self.config = config
@@ -135,6 +138,7 @@ public final class DiskScanner {
             { add(self.scanInstallers()) },
             { add(self.scanLogs()) },
             { add(self.scanAgents()) },
+            { add(self.scanRuntimes()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -186,6 +190,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .removeRuntime(let storeID, let tool, let name):
+            return RuntimeVersions.store(id: storeID).flatMap { RuntimeVersions.versions(in: $0, home: home).first { $0.tool == tool && $0.name == name } }?.bytes ?? 0
         case .globalPackage(let manager, let name):
             guard let tool = Shell.resolve(manager.tool) else { return finding.bytes }
             return GlobalPackages.list(manager, tool: tool, home: home, now: now())?.first { $0.name == name }?.bytes ?? 0
@@ -906,7 +912,8 @@ public final class DiskScanner {
 
     // MARK: Projects
 
-    func scanProjects() -> [Finding] {
+    /// The folders in which we look for projects: the usual developer folders, and the roots of the settings.
+    func projectRoots() -> [URL] {
         var roots: [URL] = []
         let fm = FileManager.default
         for name in Self.defaultRootNames {
@@ -915,7 +922,29 @@ public final class DiskScanner {
         }
         for path in config.roots { roots.append(URL(fileURLWithPath: path, isDirectory: true)) }
         var seen = Set<String>()
-        roots = roots.filter { seen.insert($0.resolvingSymlinksInPath().path).inserted }
+        return roots.filter { seen.insert($0.resolvingSymlinksInPath().path).inserted }
+    }
+
+    /// What the projects ask for (`.nvmrc`, `.python-version`, `rust-toolchain`, `.tool-versions`, ...). The cleaner reads it again.
+    public func runtimeRequests() -> [RuntimeVersions.Request] { RuntimeVersions.projectRequests(roots: projectRoots()) }
+
+    /// Runtime versions that nothing keeps: not the default, not asked for by a scanned project, not the newest, not running.
+    /// One review item for each version. The text says "no scanned project asks for it", never "unused".
+    func scanRuntimes() -> [Finding] {
+        let decision = RuntimeVersions.decide(home: home, requests: runtimeRequests(), running: programPaths())
+        return decision.removable.compactMap { v in
+            guard v.bytes > 0, guardian.check(v.url) == nil else { return nil }
+            let kept = decision.kept.filter { $0.key.hasPrefix("\(v.store.id)/\(v.tool)/") }.count
+            return Finding(id: "runtime:\(v.store.id):\(v.key)", ecosystem: .runtimes, title: "\(v.tool.capitalized) \(v.name) (\(v.store.manager))",
+                           location: "~/\(v.store.root)\(v.store.depth == 2 ? "/" + v.tool : "")/\(v.name) · not the default · no scanned project asks for it · \(kept) other \(kept == 1 ? "version stays" : "versions stay")",
+                           bytes: v.bytes, tier: .review, rebuild: .download, action: .removeRuntime(storeID: v.store.id, tool: v.tool, name: v.name),
+                           note: "Scripts, editors, and projects outside the scanned folders can still use it.")
+        }
+    }
+
+    func scanProjects() -> [Finding] {
+        var roots: [URL] = projectRoots()
+        let fm = FileManager.default
 
         let scanner = ProjectScanner(home: home, roots: roots, guardian: guardian,
                                      activeDirectories: Shell.activeDirectories(),

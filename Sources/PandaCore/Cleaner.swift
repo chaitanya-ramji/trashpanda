@@ -30,6 +30,8 @@ public final class Cleaner {
     private let hfTool: () -> String?
     /// Finds a JavaScript package manager at clean time. Tests give fake ones.
     private let packageTool: (PackageManager) -> String?
+    /// The version requests of the projects, read now. nil means that we cannot tell, and then no runtime is removed.
+    private let runtimeRequests: (() -> [RuntimeVersions.Request])?
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
@@ -40,7 +42,9 @@ public final class Cleaner {
                 brew: (() -> Brew?)? = nil,
                 openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
                 ollama: (() -> Ollama?)? = nil, hfTool: (() -> String?)? = nil,
-                packageTool: ((PackageManager) -> String?)? = nil) {
+                packageTool: ((PackageManager) -> String?)? = nil,
+                runtimeRequests: (() -> [RuntimeVersions.Request])? = nil) {
+        self.runtimeRequests = runtimeRequests
         self.packageTool = packageTool ?? { Shell.resolve($0.tool) }
         self.hfTool = hfTool ?? { Shell.resolve("hf") }
         self.ollama = ollama ?? { Shell.resolve("ollama").map { Ollama(path: $0) } }
@@ -127,6 +131,9 @@ public final class Cleaner {
 
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
+
+            case .removeRuntime(let storeID, let tool, let name):
+                removeRuntime(storeID, tool, name, finding: finding, into: &report)
 
             case .globalPackage(let manager, let name):
                 runGlobalPackage(manager, name, finding: finding, into: &report)
@@ -274,6 +281,36 @@ public final class Cleaner {
         } catch {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
+        }
+    }
+
+    /// One runtime version. We decide again now: the default may have changed, a program may run from it, a project may ask for it.
+    /// If we cannot read the projects, we remove nothing. The path and the guard are checked last.
+    private func removeRuntime(_ storeID: String, _ tool: String, _ name: String, finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        guard let store = RuntimeVersions.store(id: storeID), RuntimeVersions.isPart(name), RuntimeVersions.isPart(tool) else {
+            skip(finding, "not a runtime version", &report); return
+        }
+        guard let requests = runtimeRequests else { skip(finding, "could not read the projects, so nothing is removed", &report); return }
+        let decision = RuntimeVersions.decide(home: home, requests: requests(), running: programPaths(), measure: false)
+        guard let version = decision.removable.first(where: { $0.store == store && $0.tool == tool && $0.name == name }) else {
+            let why = decision.kept["\(storeID)/\(tool)/\(name)"] ?? "it is not installed any more"
+            skip(finding, "\(name) stays: \(why)", &report); return
+        }
+        let size = Sizer.size(of: version.url)          // measure first, check last (see removeFolders)
+        let rootPrefix = home.appendingPathComponent(store.root, isDirectory: true).standardizedFileURL.path + "/"
+        guard version.url.standardizedFileURL.path.hasPrefix(rootPrefix), UpdateDownloads.isPlainPath(version.url) else {
+            skip(finding, "not a version folder of the manager", &report); return
+        }
+        if let reason = guardian.check(version.url) { skip(finding, "\(reason)", &report); return }
+        do {
+            try FileManager.default.removeItem(at: version.url)
+            report.freed += size
+            report.removed += 1
+            Log.info("clean \(finding.id): removed \(size) bytes — \(version.url.path)")
+        } catch {
+            Log.error("remove failed \(version.url.path): \(error.localizedDescription)")
+            report.failed.append("\(version.url.path): \(error.localizedDescription)")
         }
     }
 

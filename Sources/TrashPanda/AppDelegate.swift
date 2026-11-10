@@ -623,7 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         cleaning = true
         busyChanged()
         let cleaner = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
-                              runningApps: runningApps)
+                              runningApps: runningApps, runtimeRequests: scanner.runtimeRequests)
         DispatchQueue.global(qos: .utility).async {
             let report = cleaner.clean(findings)
             DispatchQueue.main.async { self.finish(report) }

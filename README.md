@@ -41,6 +41,7 @@ Trash Panda looks in two places:
 | --- | --- | --- |
 | Swift, Obj-C, Xcode | Build data, simulator caches, Swift packages, CocoaPods. Review: simulator runtimes, old simulators, archives, device support files (one item for each OS version; the newest of each device model is kept). | `.build`, `Pods` |
 | JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright (old browser versions), Electron and node-gyp downloads | `node_modules`, `.next`, `.nuxt`, `.turbo` |
+| Old language runtimes | Versions installed by nvm, fnm, pyenv, rustup, SDKMAN, asdf, and mise: one review item for each version that is not the default, not the newest, not asked for by a scanned project, and not running. | None |
 | JavaScript global packages | Packages that you installed with `npm install -g`, `pnpm add -g`, `yarn global add`, or `bun add -g`: one review item for each. The manager removes it. | None |
 | Python | pip, uv, pre-commit, Poetry, Hugging Face, PyTorch | `.venv`, `.tox`, `.nox` |
 | Java, Kotlin | Gradle, Maven, Android, Kotlin/Native, JetBrains | `target`, `build`, `.gradle` |
@@ -87,6 +88,7 @@ The menu shows the cost to get an item back. The cost is seconds, minutes, or a 
 
 Trash Panda deletes files for good. They do not go to the Trash. These rules reduce the risk:
 
+- Old language runtime versions (nvm, fnm, pyenv, rustup, SDKMAN, asdf, mise) are review items, one for each version, and the default button keeps it. A version is offered only when it is not the default or global version of its manager, no scanned project asks for it (`.nvmrc`, `.node-version`, `.python-version`, `rust-toolchain`, `.tool-versions`, `.sdkmanrc`, `mise.toml`), it is not the newest version of its tool, and no running program starts from it. A request that the app cannot read (`lts/*`, `latest`, `system`, `20.x`, a range, an array) keeps every version of that tool. The cleaner decides again at clean time, and if it cannot read the projects it removes nothing. The text says "no scanned project asks for it" and never "unused", because a script, an editor, or a project outside the scanned folders can still use a version. The version folder is removed by its path, the same as `uninstall` does (nvm and SDKMAN are shell functions that an app cannot run). None of these managers is installed on the author's Mac, so the layouts are not checked on a real install.
 - Global JavaScript packages are review items, one for each package, and the default button keeps it. The package manager removes the package (`npm uninstall -g`, `pnpm remove -g`, `yarn global remove`, `bun remove -g`), with no option, and Trash Panda lists the packages again before and after to check the result. The managers themselves and their helpers (`npm`, `pnpm`, `yarn`, `bun`, `corepack`, `node`) are never listed. No manager records when a tool was last used, so the menu shows the date of the package folder and never says "unused". A program that calls the tool, such as an MCP server that an AI app starts, stops working, and the dialog says so. `npm` is checked on a real Mac. The output of `pnpm`, `yarn`, and `bun` follows their documentation and is not checked on a real install.
 - The AI agents menu is split by product when it has more than 6 rows from more than one product. Each product is one row with its icon (the icon of its app, or a symbol when the app is not installed) and the size that it can free, and it opens its own list with its own "Free up" line. Rows are no longer cut at 12 in this menu.
 - uv: Trash Panda runs `uv cache prune` (unused entries only, never `--force`) as a safe item. Its size cannot be previewed, so the menu shows the whole cache as an upper bound, and the report shows what was freed. Removing the whole cache (`uv cache clean`) is a separate review item. The Pythons and tools that uv installed (`~/.local/share/uv/python` and `tools`) are never deleted.
@@ -280,7 +282,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Menu: show the full split of reclaimable data as an interactive bar ([#42](https://github.com/chaitanya-ramji/trashpanda/issues/42))
 
 ### Later: v0.6 Old tools
-- [ ] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
+- [x] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
 - [x] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
 - [x] Unused global JavaScript packages: npm, pnpm, Bun, Yarn ([#51](https://github.com/chaitanya-ramji/trashpanda/issues/51))
 - [x] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
