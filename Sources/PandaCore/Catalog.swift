@@ -171,6 +171,16 @@ enum Catalog {
                   paths: ["Library/Caches/Coursier"], tier: .safe, rebuild: .download),
         CacheSpec(id: "scala.ivy", title: "Ivy cache", ecosystem: .scala,
                   paths: [".ivy2/cache"], tier: .review, rebuild: .download),
+
+        // Haskell
+        CacheSpec(id: "haskell.cabal.packages", title: "Cabal package downloads", ecosystem: .haskell,
+                  paths: [".cabal/packages"], tier: .safe, rebuild: .download),
+        CacheSpec(id: "haskell.cabal.xdg", title: "Cabal package downloads", ecosystem: .haskell,
+                  paths: [".cache/cabal/packages"], tier: .safe, rebuild: .download),
+        CacheSpec(id: "haskell.ghcup.cache", title: "GHCup downloads", ecosystem: .haskell,
+                  paths: [".ghcup/cache"], tier: .safe, rebuild: .download),
+        CacheSpec(id: "haskell.stack.snapshots", title: "Stack snapshots", ecosystem: .haskell,
+                  paths: [".stack/snapshots"], tier: .review, rebuild: .minutes),
     ]
 
     // MARK: Project build outputs
@@ -236,6 +246,12 @@ enum Catalog {
                      markers: ["build.sbt", "build.sc", "build.mill"], .scala, "Build server and editor cache", rebuild: .seconds),
         ArtifactRule(["out"],
                      markers: ["build.sc", "build.mill"], .scala, "Mill build output"),
+
+        // Haskell
+        ArtifactRule(["dist-newstyle"],
+                     markers: ["cabal.project", "*.cabal"], .haskell, "Cabal build output"),
+        ArtifactRule([".stack-work"],
+                     markers: ["stack.yaml"], .haskell, "Stack build output"),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
