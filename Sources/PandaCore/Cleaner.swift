@@ -32,6 +32,8 @@ public final class Cleaner {
     private let packageTool: (PackageManager) -> String?
     /// The version requests of the projects, read now. nil means that we cannot tell, and then no runtime is removed.
     private let runtimeRequests: (() -> [RuntimeVersions.Request])?
+    /// Reads the free space of the volume. Tests give a fake one.
+    private let freeSpace: (URL) -> Int64
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
@@ -43,8 +45,10 @@ public final class Cleaner {
                 openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
                 ollama: (() -> Ollama?)? = nil, hfTool: (() -> String?)? = nil,
                 packageTool: ((PackageManager) -> String?)? = nil,
-                runtimeRequests: (() -> [RuntimeVersions.Request])? = nil) {
+                runtimeRequests: (() -> [RuntimeVersions.Request])? = nil,
+                freeSpace: @escaping (URL) -> Int64 = DiskUsage.rawFree(at:)) {
         self.runtimeRequests = runtimeRequests
+        self.freeSpace = freeSpace
         self.packageTool = packageTool ?? { Shell.resolve($0.tool) }
         self.hfTool = hfTool ?? { Shell.resolve("hf") }
         self.ollama = ollama ?? { Shell.resolve("ollama").map { Ollama(path: $0) } }
@@ -67,13 +71,16 @@ public final class Cleaner {
         inventoryLoaded = false
         inventory = nil
         let started = Date()
-        let before = DiskUsage.rawFree(at: URL(fileURLWithPath: guardian.home))
+        let before = freeSpace(URL(fileURLWithPath: guardian.home))
         Log.info("clean start: \(findings.count) items, estimate \(findings.reduce(0) { $0 + $1.bytes }) bytes")
         // Read the running processes again. The state can change after the scan.
         let active = Shell.activeDirectories()
 
         for finding in findings {
             progress?(finding.title)
+            // What this item freed. The Docker items are counted apart (#40). `defer` runs at the end of each turn, also after `continue`.
+            let freedAtStart = report.freed
+            defer { if finding.ecosystem == .docker { report.dockerFreed += report.freed - freedAtStart } }
 
             // Nothing is cleaned while the app that uses it runs. We look again for each item,
             // because the user can start the app while the clean runs.
@@ -158,7 +165,17 @@ public final class Cleaner {
             }
         }
 
-        let after = DiskUsage.rawFree(at: URL(fileURLWithPath: guardian.home))
+        let after = freeSpace(URL(fileURLWithPath: guardian.home))
+        report.volumeChange = after - before
+        if report.dockerFreed > 0 {
+            let engine: String?
+            if case .success(let e) = dockerEngine() { engine = e.kind } else { engine = nil }
+            report.dockerNote = DockerSpaceNote.message(engine: engine, dockerFreed: report.dockerFreed,
+                                                        otherFreed: report.freed - report.dockerFreed, volumeChange: report.volumeChange)
+            // Two numbers that are kept apart, so that they can be compared later.
+            Log.info("docker: freed inside \(report.dockerFreed) bytes, other items \(report.freed - report.dockerFreed) bytes, "
+                     + "Mac free space changed by \(report.volumeChange) bytes, engine \(engine ?? "unknown"), note \(report.dockerNote == nil ? "no" : "yes")")
+        }
         Log.info(String(format: "clean done in %.1fs: removed %d, freed %lld bytes, skipped %d, failed %d, volume free changed by %lld bytes",
                         Date().timeIntervalSince(started), report.removed, report.freed,
                         report.skipped.count, report.failed.count, after - before))
