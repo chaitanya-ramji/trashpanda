@@ -169,6 +169,9 @@ public enum DockerAction: Sendable, Equatable {
     /// A stopped container and the volumes that only it uses. Docker refuses `volume rm` while any container uses a volume, even a stopped one,
     /// so the container goes first, and then each volume. Never forced. The data of the volumes is lost for good.
     case removeStoppedContainerWithVolumes(id: String, volumes: [String])
+    /// A container that may be running, and the volumes that only it uses. The container is stopped with `docker stop` (never `kill`, and
+    /// never forced), then removed, then each volume. The user chose this knowing that a program or a database stops now.
+    case stopAndRemoveContainerWithVolumes(id: String, volumes: [String])
 
     /// The arguments, or nil when the identifier is not valid. A name can hold any text.
     /// We use the hex identifier, and we accept nothing else.
@@ -181,13 +184,19 @@ public enum DockerAction: Sendable, Equatable {
         case .removeVolume(let name): return Self.isVolumeName(name) ? ["volume", "rm", name] : nil
         case .removeStoppedContainerWithVolumes(let id, let volumes):
             return Self.isHexID(id) && !volumes.isEmpty && volumes.count <= 10 && volumes.allSatisfy(Self.isVolumeName) ? ["container", "rm", id] : nil
+        case .stopAndRemoveContainerWithVolumes(let id, let volumes):
+            return Self.isHexID(id) && volumes.count <= 10 && volumes.allSatisfy(Self.isVolumeName) ? ["container", "stop", id] : nil
         }
     }
 
     /// The commands after the container is gone: one `volume rm` for each volume. Empty for the other actions.
     public var followUpArguments: [[String]] {
-        guard case .removeStoppedContainerWithVolumes(_, let volumes) = self, arguments != nil else { return [] }
-        return volumes.map { ["volume", "rm", $0] }
+        guard arguments != nil else { return [] }
+        switch self {
+        case .removeStoppedContainerWithVolumes(_, let volumes): return volumes.map { ["volume", "rm", $0] }
+        case .stopAndRemoveContainerWithVolumes(let id, let volumes): return [["container", "rm", id]] + volumes.map { ["volume", "rm", $0] }
+        default: return []
+        }
     }
 
     public var timeout: TimeInterval { 60 }

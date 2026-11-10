@@ -60,7 +60,7 @@ final class FakeDocker {
           *"system df"*) cat "\(files["summary"]!)"; exit 0;;
           *"image inspect"*) cat "\(files["tagtimes"]!)"; exit 0;;
           *"container inspect"*) cat "$(dirname "$0")/mounts.txt" 2>/dev/null; exit 0;;
-          *"builder prune"*|*"image prune"*|*"image rm "*|*"container rm "*|*"volume rm "*) touch "\(marker)"; exit 0;;
+          *"builder prune"*|*"image prune"*|*"image rm "*|*"container rm "*|*"container stop "*|*"volume rm "*) touch "\(marker)"; exit 0;;
         esac
         echo "UNEXPECTED $*" >> "\(logPath)"
         exit 1
