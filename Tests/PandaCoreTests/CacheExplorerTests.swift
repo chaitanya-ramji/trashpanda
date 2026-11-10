@@ -94,46 +94,41 @@ final class CacheExplorerTests: XCTestCase {
 
     // MARK: The menu items are read only
 
-    func testTheItemsHaveNoActionAndAreInNoTotal() throws {
+    func testTheItemsAreReviewItemsAndInNoOneClickTotal() throws {
         let box = try Sandbox()
         try makeCaches(box, [("CloudKit", 30 * mb), ("pnpm", 20 * mb), ("Adobe", 15 * mb)])
         let found = scanner(box).scanCacheExplorer()
-        XCTAssertEqual(found.count, 3)
-        XCTAssertEqual(Set(found.map(\.title)), ["CloudKit · keep", "pnpm · can clean", "Adobe · cache folder"])
+        XCTAssertEqual(Set(found.map(\.title)), ["CloudKit · system cache", "Adobe · cache folder"], "pnpm has its own item, so it is not here")
         for f in found {
             XCTAssertEqual(f.ecosystem, .cacheExplorer)
+            XCTAssertEqual(f.tier, .review)
+            XCTAssertTrue(f.isActionable)
             XCTAssertNotNil(f.note)
-            XCTAssertEqual(f.isActionable, f.title.hasSuffix("cache folder"), "Only a folder with an unknown owner has an action: \(f.title)")
         }
         let result = ScanResult(findings: found, disk: DiskUsage(total: 1, free: 1))
         XCTAssertEqual(result.reclaimable, 0, "Never in the one-click clean")
-        XCTAssertTrue(result.reviewable >= 15 * mb_() && result.reviewable < 15 * mb_() + 100_000, "Only the folder with an unknown owner is a review item: \(result.reviewable)")
+        XCTAssertEqual(result.reviewable, found.reduce(0) { $0 + $1.bytes })
     }
 
-    private func mb_() -> Int64 { 1_500_000 }
-
-    func testNothingCanBeRemovedFromTheListThatIsKeepOrHasAnItem() throws {
+    func testEveryRowInTheListCanBeRemoved() throws {
         let box = try Sandbox()
-        try makeCaches(box, [("CloudKit", 30 * mb), ("Adobe", 20 * mb)])
-        let found = scanner(box).scanCacheExplorer().filter { !$0.title.hasSuffix("cache folder") }
-        let report = Cleaner(guardian: PathGuard(home: box.home)).clean(found)
-        XCTAssertEqual(report.removed, 0)
-        XCTAssertEqual(report.freed, 0)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: box.home.appendingPathComponent("Library/Caches/CloudKit/data").path))
+        try makeCaches(box, [("CloudKit", 30 * mb), ("pnpm", 20 * mb), ("Adobe", 20 * mb), ("com.apple.bird", 15 * mb)])
+        let found = scanner(box).scanCacheExplorer()
+        XCTAssertEqual(Set(found.map(\.location)), ["~/Library/Caches/CloudKit", "~/Library/Caches/Adobe", "~/Library/Caches/com.apple.bird"])
+        XCTAssertTrue(found.allSatisfy(\.isActionable), "Nothing in the menu is read only")
     }
 
-    func testFoldersThatHaveAnItemAreCanClean() throws {
+    func testFoldersThatHaveAnItemOfTheirOwnAreNotListedAgain() throws {
         let box = try Sandbox()
         try makeCaches(box, [("Homebrew", 30 * mb), ("go-build", 20 * mb), ("ms-playwright", 25 * mb), ("Yarn", 15 * mb), ("pypoetry", 12 * mb), ("Adobe", 11 * mb)])
-        let labels = Dictionary(uniqueKeysWithValues: scanner(box).scanCacheExplorer().map { ($0.location.replacingOccurrences(of: "~/Library/Caches/", with: ""), $0.title) })
-        for name in ["Homebrew", "go-build", "ms-playwright", "Yarn", "pypoetry"] { XCTAssertTrue(labels[name]?.hasSuffix("can clean") == true, "\(name): \(labels[name] ?? "")") }
-        XCTAssertTrue(labels["Adobe"]?.hasSuffix("cache folder") == true)
+        let found = scanner(box).scanCacheExplorer()
+        XCTAssertEqual(found.map(\.location), ["~/Library/Caches/Adobe"], "The others have an item in the group of their tool, so they are not shown twice")
     }
 
     func testTwoFoldersWithTheSameAppNameCanBeToldApart() throws {
         let box = try Sandbox()
         try makeCaches(box, [("company.thebrowser.Browser", 30 * mb), ("Arc", 20 * mb)])
         let found = DiskScanner(home: box.home, config: Config(), useOwnerTools: false, appName: { $0 == "company.thebrowser.Browser" ? "Arc" : nil }).scanCacheExplorer()
-        XCTAssertEqual(Set(found.map(\.title)), ["Arc (company.thebrowser.Browser) · cache folder", "Arc · can clean"])
+        XCTAssertEqual(found.map(\.title), ["Arc (company.thebrowser.Browser) · cache folder"], "The folder named Arc has its own item")
     }
 }

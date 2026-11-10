@@ -107,7 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let style = demoStyle {
             menu.appearance = NSAppearance(named: style == "dark" ? .darkAqua : .aqua)
 
-            result = DemoData.result()
+            let demo = DemoData.result()
+            result = ScanResult(findings: demo.findings.filter(\.isActionable), disk: demo.disk)
             disk = result!.disk
             refreshStatusItem()
             rebuildMenu()
@@ -185,7 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async {
             let r = scanner.scan()
             DispatchQueue.main.async {
-                self.result = r
+                // Nothing in the menu is read only. A line that has no action (a note) is not shown. Everything shown can be removed.
+                self.result = ScanResult(findings: r.findings.filter(\.isActionable), disk: r.disk)
                 self.disk = r.disk
                 self.scanning = false
                 self.busyChanged()
@@ -392,7 +394,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let safeAll = actionable.filter { $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
         let safe = safeAll.filter { blockers($0).isEmpty }
         let review = actionable.filter { $0.tier == .review }.sorted { $0.bytes > $1.bytes }
-        let info = items.filter { !$0.isActionable }.sorted { $0.bytes > $1.bytes }
 
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.bytes }
@@ -414,31 +415,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sub.addItem(disabled("Take a look first"))
             for f in review.prefix(12) { sub.addItem(findingItem(f)) }
             if review.count > 12 { sub.addItem(moreItem(Array(review.dropFirst(12)))) }
-        }
-        if !info.isEmpty {
-            if !safeAll.isEmpty || !review.isEmpty { sub.addItem(.separator()) }
-            sub.addItem(disabled("Information only. Cannot be removed here."))
-            for f in info.prefix(12) {
-                let item = NSMenuItem(title: f.title, action: nil, keyEquivalent: "")
-                item.attributedTitle = line(f.title, f.bytes > 0 ? Format.bytes(f.bytes) : "")
-                item.isEnabled = false
-                item.toolTip = f.location
-                sub.addItem(item)
-                if let note = f.note {
-                    let n = NSMenuItem(title: note, action: nil, keyEquivalent: "")
-                    n.attributedTitle = NSAttributedString(string: "  " + note, attributes: [
-                        .font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
-                    n.isEnabled = false
-                    sub.addItem(n)
-                }
-                if let url = f.helpURL {
-                    let link = NSMenuItem(title: "Read the official steps…", action: #selector(openHelp(_:)), keyEquivalent: "")
-                    link.target = self
-                    link.representedObject = url
-                    sub.addItem(link)
-                }
-            }
-            if info.count > 12 { sub.addItem(disabled("+ \(info.count - 12) more")) }
         }
         return sub
     }

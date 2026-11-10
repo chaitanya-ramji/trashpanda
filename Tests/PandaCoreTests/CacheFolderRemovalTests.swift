@@ -2,7 +2,7 @@ import XCTest
 @testable import PandaCore
 
 /// The cache explorer rows can be emptied (the owner asked: "if it cannot be removed, it is useless").
-/// An unknown folder is a review item. CloudKit, Apple caches, and folders that have their own item are never emptied through it.
+/// An unknown folder is a review item. CloudKit and Apple caches are review items with the strongest dialog. Folders that have their own item are never emptied through it.
 final class CacheFolderRemovalTests: XCTestCase {
     private let mb = 3_500_000
     private func make(_ box: Sandbox) throws {
@@ -47,14 +47,40 @@ final class CacheFolderRemovalTests: XCTestCase {
         XCTAssertTrue(c.footer?.contains("sign you out") == true && c.footer?.contains("can't be undone") == true)
     }
 
-    func testAKeepFolderAndAFolderWithAnItemHaveNoAction() throws {
+    func testASystemFolderIsAnItemWithTheStrongestDialogAndAFolderWithAnItemIsNotListed() throws {
         let box = try Sandbox()
         try make(box)
-        for name in ["CloudKit", "com.apple.bird", "pnpm"] {
+        for name in ["CloudKit", "com.apple.bird"] {
             let f = try XCTUnwrap(item(box, name), name)
-            XCTAssertFalse(f.isActionable, name)
-            if case .inform = f.action {} else { XCTFail(name) }
+            XCTAssertTrue(f.isActionable, name)
+            XCTAssertEqual(f.title, "\(name) · system cache")
+            XCTAssertEqual(f.tier, .review)
+            XCTAssertEqual(Confirmation.kind(of: f), .cacheFolder)
+            let c = Confirmation.forOne(f, staleDays: 30)
+            XCTAssertEqual(c.title, "Empty this system cache?")
+            XCTAssertEqual(c.confirmTitle, "Empty system cache")
+            XCTAssertTrue(c.cancelIsDefault)
+            XCTAssertTrue(c.footer?.contains("iCloud") == true && c.footer?.contains("not synced yet") == true && c.footer?.contains("can't be undone") == true)
         }
+        XCTAssertNil(item(box, "pnpm"), "pnpm has its own item in the group of its tool, so it is not shown twice")
+    }
+
+    func testASystemFolderIsEmptiedOnlyThroughTheExplorerItem() throws {
+        let box = try Sandbox()
+        try make(box)
+        let f = try XCTUnwrap(item(box, "CloudKit"))
+        let report = cleaner(box).clean([f])
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertFalse(exists(box, "Library/Caches/CloudKit/data"))
+        XCTAssertTrue(exists(box, "Library/Caches/CloudKit"), "The folder stays")
+        for keep in ["com.apple.bird/data", "Adobe/a/data", "pnpm/x"] { XCTAssertTrue(exists(box, "Library/Caches/\(keep)"), keep) }
+        // Any other action still hits the guard.
+        let other = Finding(id: "o", ecosystem: .cacheExplorer, title: "x", location: "x", bytes: 1, tier: .review, rebuild: .download,
+                            action: .removeContents(box.home.appendingPathComponent("Library/Caches/com.apple.bird")))
+        XCTAssertEqual(cleaner(box).clean([other]).removed, 0)
+        XCTAssertTrue(exists(box, "Library/Caches/com.apple.bird/data"))
+        // And the folder that holds them all is never emptied.
+        XCTAssertEqual(cleaner(box).clean([forged("Caches"), forged("."), forged("")]).removed, 0)
     }
 
     func testABundleIDFolderGetsTheOwnerApp() throws {
@@ -103,12 +129,12 @@ final class CacheFolderRemovalTests: XCTestCase {
         let box = try Sandbox()
         try make(box)
         try box.file("Documents/keep.txt", bytes: 100)
-        let names = ["", ".", "..", "../Documents", "a/b", "/etc", ".hidden", "CloudKit", "cloudkit", "com.apple.bird", "com.apple.anything", "GeoServices",
-                     "FamilyCircle", "pnpm", "Yarn", "Homebrew", "ms-playwright", "Adobe\n", "x\u{0}y", String(repeating: "a", count: 300), "Library", "Caches"]
+        let names = ["", ".", "..", "../Documents", "a/b", "/etc", ".hidden",
+                     "pnpm", "Yarn", "Homebrew", "ms-playwright", "Adobe\n", "x\u{0}y", String(repeating: "a", count: 300), "Library", "Caches"]
         let report = cleaner(box).clean(names.map(forged))
         XCTAssertEqual(report.removed, 0)
         XCTAssertEqual(report.skipped.count, names.count)
-        for keep in ["Library/Caches/CloudKit/data", "Library/Caches/com.apple.bird/data", "Library/Caches/pnpm/x", "Library/Caches/Adobe/a/data", "Documents/keep.txt"] {
+        for keep in ["Library/Caches/pnpm/x", "Library/Caches/Adobe/a/data", "Documents/keep.txt"] {
             XCTAssertTrue(exists(box, keep), keep)
         }
     }
@@ -201,5 +227,84 @@ final class CacheFolderRemovalTests: XCTestCase {
                             action: .removeContents(box.home.appendingPathComponent("Library/Caches/AdobeSomethingElse")))
         XCTAssertEqual(DiskScanner.removeOverlap([explorer, other], home: box.home).first { $0.id == explorer.id }?.bytes, explorer.bytes,
                        "A folder name that only starts the same is not inside it")
+    }
+
+    // MARK: Found by the independent review
+
+    func testTheGuardLiftsTheRuleForTheNamedFolderOnly() throws {
+        let box = try Sandbox()
+        try make(box)
+        let g = scanner(box).guardian
+        let caches = box.home.appendingPathComponent("Library/Caches")
+        XCTAssertNotNil(g.check(caches.appendingPathComponent("CloudKit/data")), "No name, no lift")
+        XCTAssertNil(g.check(caches.appendingPathComponent("CloudKit/data"), allowingSystemCache: "CloudKit"))
+        XCTAssertNil(g.check(caches.appendingPathComponent("CloudKit/data"), allowingSystemCache: "cloudkit"), "Case does not matter")
+        XCTAssertNotNil(g.check(caches.appendingPathComponent("com.apple.bird/data"), allowingSystemCache: "CloudKit"), "Another protected folder stays protected")
+        XCTAssertNotNil(g.check(caches, allowingSystemCache: "CloudKit"), "Library/Caches itself stays protected")
+        XCTAssertNotNil(g.check(box.home.appendingPathComponent("Library/Application Support/Claude"), allowingSystemCache: "CloudKit"))
+        XCTAssertNotNil(g.check(box.home.appendingPathComponent(".ssh/id_rsa"), allowingSystemCache: "CloudKit"))
+    }
+
+    func testAnotherActionNeverGetsTheLift() throws {
+        let box = try Sandbox()
+        try make(box)
+        let other = Finding(id: "o", ecosystem: .cacheExplorer, title: "x", location: "x", bytes: 1, tier: .review, rebuild: .download,
+                            action: .removeContents(box.home.appendingPathComponent("Library/Caches/CloudKit")))
+        XCTAssertEqual(cleaner(box).clean([other]).removed, 0)
+        XCTAssertTrue(exists(box, "Library/Caches/CloudKit/data"))
+    }
+
+    func testAFolderThatBecameALinkAfterTheScanIsNotFollowed() throws {
+        let box = try Sandbox()
+        try make(box)
+        try box.file("Library/Caches/Victim/keep.txt", bytes: 10)
+        let f = try XCTUnwrap(item(box, "Adobe"))
+        let adobe = box.home.appendingPathComponent("Library/Caches/Adobe")
+        try FileManager.default.removeItem(at: adobe)
+        try FileManager.default.createSymbolicLink(at: adobe, withDestinationURL: box.home.appendingPathComponent("Library/Caches/CloudKit"))
+        XCTAssertEqual(cleaner(box).clean([f]).removed, 0)
+        XCTAssertTrue(exists(box, "Library/Caches/CloudKit/data"), "The link target is untouched")
+        XCTAssertTrue(exists(box, "Library/Caches/Victim/keep.txt"))
+    }
+
+    func testAChildThatIsALinkIsNotFollowed() throws {
+        let box = try Sandbox()
+        try make(box)
+        try box.file("Documents/keep.txt", bytes: 10)
+        try FileManager.default.createSymbolicLink(at: box.home.appendingPathComponent("Library/Caches/Adobe/link"), withDestinationURL: box.home.appendingPathComponent("Documents"))
+        let f = try XCTUnwrap(item(box, "Adobe"))
+        _ = cleaner(box).clean([f])
+        XCTAssertTrue(exists(box, "Documents/keep.txt"))
+    }
+
+    func testAFolderWithDifferentLettersIsStillASystemFolder() throws {
+        let box = try Sandbox()
+        try box.file("Library/Caches/cloudKit/data", bytes: 5 * mb)
+        let f = try XCTUnwrap(item(box, "cloudKit"))
+        XCTAssertTrue(f.title.hasSuffix("system cache"))
+        XCTAssertEqual(Confirmation.forOne(f, staleDays: 30).title, "Empty this system cache?")
+        XCTAssertEqual(cleaner(box).clean([f]).removed, 1, "The guard and the cleaner agree about the case")
+        XCTAssertFalse(exists(box, "Library/Caches/cloudKit/data"))
+    }
+
+    func testTheDialogFollowsTheActionNotTheTitle() throws {
+        let box = try Sandbox()
+        try make(box)
+        var f = try XCTUnwrap(item(box, "CloudKit"))
+        f = Finding(id: f.id, ecosystem: f.ecosystem, title: "Renamed", location: f.location, bytes: f.bytes, tier: f.tier, rebuild: f.rebuild, action: f.action)
+        XCTAssertEqual(Confirmation.forOne(f, staleDays: 30).title, "Empty this system cache?")
+    }
+
+    func testAForgedNameCannotSizeTheWholeHome() throws {
+        let box = try Sandbox()
+        try make(box)
+        XCTAssertEqual(scanner(box).remainingBytes(of: forged("../..")), 0)
+    }
+
+    func testAnAppOfAnAppleFolderIsNotQuitForIt() throws {
+        let box = try Sandbox()
+        try box.file("Library/Caches/com.apple.Safari/data", bytes: 5 * mb)
+        let f = try XCTUnwrap(item(box, "com.apple.Safari"))
+        XCTAssertNil(f.owner, "No app is quit for a system folder")
     }
 }

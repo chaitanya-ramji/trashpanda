@@ -4,7 +4,7 @@ import Foundation
 /// On the author's Mac, 27 GB is `CloudKit`, which is iCloud data and not safe to delete.
 ///
 /// - `can clean`: Trash Panda has an item for it in the group of its tool. The row only points to it.
-/// - `keep`: not ours to empty (iCloud data, Apple system caches). No action, with the reason.
+/// - `keep`: iCloud data and Apple system caches. Offered as review items with the strongest dialog, with the reason.
 /// - `unknown`: we do not know the owner. This is a review item: the user may empty the folder (the contents, not the folder).
 ///   Apple says that apps must be able to re-create the files in a caches folder, so this is allowed, but some apps keep
 ///   logins or offline files there, so it is never in the one-click clean, and the default button of the dialog keeps the data.
@@ -22,12 +22,12 @@ public enum CacheExplorer {
     /// A folder under this size is not worth a line.
     public static let minimumBytes: Int64 = 10_000_000
 
-    /// Folders that must stay, with a short reason. Checked by exact name.
+    /// System folders, with a short reason. They are offered as review items with the strongest dialog. Matched without regard to case.
     static let keepReasons: [String: String] = [
         "CloudKit": "iCloud data. Deleting it can lose changes that are not synced yet.",
         "com.apple.bird": "The sync state of iCloud Drive.",
         "com.apple.iCloudDrive": "The sync state of iCloud Drive.",
-        "com.apple.Safari": "Safari data. macOS protects it, and Trash Panda never cleans it.",
+        "com.apple.Safari": "Safari data. It may sign you out of sites, and macOS may refuse to let Trash Panda change it.",
         "com.apple.photolibraryd": "The caches of your Photos library. They are slow to rebuild.",
         "com.apple.mail": "Mail data. Deleting it can lose messages that are not synced.",
         "FamilyCircle": "Family Sharing data from iCloud.",
@@ -36,8 +36,8 @@ public enum CacheExplorer {
 
     /// The reason to keep a folder, or nil. Any other Apple cache is managed by macOS.
     static func keepReason(_ name: String) -> String? {
-        if let exact = keepReasons[name] { return exact }
-        return name.hasPrefix("com.apple.") ? "An Apple system cache. macOS manages it." : nil
+        if let exact = keepReasons.first(where: { $0.key.lowercased() == name.lowercased() })?.value { return exact }
+        return name.lowercased().hasPrefix("com.apple.") ? "An Apple system cache. macOS manages it." : nil
     }
 
     public struct Entry: Equatable, Sendable {
@@ -106,8 +106,4 @@ public enum CacheExplorer {
         name.range(of: #"^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9_-]*){2,}\z"#, options: .regularExpression) != nil
     }
 
-    /// True when the folder may be emptied through the explorer: a real name, not kept, and no other item owns it.
-    public static func isRemovable(_ name: String) -> Bool {
-        isFolderName(name) && keepReason(name) == nil && !catalogNames().contains(name)
-    }
 }
