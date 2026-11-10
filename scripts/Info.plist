@@ -13,5 +13,6 @@
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>Trash Panda asks Finder to empty the Trash, only when you choose it.</string>
 </dict>
 </plist>

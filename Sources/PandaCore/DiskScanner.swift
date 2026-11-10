@@ -124,6 +124,7 @@ public final class DiskScanner {
             { add(self.scanBrowserCaches()) },
             { add(self.scanServiceWorkerStorage()) },
             { add(self.scanTestBrowsers()) },
+            { add(self.scanTrash()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -170,6 +171,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.bytes(of: $0, home: home) } ?? finding.bytes
         case .removeServiceWorkerStorage(let id):
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
+        case .emptyTrash:
+            return TrashBin.bytes(home: home)
         case .removeOldTestBrowsers(let id):
             return TestBrowsers.tool(id: id).map { TestBrowsers.bytes(of: $0, home: home) } ?? finding.bytes
         case .removeUpdateDownloads(let url):
@@ -332,6 +335,19 @@ public final class DiskScanner {
                            bytes: bytes, tier: .safe, rebuild: .download,
                            action: .removeBrowserCaches(browserID: b.id), owner: b.owner)
         }
+    }
+
+    /// The Trash of the user. It is a review item: the user chose to keep these files until now, and emptying is final.
+    func scanTrash() -> [Finding] {
+        let folder = TrashBin.url(home: home)
+        guard TrashBin.readable(folder) else {
+            if FileManager.default.fileExists(atPath: folder.path) { Log.warn("the Trash cannot be read. Full Disk Access may be needed") }
+            return []
+        }
+        let bytes = Sizer.size(of: folder)
+        guard bytes > 0 else { return [] }
+        return [Finding(id: "trash", ecosystem: .trash, title: "Trash", location: "~/.Trash · Finder empties it",
+                        bytes: bytes, tier: .review, rebuild: .never, action: .emptyTrash)]
     }
 
     /// Old versions of the browsers that Playwright, Cypress, and Puppeteer downloaded. The newest of each kind stays.
