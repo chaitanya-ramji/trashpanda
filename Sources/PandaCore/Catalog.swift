@@ -315,6 +315,10 @@ enum Catalog {
         ArtifactRule(["blib"],
                      markers: ["Makefile.PL", "Build.PL", "dist.ini"], .perl, "Build output"),
 
+        // Lua
+        ArtifactRule(["lua_modules"],
+                     markers: ["*.rockspec"], .lua, "LuaRocks tree", tier: .review, rebuild: .download),
+
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
     ]
