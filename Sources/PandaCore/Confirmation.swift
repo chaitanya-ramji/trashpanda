@@ -17,7 +17,7 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage, runtime
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -30,6 +30,7 @@ public struct Confirmation: Equatable, Sendable {
         case .removeDeviceSupport: return .deviceSupport
         case .removeServiceWorkerStorage: return .serviceWorker
         case .globalPackage: return .globalPackage
+        case .removeRuntime: return .runtime
         case .emptyTrash: return .trash
         case .removeInstaller: return .installer
         case .removeOldLogs: return .oldLogs
@@ -76,6 +77,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Remove saved website data?", body: detail,
                 footer: "Websites that work offline keep their files here. After this, such a site may not open without a network until you visit it online again. This can't be undone.",
                 confirmTitle: "Remove data", cancelIsDefault: true)
+        case .runtime:
+            return Confirmation(
+                title: "Remove this runtime version?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))",
+                footer: "It is not the default, and no scanned project asks for it. A script, an editor, or a project outside the scanned folders can still use it. You can install it again with the version manager. This can't be undone.",
+                confirmTitle: "Remove version", cancelIsDefault: true)
         case .globalPackage:
             return Confirmation(
                 title: "Uninstall this global package?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))",

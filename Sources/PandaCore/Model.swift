@@ -33,7 +33,7 @@ public enum Rebuild: Sendable {
 
 /// Language or tool group. Phase 1 groups ship now. Phase 2 groups are planned.
 public enum Ecosystem: String, CaseIterable, Sendable {
-    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash, installers, logs, scala, haskell, r, julia, nim, ocaml, crystal, clojure, perl, lua, aiAgents
+    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash, installers, logs, scala, haskell, r, julia, nim, ocaml, crystal, clojure, perl, lua, aiAgents, runtimes
 
     /// A short name for places with little room, such as the legend of the bar.
     public var shortName: String {
@@ -59,6 +59,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .installers: return "Installers"
         case .logs: return "Logs"
         case .aiAgents: return "AI agents"
+        case .runtimes: return "Runtimes"
         case .lua: return "Lua"
         case .perl: return "Perl"
         case .clojure: return "Clojure"
@@ -95,6 +96,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .installers: return "Old installers"
         case .logs: return "Logs & crash reports"
         case .aiAgents: return "AI agents & local models"
+        case .runtimes: return "Old language runtimes"
         case .lua: return "Lua"
         case .perl: return "Perl"
         case .clojure: return "Clojure"
@@ -224,6 +226,8 @@ public enum SimulatorAction: Sendable, Equatable {
 }
 
 public enum Action: Sendable {
+    /// One version of a language runtime that a version manager installed. The cleaner decides again whether it may go.
+    case removeRuntime(storeID: String, tool: String, name: String)
     /// One global package of npm, pnpm, Yarn, or Bun. The manager removes it. The cleaner checks it again first.
     case globalPackage(manager: PackageManager, name: String)
     /// One action of the AI agents group. The cleaner finds the targets again at clean time.
