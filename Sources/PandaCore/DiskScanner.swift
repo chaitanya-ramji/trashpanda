@@ -244,7 +244,7 @@ public final class DiskScanner {
             case .dockerBuilderPrune: return dockerBuildCacheBytes()
             case .dockerImagePrune: return danglingImageBytes()
             case .simctlDeleteUnavailable: return scanSimulators().first { $0.id == "xcode.sim.unavailable" }?.bytes ?? 0
-            case .uvCacheClean:
+            case .uvCacheClean, .uvCachePrune:
                 return FileManager.default.fileExists(atPath: finding.location)
                     ? Sizer.size(of: URL(fileURLWithPath: finding.location)) : 0
             case .goCleanCache, .goCleanModcache:
@@ -864,9 +864,20 @@ public final class DiskScanner {
         guard FileManager.default.fileExists(atPath: dir.path), guardian.check(dir) == nil else { return [] }
         let bytes = Sizer.size(of: dir)
         guard bytes > 0 else { return [] }
-        return [Finding(id: "uv.cache", ecosystem: .python, title: "uv cache", location: dir.path,
-                        bytes: bytes, tier: .safe, rebuild: .download,
-                        action: uv != nil ? .owner(.uvCacheClean) : .removeContents(dir))]
+        // Agents such as Claude Code and Codex start `uv` (uvx, uv run), so this cache grows on a Mac that uses them.
+        // `uv cache clean` removes everything, so it is a deliberate choice (review). `uv cache prune` removes only unused entries
+        // and the uv documentation says to run it often. Its size cannot be previewed (a dry run is not documented), so the item shows
+        // the size of the cache as an upper bound, and the report shows what was really freed.
+        var out = [Finding(id: "uv.cache", ecosystem: .python, title: "uv cache (everything)", location: dir.path,
+                           bytes: bytes, tier: .review, rebuild: .download,
+                           action: uv != nil ? .owner(.uvCacheClean) : .removeContents(dir),
+                           note: "Removes the whole cache. Agents such as Claude Code and Codex start uv.")]
+        if uv != nil {
+            out.append(Finding(id: "uv.prune", ecosystem: .aiAgents, title: "uv · unused cache entries", location: dir.path,
+                               bytes: bytes, tier: .safe, rebuild: .download, action: .owner(.uvCachePrune),
+                               note: "Up to this size. uv removes only what nothing uses. Agents such as Claude Code and Codex start uv."))
+        }
+        return out
     }
 
     // MARK: Projects

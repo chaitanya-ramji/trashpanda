@@ -42,6 +42,8 @@ public struct PathGuard: Sendable {
         ".pub-cache/bin", ".pub-cache/global_packages",
         // Installed Elixir archives (such as phx_new) and the Hex login.
         ".mix", ".hex/hex.config",
+        // Interpreters and tools that uv installed (`uv python install`, `uv tool install`). Deleting them breaks commands.
+        ".local/share/uv/python", ".local/share/uv/tools",
     ]
 
     /// Files that hold a login or a secret. Neither the file nor any folder that contains it may be deleted.
