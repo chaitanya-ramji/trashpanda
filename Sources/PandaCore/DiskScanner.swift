@@ -182,6 +182,12 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeEditorCaches(let id)):
+            guard let app = EditorCaches.app(id: id) else { return finding.bytes }
+            return EditorCaches.targets(of: app, home: home, now: now()).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+        case .agent(.removeObsoleteExtensions(let id)):
+            guard let app = EditorCaches.app(id: id) else { return finding.bytes }
+            return EditorCaches.obsoleteExtensions(of: app, home: home).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
         case .agent(.removeAgentCaches(let id)):
             guard let app = AgentCaches.electronApp(id: id) else { return finding.bytes }
             return AgentCaches.targets(of: app, home: home).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
@@ -491,7 +497,32 @@ public final class DiskScanner {
 
     /// The AI agents group. Each product has its own function, and its items start with the product name.
     func scanAgents() -> [Finding] {
-        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches()
+        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches()
+    }
+
+    /// The VS Code style editors: rebuildable folders, old logs, and extensions that the editor marks obsolete. All safe, editor closed.
+    func scanEditorCaches() -> [Finding] {
+        var out: [Finding] = []
+        for app in EditorCaches.apps {
+            let targets = EditorCaches.targets(of: app, home: home, now: now()).filter { guardian.check($0) == nil }
+            let bytes = targets.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+            if bytes > 0 {
+                let logs = targets.filter { $0.deletingLastPathComponent().lastPathComponent == "logs" }.count
+                out.append(Finding(id: "agent.editor:\(app.id)", ecosystem: .aiAgents, title: app.title,
+                                   location: "~/\(app.supportRoot) · \(targets.count - logs) cache folder\(targets.count - logs == 1 ? "" : "s"), \(logs) old log\(logs == 1 ? "" : "s") · settings and chats stay",
+                                   bytes: bytes, tier: .safe, rebuild: .download, action: .agent(.removeEditorCaches(appID: app.id)),
+                                   owner: app.owner))
+            }
+            let ext = EditorCaches.obsoleteExtensions(of: app, home: home).filter { guardian.check($0) == nil }
+            let extBytes = ext.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+            if extBytes > 0, let rel = app.extensionsRoot {
+                out.append(Finding(id: "agent.extensions:\(app.id)", ecosystem: .aiAgents, title: app.extensionsTitle,
+                                   location: "~/\(rel) · \(ext.count) old version\(ext.count == 1 ? "" : "s") that \(app.product) marked obsolete",
+                                   bytes: extBytes, tier: .safe, rebuild: .download, action: .agent(.removeObsoleteExtensions(appID: app.id)),
+                                   owner: app.owner))
+            }
+        }
+        return out
     }
 
     /// The Chromium cache folders of the Electron apps in the table. One safe item for each app.

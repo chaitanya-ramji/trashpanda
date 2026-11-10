@@ -22,7 +22,7 @@ public enum AgentCaches {
     /// True when `relative` (a path below the home folder) is a folder that an AI agent cleaner may delete.
     public static func isCleanableShape(relative: String) -> Bool {
         guard let p = parts(relative) else { return false }
-        if isElectronShape(relative: relative) { return true }
+        if isElectronShape(relative: relative) || EditorCaches.isShape(relative: relative) { return true }
         let root = claudeRoot.split(separator: "/").map(String.init)
         guard p.count > root.count, Array(p.prefix(root.count)) == root else { return false }
         let rest = Array(p.dropFirst(root.count))

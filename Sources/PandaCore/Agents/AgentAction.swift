@@ -15,6 +15,10 @@ public enum AgentAction: Sendable, Equatable {
     case removeClaudeVMBundle
     /// The cache folders of one Electron app (see `AgentCaches.electronApps`). The cleaner finds them again from the app id.
     case removeAgentCaches(appID: String)
+    /// The cache folders and old logs of one VS Code style editor. The cleaner finds them again from the editor id.
+    case removeEditorCaches(appID: String)
+    /// The extension folders that one editor lists as obsolete (and does not list as installed).
+    case removeObsoleteExtensions(appID: String)
 }
 
 /// The apps that own the folders of the AI agents group. An open app blocks its items (see #16 and #47).
