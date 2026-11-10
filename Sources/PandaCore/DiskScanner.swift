@@ -185,6 +185,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeHuggingFaceRepo(let id)):
+            return HuggingFace.repo(id: id, home: home, now: now()).map(\.bytes) ?? 0
         case .agent(.removeOllamaModel(let name)):
             return ollamaTool()?.models()?.first { $0.name == name }?.bytes ?? 0
         case .agent(.removeEditorCaches(let id)):
@@ -502,7 +504,19 @@ public final class DiskScanner {
 
     /// The AI agents group. Each product has its own function, and its items start with the product name.
     func scanAgents() -> [Finding] {
-        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches()
+        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches() + scanHuggingFace()
+    }
+
+    /// The repositories of the Hugging Face hub cache. One review item for each. Datasets are costly to get again.
+    func scanHuggingFace() -> [Finding] {
+        HuggingFace.repos(home: home, now: now()).compactMap { r in
+            guard r.bytes > 0, guardian.check(r.folder) == nil else { return nil }
+            let age = r.ageDays.map { "downloaded \($0) days ago" } ?? "download date unknown"
+            return Finding(id: "agent.hf:\(r.id)", ecosystem: .aiAgents, title: "Hugging Face · \(r.kind.rawValue) \(r.name)",
+                           location: "~/\(HuggingFace.hubFolder) · \(age)", bytes: r.bytes, tier: .review, rebuild: .download,
+                           action: .agent(.removeHuggingFaceRepo(id: r.id)),
+                           note: r.kind == .dataset ? "A dataset can be very large to download again." : "Downloaded again when you need it.")
+        }
     }
 
     /// The VS Code style editors: rebuildable folders, old logs, and extensions that the editor marks obsolete. All safe, editor closed.

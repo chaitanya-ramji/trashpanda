@@ -19,11 +19,11 @@ final class HuggingFaceTokenTests: XCTestCase {
     }
     private func exists(_ box: Sandbox, _ rel: String) -> Bool { FileManager.default.fileExists(atPath: box.home.appendingPathComponent(rel).path) }
 
-    func testTheScanListsHubAndXetAndNeverTheParent() throws {
+    func testTheScanListsOnlyXetHereAndNeverTheParent() throws {
         let box = try Sandbox()
         try makeCache(box)
         let found = scanner(box).scanCaches().filter { $0.id.hasPrefix("hf.cache") }
-        XCTAssertEqual(Set(found.map(\.id)), ["hf.cache:\(hf)/hub", "hf.cache:\(hf)/xet"])
+        XCTAssertEqual(Set(found.map(\.id)), ["hf.cache:\(hf)/xet"], "The hub is listed for each repository in the AI agents group")
         XCTAssertTrue(found.allSatisfy { $0.tier == .review })
         XCTAssertFalse(found.contains { $0.location.hasSuffix("/huggingface") }, "The parent holds the login")
     }
@@ -33,8 +33,7 @@ final class HuggingFaceTokenTests: XCTestCase {
         try makeCache(box)
         let found = scanner(box).scanCaches().filter { $0.id.hasPrefix("hf.cache") }
         let report = cleaner(box).clean(found)
-        XCTAssertEqual(report.removed, 2)
-        XCTAssertFalse(exists(box, "\(hf)/hub/models--org--name/blobs/aaaa"))
+        XCTAssertEqual(report.removed, 1)
         XCTAssertFalse(exists(box, "\(hf)/xet/chunk-cache/x"))
         XCTAssertTrue(exists(box, "\(hf)/token"), "The login stays")
         XCTAssertTrue(exists(box, "\(hf)/stored_tokens"))
@@ -77,8 +76,9 @@ final class HuggingFaceTokenTests: XCTestCase {
     func testTheKeepRowsStillWorkWithoutTheLogin() throws {
         let box = try Sandbox()
         try box.file("\(hf)/hub/m/a", bytes: 2_000_000)
+        try box.file("\(hf)/xet/c/x", bytes: 2_000_000)
         let found = scanner(box).scanCaches().filter { $0.id.hasPrefix("hf.cache") }
-        XCTAssertEqual(found.count, 1, "Only hub exists")
+        XCTAssertEqual(found.count, 1, "Only xet is a row here")
         XCTAssertEqual(cleaner(box).clean(found).removed, 1)
     }
 }

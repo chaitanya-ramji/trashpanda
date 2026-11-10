@@ -99,9 +99,10 @@ enum Catalog {
                   paths: [".cache/pre-commit"], tier: .safe, rebuild: .download),
         CacheSpec(id: "poetry.cache", title: "Poetry cache", ecosystem: .python,
                   paths: ["Library/Caches/pypoetry"], tier: .review, rebuild: .download),
-        // Only `hub` (models and datasets) and `xet`. The folder above also holds the login (`token`, `stored_tokens`).
-        CacheSpec(id: "hf.cache", title: "Hugging Face models", ecosystem: .python,
-                  paths: [".cache/huggingface/hub", ".cache/huggingface/xet"], tier: .review, rebuild: .download),
+        // Only `xet` here. The folder above also holds the login (`token`, `stored_tokens`). The `hub` folder is listed
+        // for each repository in the AI agents group (HuggingFace.swift), so that it is not counted twice.
+        CacheSpec(id: "hf.cache", title: "Hugging Face download chunks", ecosystem: .python,
+                  paths: [".cache/huggingface/xet"], tier: .review, rebuild: .download),
         CacheSpec(id: "torch.cache", title: "PyTorch downloads", ecosystem: .python,
                   paths: [".cache/torch"], tier: .review, rebuild: .download),
 

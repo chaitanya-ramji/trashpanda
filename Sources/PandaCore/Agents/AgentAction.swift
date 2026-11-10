@@ -21,6 +21,8 @@ public enum AgentAction: Sendable, Equatable {
     case removeObsoleteExtensions(appID: String)
     /// One Ollama model. The cleaner asks `ollama rm <name>`, and nothing else. A model that is loaded is skipped.
     case removeOllamaModel(name: String)
+    /// One Hugging Face repository (`model/org/name`). The cleaner finds its folder again, and removes it with `hf` or by folder.
+    case removeHuggingFaceRepo(id: String)
 }
 
 /// The apps that own the folders of the AI agents group. An open app blocks its items (see #16 and #47).
