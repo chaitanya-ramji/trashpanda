@@ -195,6 +195,10 @@ enum Catalog {
                   paths: [".julia/artifacts"], tier: .review, rebuild: .download),
         CacheSpec(id: "julia.packages", title: "Julia packages", ecosystem: .julia,
                   paths: [".julia/packages"], tier: .review, rebuild: .download),
+
+        // Nim
+        CacheSpec(id: "nim.cache", title: "Nim build cache", ecosystem: .nim,
+                  paths: [".cache/nim"], tier: .safe, rebuild: .minutes),
     ]
 
     // MARK: Project build outputs
@@ -266,6 +270,10 @@ enum Catalog {
                      markers: ["cabal.project", "*.cabal"], .haskell, "Cabal build output"),
         ArtifactRule([".stack-work"],
                      markers: ["stack.yaml"], .haskell, "Stack build output"),
+
+        // Nim
+        ArtifactRule(["nimcache"],
+                     markers: ["*.nimble", "nim.cfg", "config.nims"], .nim, "Nim build cache"),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
