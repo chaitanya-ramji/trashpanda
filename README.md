@@ -299,6 +299,15 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Project scan: match generic folder names (lib, local) only when the marker file is present ([#88](https://github.com/chaitanya-ramji/trashpanda/issues/88))
 - [ ] Git worktrees: find the ones that tools and you left behind, and remove them safely ([#118](https://github.com/chaitanya-ramji/trashpanda/issues/118))
 
+### Now: v0.7 Correct numbers and safe tools
+- [ ] Do not count the uv cache two times in the totals ([#124](https://github.com/chaitanya-ramji/trashpanda/issues/124))
+- [ ] Show one folder in one group only ([#125](https://github.com/chaitanya-ramji/trashpanda/issues/125))
+- [ ] Careful dialog for a container, and the critical style for a permanent delete ([#126](https://github.com/chaitanya-ramji/trashpanda/issues/126))
+- [ ] Start system tools from fixed paths, and refuse a tool file that others can write to ([#127](https://github.com/chaitanya-ramji/trashpanda/issues/127))
+- [ ] Correct the network sentence in SECURITY.md ([#128](https://github.com/chaitanya-ramji/trashpanda/issues/128))
+- [ ] Do not start a process on the main thread when the menu opens ([#129](https://github.com/chaitanya-ramji/trashpanda/issues/129))
+- [ ] One shared delete helper: measure first, check last ([#130](https://github.com/chaitanya-ramji/trashpanda/issues/130))
+
 ### Later: v1.0 Signed and stable
 - [ ] Notarize the app and publish signed releases ([#30](https://github.com/chaitanya-ramji/trashpanda/issues/30))
 - [ ] Homebrew cask and tap ([#31](https://github.com/chaitanya-ramji/trashpanda/issues/31))
