@@ -142,6 +142,7 @@ public final class DiskScanner {
                 { add(self.scanHomebrew()) },
                 { add(self.scanBrewLeaves()) },
                 { add(self.scanOllama()) },
+                { add(self.scanGlobalPackages()) },
                 { add(self.scanDocker()) },
                 { add(self.scanGo()) },
                 { add(self.scanUv()) },
@@ -185,6 +186,9 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .globalPackage(let manager, let name):
+            guard let tool = Shell.resolve(manager.tool) else { return finding.bytes }
+            return GlobalPackages.list(manager, tool: tool, home: home, now: now())?.first { $0.name == name }?.bytes ?? 0
         case .agent(.removeOldSessions(let kind, let cutoff, _)):
             return AgentSessions.entries(kind, home: home, olderThan: cutoff).reduce(Int64(0)) { $0 + $1.bytes }
         case .agent(.removeFixedFolders(let id)):
@@ -600,6 +604,23 @@ public final class DiskScanner {
             }
         }
         return out
+    }
+
+    /// Global packages of npm, pnpm, Yarn, and Bun. One review item for each package. The manager removes it.
+    func scanGlobalPackages() -> [Finding] {
+        PackageManager.allCases.flatMap { manager -> [Finding] in
+            guard let tool = Shell.resolve(manager.tool),
+                  let packages = GlobalPackages.list(manager, tool: tool, home: home, now: now()) else { return [] }
+            return packages.compactMap { p in
+                guard p.bytes > 0 else { return nil }
+                let age = p.ageDays.map { " · installed or updated \($0) days ago" } ?? ""
+                return Finding(id: "pkg.\(manager.rawValue):\(p.name)", ecosystem: .javascript,
+                               title: "Global package · \(p.name) (\(manager.label))",
+                               location: "\(p.name)@\(p.version)\(age)", bytes: p.bytes, tier: .review, rebuild: .download,
+                               action: .globalPackage(manager: manager, name: p.name),
+                               note: "A program that calls it, such as an MCP server in an AI app, stops working.")
+            }
+        }
     }
 
     func ollamaTool() -> Ollama? { (ollamaOverride ?? Shell.resolve("ollama")).map { Ollama(path: $0) } }

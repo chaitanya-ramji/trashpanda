@@ -28,6 +28,8 @@ public final class Cleaner {
     private let ollama: () -> Ollama?
     /// Finds the `hf` tool at clean time. Tests give a fake one. nil means that the folder is removed directly.
     private let hfTool: () -> String?
+    /// Finds a JavaScript package manager at clean time. Tests give fake ones.
+    private let packageTool: (PackageManager) -> String?
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
@@ -37,7 +39,9 @@ public final class Cleaner {
                 mountedImages: @escaping () -> [String] = Installers.mountedImagePaths,
                 brew: (() -> Brew?)? = nil,
                 openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
-                ollama: (() -> Ollama?)? = nil, hfTool: (() -> String?)? = nil) {
+                ollama: (() -> Ollama?)? = nil, hfTool: (() -> String?)? = nil,
+                packageTool: ((PackageManager) -> String?)? = nil) {
+        self.packageTool = packageTool ?? { Shell.resolve($0.tool) }
         self.hfTool = hfTool ?? { Shell.resolve("hf") }
         self.ollama = ollama ?? { Shell.resolve("ollama").map { Ollama(path: $0) } }
         self.openClaudeBinaries = openClaudeBinaries
@@ -123,6 +127,9 @@ public final class Cleaner {
 
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
+
+            case .globalPackage(let manager, let name):
+                runGlobalPackage(manager, name, finding: finding, into: &report)
 
             case .agent(let action):
                 runAgent(action, finding: finding, into: &report)
@@ -270,7 +277,30 @@ public final class Cleaner {
         }
     }
 
+    /// One global package. The manager removes it. We check the name, list the packages again, and verify the result.
+    private func runGlobalPackage(_ manager: PackageManager, _ name: String, finding: Finding, into report: inout CleanReport) {
+        guard let args = manager.removeArguments(name), !GlobalPackages.protectedNames.contains(name) else {
+            skip(finding, "the package name is not valid, or it is a package manager", &report); return
+        }
+        guard let tool = packageTool(manager) else { skip(finding, "\(manager.tool) not found", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        guard let before = GlobalPackages.list(manager, tool: tool, home: home, now: Date())?.first(where: { $0.name == name }) else {
+            skip(finding, "\(name) is not a global \(manager.label) package any more, or \(manager.tool) did not answer", &report); return
+        }
+        let result = Shell.run(tool, args, timeout: 300)         // run once: never run a remove twice
+        guard result.status == 0, !result.timedOut else {
+            let why = result.stderr.split(whereSeparator: \.isNewline).last.map(String.init) ?? "\(manager.tool) failed"
+            report.failed.append("\(finding.title): \(why)"); return
+        }
+        let still = GlobalPackages.list(manager, tool: tool, home: home, now: Date())?.first { $0.name == name }
+        guard still == nil else { report.failed.append("\(finding.title): \(manager.tool) exited 0, but the package is still installed"); return }
+        report.freed += before.bytes
+        report.removed += 1
+        Log.info("clean \(finding.id): \(manager.tool) removed \(name), freed \(before.bytes)")
+    }
+
     // MARK: AI agents
+
 
     private func runAgent(_ action: AgentAction, finding: Finding, into report: inout CleanReport) {
         switch action {
