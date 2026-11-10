@@ -273,6 +273,8 @@ public final class Cleaner {
             removeFolders(ClaudeDesktop.oldRuntimes(home: URL(fileURLWithPath: guardian.home)).filter { names.contains(ClaudeDesktop.runtimeName($0)) },
                           finding: finding, into: &report)
         case .removeAgentCaches(let id): removeAgentCaches(id, finding: finding, into: &report)
+        case .removeEditorCaches(let id): removeEditorCaches(id, finding: finding, into: &report)
+        case .removeObsoleteExtensions(let id): removeObsoleteExtensions(id, finding: finding, into: &report)
         case .removeClaudeVMBundle:
             removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
         }
@@ -307,6 +309,60 @@ public final class Cleaner {
         }
         if removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
+    /// The cache folders and old logs of one editor. We find them again now, with the age of each log.
+    private func removeEditorCaches(_ id: String, finding: Finding, into report: inout CleanReport) {
+        guard let app = EditorCaches.app(id: id) else { skip(finding, "unknown editor", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for url in EditorCaches.targets(of: app, home: home, now: Date()) {
+            let size = Sizer.size(of: url)           // measure first, check last (see removeFolders)
+            guard EditorCaches.isTarget(url, of: app, home: home), UpdateDownloads.isPlainPath(url) else {
+                report.skipped.append("\(url.path): not a cache folder of the editor"); continue
+            }
+            if let reason = guardian.check(url) {
+                report.skipped.append("\(url.path): \(reason)"); continue
+            }
+            do {
+                try FileManager.default.removeItem(at: url)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
+    /// The extension folders that the editor marks as obsolete. A folder that the editor lists as installed stays.
+    private func removeObsoleteExtensions(_ id: String, finding: Finding, into report: inout CleanReport) {
+        guard let app = EditorCaches.app(id: id) else { skip(finding, "unknown editor", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for url in EditorCaches.obsoleteExtensions(of: app, home: home) {
+            let size = Sizer.size(of: url)           // measure first, check last (see removeFolders)
+            guard EditorCaches.isExtensionTarget(url, of: app, home: home), UpdateDownloads.isPlainPath(url) else {
+                report.skipped.append("\(url.path): not an extension folder of the editor"); continue
+            }
+            if let reason = guardian.check(url) {
+                report.skipped.append("\(url.path): \(reason)"); continue
+            }
+            do {
+                try FileManager.default.removeItem(at: url)
+                report.freed += size
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) obsolete extensions, failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
     }
 

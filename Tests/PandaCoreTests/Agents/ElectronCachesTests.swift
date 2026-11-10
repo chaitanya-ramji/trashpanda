@@ -52,7 +52,7 @@ final class ElectronCachesTests: XCTestCase {
         XCTAssertTrue(AgentCaches.isCleanableShape(relative: "\(codex)/component_crx_cache"))
         XCTAssertTrue(AgentCaches.isCleanableShape(relative: "\(codex)/extensions_crx_cache"))
         XCTAssertFalse(AgentCaches.isCleanableShape(relative: "\(claude)/component_crx_cache"), "Only the Codex app has this")
-        XCTAssertFalse(AgentCaches.isCleanableShape(relative: "Library/Application Support/Antigravity/CachedData"), "VS Code names are another issue")
+        XCTAssertFalse(AgentCaches.isElectronShape(relative: "Library/Application Support/Antigravity/CachedData"), "VS Code names belong to the editor table")
     }
 
     func testTheGuardFollowsTheShapes() throws {
