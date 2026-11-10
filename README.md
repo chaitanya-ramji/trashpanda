@@ -55,6 +55,7 @@ Trash Panda looks in two places:
 | Homebrew | Downloads and old versions | None |
 | Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia): cache, code cache, and GPU caches. Firefox and Zen: `cache2` and `startupCache`. Dia and Zen are not checked on a real install yet. Review: Service Worker storage. | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |
+| Logs and crash reports | Old files in `~/Library/Logs`: one review item for logs, one for crash reports (`DiagnosticReports`, `CrashReporter`). Files at least 30 days old only. | None |
 | Old installers | `.dmg` and `.pkg` files in `~/Downloads` that are older than 30 days. One review item for each file. No other file type. | None |
 | Trash | The size of `~/.Trash`. One review item. Finder empties it (see Safety rules). | None |
 | Docker | Build cache, untagged images (safe). Stopped containers, old unused images, and unused volumes (review). | None |
@@ -74,6 +75,7 @@ The menu shows the cost to get an item back. The cost is seconds, minutes, or a 
 
 Trash Panda deletes files for good. They do not go to the Trash. These rules reduce the risk:
 
+- Old logs and crash reports are two review items, never in the one-click clean, and the default button of the dialog keeps the files. Only plain files at least 30 days old count. A folder, a link, and a newer file never count, and the app reads the age again when you confirm. The log of Trash Panda (`~/Library/Logs/TrashPanda`) is never touched.
 - Old installers are review items, one for each file, never in the one-click clean, and the default button of the dialog keeps the file. Only `.dmg` and `.pkg` files that lie directly in `~/Downloads` count, and only when they are at least 30 days old. A link, a folder, and a file in a sub-folder never count. The app reads the age again when you confirm, and it skips a disk image that is mounted. The first time, macOS asks if Trash Panda may look in Downloads. Say no, and the app shows no installers.
 - The Trash is a review item. It is never in the one-click clean. Trash Panda does not delete those files itself: it asks Finder to empty the Trash, the same as the Finder menu. The first time, macOS asks if Trash Panda may control Finder. Say no, and nothing is deleted. The app reads only `~/.Trash`, not the Trash of an external drive. If macOS does not let the app read the Trash (Full Disk Access), the app shows nothing for it.
 - The app always shows a list and asks you before it deletes.
@@ -243,7 +245,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 ### Later: v0.5 Insight
 - [ ] Cache explorer: show the largest folders in Library/Caches ([#20](https://github.com/chaitanya-ramji/trashpanda/issues/20))
 - [ ] Explain space that does not come back: local snapshots ([#21](https://github.com/chaitanya-ramji/trashpanda/issues/21))
-- [ ] Logs and crash reports (review) ([#22](https://github.com/chaitanya-ramji/trashpanda/issues/22))
+- [x] Logs and crash reports (review) ([#22](https://github.com/chaitanya-ramji/trashpanda/issues/22))
 - [x] Show the Trash size and offer to empty it ([#23](https://github.com/chaitanya-ramji/trashpanda/issues/23))
 - [x] Old installers in Downloads (DMG, PKG, ZIP) ([#24](https://github.com/chaitanya-ramji/trashpanda/issues/24))
 - [ ] Docker: say when freed space is not back on the Mac yet ([#40](https://github.com/chaitanya-ramji/trashpanda/issues/40))
