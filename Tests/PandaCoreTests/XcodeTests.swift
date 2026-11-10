@@ -489,7 +489,7 @@ final class ConfirmationTests: XCTestCase {
         (.volume, .docker(.removeVolume(name: "data")), true),
         (.simulatorDevice, .simulator(.deleteDevice(udid: uid("1"))), true),
         (.archive, .removeArchive(URL(fileURLWithPath: "/x/Archives/d/A.xcarchive")), true),
-        (.container, .docker(.removeContainer(id: "0123456789ab")), false),
+        (.container, .docker(.removeContainer(id: "0123456789ab")), true),
         (.simulatorRuntime, .simulator(.deleteRuntime(id: uid("1"))), false),
     ]
 
@@ -501,6 +501,42 @@ final class ConfirmationTests: XCTestCase {
         }
         let ordinary = Confirmation.forOne(item(.owner(.brewCleanup), tier: .safe), staleDays: 30)
         XCTAssertFalse(ordinary.cancelIsDefault)
+    }
+
+    /// One sample finding for each kind, and the decision for its default button.
+    /// A new `Kind` case fails this test until someone adds it here and decides.
+    func testEachKindHasADecidedDefaultButton() {
+        let url = URL(fileURLWithPath: "/x/item")
+        let samples: [(Confirmation.Kind, Finding, Bool)] = [
+            (.ordinary, item(.owner(.brewCleanup), tier: .safe), false),
+            (.container, item(.docker(.removeContainer(id: "0123456789ab"))), true),
+            (.volume, item(.docker(.removeVolume(name: "data"))), true),
+            (.simulatorRuntime, item(.simulator(.deleteRuntime(id: uid("1")))), false),
+            (.simulatorDevice, item(.simulator(.deleteDevice(udid: uid("1")))), true),
+            (.archive, item(.removeArchive(url)), true),
+            (.deviceSupport, item(.removeDeviceSupport(url)), false),
+            (.serviceWorker, item(.removeServiceWorkerStorage(browserID: "b")), true),
+            (.trash, item(.emptyTrash), true),
+            (.installer, item(.removeInstaller(url)), true),
+            (.oldLogs, item(.removeOldLogs(.logs)), true),
+            (.brewPackage, item(.brew(.uninstall(name: "pkg"))), true),
+            (.agentRuntime, item(.agent(.removeOldClaudeDesktopRuntimes(names: []))), true),
+            (.vmBundle, item(.agent(.removeClaudeVMBundle)), true),
+            (.localModel, item(.agent(.removeOllamaModel(name: "m"))), true),
+            (.agentSessions, item(.agent(.removeOldSessions(kind: .codex, olderThan: Date(), minimumAgeDays: 30))), true),
+            (.globalPackage, item(.globalPackage(manager: .npm, name: "pkg")), true),
+            (.runtime, item(.removeRuntime(storeID: "s", tool: "t", name: "n")), true),
+            (.cacheFolder, item(.removeCacheFolderContents(name: "Some Cache")), true),
+            (.containerWithVolumes, item(.docker(.removeStoppedContainerWithVolumes(id: "0123456789ab", volumes: ["v"]))), true),
+            (.runningContainer, item(.docker(.stopAndRemoveContainerWithVolumes(id: "0123456789ab", volumes: ["v"]))), true),
+        ]
+        XCTAssertEqual(Set(samples.map { "\($0.0)" }), Set(Confirmation.Kind.allCases.map { "\($0)" }),
+                       "Each kind needs a sample and a decision")
+        XCTAssertEqual(samples.count, Confirmation.Kind.allCases.count)
+        for (kind, finding, cancelDefault) in samples {
+            XCTAssertEqual(Confirmation.kind(of: finding), kind)
+            XCTAssertEqual(Confirmation.forOne(finding, staleDays: 30).cancelIsDefault, cancelDefault, "\(kind)")
+        }
     }
 
     func testEveryDestructiveDialogSaysThatItCannotBeUndone() {
