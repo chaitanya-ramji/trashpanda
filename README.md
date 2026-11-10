@@ -52,7 +52,7 @@ Trash Panda looks in two places:
 | Dart, Flutter | Pub packages, analysis cache | `.dart_tool`, Flutter `build` |
 | Elixir, Erlang | Hex packages, rebar3 | `_build`, `deps`, `.elixir_ls` |
 | Zig | Global cache | `.zig-cache`, `zig-out` |
-| Homebrew | Downloads and old versions | None |
+| Homebrew | Downloads and old versions (safe). Review: each package that no other package needs (`brew leaves`), with its install date. Brew removes it. | None |
 | Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia): cache, code cache, and GPU caches. Firefox and Zen: `cache2` and `startupCache`. Dia and Zen are not checked on a real install yet. Review: Service Worker storage. | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |
 | Logs and crash reports | Old files in `~/Library/Logs`: one review item for logs, one for crash reports (`DiagnosticReports`, `CrashReporter`). Files at least 30 days old only. | None |
@@ -75,6 +75,7 @@ The menu shows the cost to get an item back. The cost is seconds, minutes, or a 
 
 Trash Panda deletes files for good. They do not go to the Trash. These rules reduce the risk:
 
+- A Homebrew package is a review item, one for each package that no other package needs. Trash Panda does not delete its files: it runs `brew uninstall --formula <name>`, and never `--force` or `--ignore-dependencies`, so brew itself refuses when another package needs it. The app reads the list again when you confirm, and it skips a package that runs. Brew does not record when a tool was last used, so the menu shows the install date and never says "unused".
 - Old logs and crash reports are two review items, never in the one-click clean, and the default button of the dialog keeps the files. Only plain files at least 30 days old count. A folder, a link, and a newer file never count, and the app reads the age again when you confirm. The log of Trash Panda (`~/Library/Logs/TrashPanda`) is never touched.
 - Old installers are review items, one for each file, never in the one-click clean, and the default button of the dialog keeps the file. Only `.dmg` and `.pkg` files that lie directly in `~/Downloads` count, and only when they are at least 30 days old. A link, a folder, and a file in a sub-folder never count. The app reads the age again when you confirm, and it skips a disk image that is mounted. The first time, macOS asks if Trash Panda may look in Downloads. Say no, and the app shows no installers.
 - The Trash is a review item. It is never in the one-click clean. Trash Panda does not delete those files itself: it asks Finder to empty the Trash, the same as the Finder menu. The first time, macOS asks if Trash Panda may control Finder. Say no, and nothing is deleted. The app reads only `~/.Trash`, not the Trash of an external drive. If macOS does not let the app read the Trash (Full Disk Access), the app shows nothing for it.
@@ -254,7 +255,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 
 ### Later: v0.6 Old tools
 - [ ] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
-- [ ] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
+- [x] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
 - [ ] Unused global JavaScript packages: npm, pnpm, Bun, Yarn ([#51](https://github.com/chaitanya-ramji/trashpanda/issues/51))
 - [ ] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
 - [ ] More languages (phase 2b): Scala, Haskell, R, Julia, Nim, OCaml, Crystal, Clojure, Perl, Lua ([#29](https://github.com/chaitanya-ramji/trashpanda/issues/29))
