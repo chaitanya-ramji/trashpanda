@@ -126,6 +126,7 @@ public final class DiskScanner {
             { add(self.scanTestBrowsers()) },
             { add(self.scanTrash()) },
             { add(self.scanInstallers()) },
+            { add(self.scanLogs()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -174,6 +175,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .removeOldLogs(let kind):
+            return OldLogs.bytes(kind, home: home, now: now())
         case .removeInstaller(let url):
             return FileManager.default.fileExists(atPath: url.path) ? finding.bytes : 0
         case .removeOldTestBrowsers(let id):
@@ -337,6 +340,18 @@ public final class DiskScanner {
                            location: "\(b.roots.map { "~/" + $0 }.joined(separator: " and ")) · pages load again the first time",
                            bytes: bytes, tier: .safe, rebuild: .download,
                            action: .removeBrowserCaches(browserID: b.id), owner: b.owner)
+        }
+    }
+
+    /// Old files in `~/Library/Logs`: one item for the logs and one for the crash reports. Both are review items.
+    func scanLogs() -> [Finding] {
+        OldLogs.Kind.allCases.compactMap { kind in
+            let files = OldLogs.entries(kind, home: home, now: now()).filter { guardian.check($0.url) == nil }
+            let bytes = files.reduce(Int64(0)) { $0 + $1.bytes }
+            guard bytes > 0 else { return nil }
+            return Finding(id: kind.findingID, ecosystem: .logs, title: kind.title,
+                           location: "~/Library/Logs · \(files.count) file\(files.count == 1 ? "" : "s") older than \(OldLogs.minimumAgeDays) days",
+                           bytes: bytes, tier: .review, rebuild: .never, action: .removeOldLogs(kind))
         }
     }
 

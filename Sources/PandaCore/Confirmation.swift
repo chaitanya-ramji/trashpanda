@@ -17,7 +17,7 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -31,6 +31,7 @@ public struct Confirmation: Equatable, Sendable {
         case .removeServiceWorkerStorage: return .serviceWorker
         case .emptyTrash: return .trash
         case .removeInstaller: return .installer
+        case .removeOldLogs: return .oldLogs
         default: return .ordinary
         }
     }
@@ -68,6 +69,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Remove saved website data?", body: detail,
                 footer: "Websites that work offline keep their files here. After this, such a site may not open without a network until you visit it online again. This can't be undone.",
                 confirmTitle: "Remove data", cancelIsDefault: true)
+        case .oldLogs:
+            return Confirmation(
+                title: "Delete \(f.title.lowercased())?", body: "\(f.title)\n\(f.location)",
+                footer: "Only files older than \(OldLogs.minimumAgeDays) days are deleted. Newer files stay, and so does the log of Trash Panda. Keep crash reports if you are looking for a crash. This can't be undone.",
+                confirmTitle: "Delete files", cancelIsDefault: true)
         case .installer:
             return Confirmation(
                 title: "Delete this installer?", body: detail,

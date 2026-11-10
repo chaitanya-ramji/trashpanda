@@ -109,6 +109,9 @@ public final class Cleaner {
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
 
+            case .removeOldLogs(let kind):
+                removeOldLogs(kind, finding: finding, into: &report)
+
             case .removeInstaller(let url):
                 removeInstaller(url, finding: finding, into: &report)
 
@@ -244,6 +247,28 @@ public final class Cleaner {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
         }
+    }
+
+    /// The old files of one group in Logs. We find them again now. Each file passes the guard, and nothing else is touched.
+    private func removeOldLogs(_ kind: OldLogs.Kind, finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        var removed = 0, failures = 0
+        for entry in OldLogs.entries(kind, home: home, now: Date()) {
+            if let reason = guardian.check(entry.url) {
+                report.skipped.append("\(entry.url.path): \(reason)"); continue
+            }
+            do {
+                try FileManager.default.removeItem(at: entry.url)
+                report.freed += entry.bytes
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) old files, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.location): \(failures) files stayed") }
     }
 
     /// One old installer. We check the path, the file type, the age, and the mounts again now.
