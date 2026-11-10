@@ -187,6 +187,14 @@ enum Catalog {
         // R
         CacheSpec(id: "r.renv.cache", title: "renv package cache", ecosystem: .r,
                   paths: ["Library/Caches/org.R-project.R/R/renv/cache"], tier: .review, rebuild: .minutes, note: "Every renv project that links to it needs renv::restore() to rebuild its library."),
+
+        // Julia
+        CacheSpec(id: "julia.compiled", title: "Julia precompiled code", ecosystem: .julia,
+                  paths: [".julia/compiled"], tier: .safe, rebuild: .minutes),
+        CacheSpec(id: "julia.artifacts", title: "Julia artifacts", ecosystem: .julia,
+                  paths: [".julia/artifacts"], tier: .review, rebuild: .download),
+        CacheSpec(id: "julia.packages", title: "Julia packages", ecosystem: .julia,
+                  paths: [".julia/packages"], tier: .review, rebuild: .download),
     ]
 
     // MARK: Project build outputs
