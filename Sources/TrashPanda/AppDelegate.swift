@@ -276,9 +276,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let parent = NSMenuItem()
         parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : "info")
         parent.submenu = submenu(for: ecosystem, items: items)
-        if ecosystem == .aiAgents {
-            parent.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: ecosystem.name)
-        }
         return parent
     }
 
