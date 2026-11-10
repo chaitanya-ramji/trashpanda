@@ -182,6 +182,10 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeOldClaudeDesktopRuntimes):
+            return ClaudeDesktop.oldRuntimes(home: home).reduce(Int64(0)) { $0 + $1.bytes }
+        case .agent(.removeClaudeVMBundle):
+            return ClaudeDesktop.vmBundles(home: home).reduce(Int64(0)) { $0 + $1.bytes }
         case .agent(.removeOldClaudeVersions):
             guard let running = openClaudeBinaries(ClaudeVersions.entries(home: home).map { $0.url.path }) else { return finding.bytes }
             return ClaudeVersions.old(home: home, running: running).old.reduce(Int64(0)) { $0 + $1.bytes }
@@ -484,7 +488,31 @@ public final class DiskScanner {
 
     /// The AI agents group. Each product has its own function, and its items start with the product name.
     func scanAgents() -> [Finding] {
-        scanCodexRuntimes() + scanClaudeVersions()
+        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop()
+    }
+
+    /// Old runtimes and the Cowork VM of Claude Desktop. Both are review items, and Claude Desktop must be closed.
+    func scanClaudeDesktop() -> [Finding] {
+        var out: [Finding] = []
+        let place = "~/" + AgentCaches.claudeRoot
+        let old = ClaudeDesktop.oldRuntimes(home: home).filter { guardian.check($0.url) == nil }
+        let oldBytes = old.reduce(Int64(0)) { $0 + $1.bytes }
+        if oldBytes > 0 {
+            let names = old.map { "\($0.family) \($0.url.lastPathComponent)" }.joined(separator: ", ")
+            out.append(Finding(id: "agent.claude.runtimes", ecosystem: .aiAgents, title: "Claude · old Desktop runtimes",
+                               location: "\(place) · \(names) · the newest of each stays", bytes: oldBytes, tier: .review, rebuild: .download,
+                               action: .agent(.removeOldClaudeDesktopRuntimes), owner: AgentOwners.claudeDesktop))
+        }
+        let vm = ClaudeDesktop.vmBundles(home: home).filter { guardian.check($0.url) == nil }
+        let vmBytes = vm.reduce(Int64(0)) { $0 + $1.bytes }
+        if vmBytes > 0 {
+            out.append(Finding(id: "agent.claude.vm", ecosystem: .aiAgents, title: "Claude · Cowork VM",
+                               location: "\(place)/\(AgentCaches.claudeVMRoot)", bytes: vmBytes, tier: .review, rebuild: .download,
+                               action: .agent(.removeClaudeVMBundle),
+                               note: "Claude downloads about 10 GB again when it needs it. Settings, Storage in Claude removes old tasks first.",
+                               helpURL: ClaudeDesktop.changelogURL, owner: AgentOwners.claudeDesktop))
+        }
+        return out
     }
 
     /// Old versions of the Claude Code tool. One item. If we cannot tell which versions run, there is no item.

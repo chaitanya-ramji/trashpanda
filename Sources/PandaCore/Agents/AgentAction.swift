@@ -7,6 +7,10 @@ public enum AgentAction: Sendable, Equatable {
     case removeCodexRuntime(URL)
     /// The old versions of the Claude Code command line tool. The cleaner finds them again, and keeps the newest, the linked one, and any that runs.
     case removeOldClaudeVersions
+    /// The old runtimes of Claude Desktop (all but the newest of each family). The cleaner finds them again.
+    case removeOldClaudeDesktopRuntimes
+    /// The Cowork VM folders of Claude Desktop. The cleaner finds them again from fixed names.
+    case removeClaudeVMBundle
 }
 
 /// The apps that own the folders of the AI agents group. An open app blocks its items (see #16 and #47).
@@ -14,6 +18,9 @@ public enum AgentAction: Sendable, Equatable {
 public enum AgentOwners {
     /// The Codex desktop app. Since late 2026 it shows the name "ChatGPT", and its bundle ID is still `com.openai.codex`.
     /// The `codex` command line tool uses the same runtime folders.
+    /// Claude Desktop. The bundle ID is checked on a real Mac.
+    public static let claudeDesktop = AppOwner(name: "Claude", bundleIDs: [ClaudeDesktop.bundleID + "*"])
+
     public static let codex = AppOwner(name: "Codex", bundleIDs: ["com.openai.codex*"], processNames: ["codex"])
 }
 
