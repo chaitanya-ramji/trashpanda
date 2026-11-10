@@ -90,6 +90,28 @@ public struct DockerEngine: Sendable, Equatable {
         return inventory
     }
 
+    /// The volumes that each container mounts, by container id. nil when the engine did not answer.
+    /// A container that is not in the answer has no volumes. Only named and anonymous volumes count (not a bind of a folder).
+    /// `index . "Name"` is needed: a bind mount has no `Name`, and `.Name` would stop the whole answer with a template error.
+    /// The real tool prints `bind:<no value>` for such a mount. Checked on OrbStack.
+    public func volumes(ofContainers ids: [String]) -> [String: [String]]? {
+        let valid = ids.filter(DockerAction.isHexID).prefix(200)
+        guard !valid.isEmpty else { return [:] }
+        let r = run(["container", "inspect", "--format", #"{{.Id}}|{{range .Mounts}}{{.Type}}:{{index . "Name"}},{{end}}"#] + valid, timeout: 30)
+        guard r.status == 0, !r.timedOut else { return nil }
+        var out: [String: [String]] = [:]
+        for line in r.stdout.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 2, DockerAction.isHexID(parts[0]) else { continue }
+            // Each mount is `<type>:<name>`. Only a `volume` counts. A bind of a folder has a path as its name and is left out.
+            out[parts[0]] = parts[1].split(separator: ",").compactMap { mount -> String? in
+                let pieces = mount.split(separator: ":", maxSplits: 1).map(String.init)
+                return pieces.count == 2 && pieces[0] == "volume" && DockerAction.isVolumeName(pieces[1]) ? pieces[1] : nil
+            }
+        }
+        return out
+    }
+
     /// When each image came to this Mac (the last time a name was set on it). The build date can be years older.
     /// An image that is missing from the answer has an unknown age.
     public func tagTimes(ofImages ids: [String]) -> [String: Date] {

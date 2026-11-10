@@ -166,6 +166,9 @@ public enum DockerAction: Sendable, Equatable {
     case removeImage(refs: [String])
     /// Removes one volume that no container uses. Never forced. The data is lost for good.
     case removeVolume(name: String)
+    /// A stopped container and the volumes that only it uses. Docker refuses `volume rm` while any container uses a volume, even a stopped one,
+    /// so the container goes first, and then each volume. Never forced. The data of the volumes is lost for good.
+    case removeStoppedContainerWithVolumes(id: String, volumes: [String])
 
     /// The arguments, or nil when the identifier is not valid. A name can hold any text.
     /// We use the hex identifier, and we accept nothing else.
@@ -176,7 +179,15 @@ public enum DockerAction: Sendable, Equatable {
             guard !refs.isEmpty, refs.count <= 20, refs.allSatisfy(Self.isImageRef) else { return nil }
             return ["image", "rm"] + refs
         case .removeVolume(let name): return Self.isVolumeName(name) ? ["volume", "rm", name] : nil
+        case .removeStoppedContainerWithVolumes(let id, let volumes):
+            return Self.isHexID(id) && !volumes.isEmpty && volumes.count <= 10 && volumes.allSatisfy(Self.isVolumeName) ? ["container", "rm", id] : nil
         }
+    }
+
+    /// The commands after the container is gone: one `volume rm` for each volume. Empty for the other actions.
+    public var followUpArguments: [[String]] {
+        guard case .removeStoppedContainerWithVolumes(_, let volumes) = self, arguments != nil else { return [] }
+        return volumes.map { ["volume", "rm", $0] }
     }
 
     public var timeout: TimeInterval { 60 }

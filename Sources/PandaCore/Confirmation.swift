@@ -17,13 +17,14 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage, runtime, cacheFolder
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage, runtime, cacheFolder, containerWithVolumes
     }
 
     public static func kind(of f: Finding) -> Kind {
         switch f.action {
         case .docker(.removeContainer): return .container
         case .docker(.removeVolume): return .volume
+        case .docker(.removeStoppedContainerWithVolumes): return .containerWithVolumes
         case .simulator(.deleteRuntime): return .simulatorRuntime
         case .simulator(.deleteDevice): return .simulatorDevice
         case .removeArchive: return .archive
@@ -53,6 +54,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Delete this volume?", body: detail,
                 footer: "Databases and files inside a volume are lost for good. If it holds a database, export it first. This can't be undone.",
                 confirmTitle: "Delete volume", cancelIsDefault: true)
+        case .containerWithVolumes:
+            return Confirmation(
+                title: "Delete this container and its volumes?", body: "\(detail)\n\(ByteText.string(f.bytes)) in all",
+                footer: "The container and its volumes are deleted for good. A volume can hold a database. If it does, export it first (for a Postgres database, with pg_dump). Docker keeps the images. This can't be undone.",
+                confirmTitle: "Delete container and volumes", cancelIsDefault: true)
         case .container:
             return Confirmation(
                 title: "Remove this container?", body: "\(detail)\n\(f.rebuild.label).",

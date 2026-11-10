@@ -48,6 +48,8 @@ public struct DockerInventory: Sendable {
         /// A volume that we may offer to remove: on this Mac (the local driver) and used by no container.
         /// A volume of another driver can live on a network share or another machine.
         public var isRemovable: Bool { driver == "local" && links == 0 }
+        /// A short name for a text: an anonymous volume has a 64 character id.
+        public var anonymousShort: String { isAnonymous ? String(name.prefix(12)) + "…" : name }
     }
 
     public let images: [Image]
