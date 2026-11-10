@@ -185,7 +185,7 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
-        case .agent(.removeOldSessions(let kind, let cutoff)):
+        case .agent(.removeOldSessions(let kind, let cutoff, _)):
             return AgentSessions.entries(kind, home: home, olderThan: cutoff).reduce(Int64(0)) { $0 + $1.bytes }
         case .agent(.removeFixedFolders(let id)):
             guard let app = FixedFolders.app(id: id) else { return finding.bytes }
@@ -516,16 +516,19 @@ public final class DiskScanner {
 
     /// Old transcripts of Codex and Claude Code (review), and a note about the chats of Gemini CLI.
     func scanAgentSessions() -> [Finding] {
-        let cutoff = now().addingTimeInterval(-Double(config.staleDays) * 86_400)
         var out: [Finding] = AgentSessions.Kind.allCases.compactMap { kind in
+            // Claude Code has its own retention setting. If the user keeps sessions longer than our limit, we keep them that long too.
+            let days = max(config.staleDays, kind == .claude ? (AgentSessions.claudeRetentionDays(home: home) ?? 0) : 0)
+            let cutoff = now().addingTimeInterval(-Double(days) * 86_400)
             let files = AgentSessions.entries(kind, home: home, olderThan: cutoff).filter { guardian.check($0.url) == nil }
             let bytes = files.reduce(Int64(0)) { $0 + $1.bytes }
             guard bytes > 0, let oldest = files.first else { return nil }
-            let days = max(0, Int(now().timeIntervalSince(oldest.modified) / 86_400))
+            let oldestDays = max(0, Int(now().timeIntervalSince(oldest.modified) / 86_400))
             let setting = kind == .claude ? " · Claude Code also deletes them by itself (cleanupPeriodDays)" : ""
             return Finding(id: kind.findingID, ecosystem: .aiAgents, title: kind.title,
-                           location: "\(files.count) session\(files.count == 1 ? "" : "s") older than \(config.staleDays) days · the oldest is \(days) days old\(setting)",
-                           bytes: bytes, tier: .review, rebuild: .never, action: .agent(.removeOldSessions(kind: kind, olderThan: cutoff)))
+                           location: "\(files.count) session\(files.count == 1 ? "" : "s") older than \(days) days · the oldest is \(oldestDays) days old\(setting)",
+                           bytes: bytes, tier: .review, rebuild: .never,
+                           action: .agent(.removeOldSessions(kind: kind, olderThan: cutoff, minimumAgeDays: days)))
         }
         let gemini = AgentSessions.geminiChatBytes(home: home)
         if gemini >= 50_000_000 {

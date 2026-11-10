@@ -78,7 +78,7 @@ extension AgentCaches {
 
     /// A partition name is plain: letters, digits, dot, dash, underscore. It cannot be `.` or `..`.
     static func isPartitionName(_ name: String) -> Bool {
-        name.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil && !name.contains("..")
+        name.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*\z"#, options: .regularExpression) != nil && !name.contains("..")
     }
 
     /// True when `relative` is a cache folder of an Electron app: `<root>/<name>` or `<root>/Partitions/<partition>/<name>`.

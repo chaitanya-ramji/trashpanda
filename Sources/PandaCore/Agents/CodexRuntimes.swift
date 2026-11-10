@@ -19,7 +19,7 @@ public enum CodexRuntimes {
 
     /// The name of a staging folder: the prefix and six letters or digits.
     static func isStagingName(_ name: String) -> Bool {
-        name.range(of: "^\(stagingPrefix)[A-Za-z0-9]{6}$", options: .regularExpression) != nil
+        name.range(of: "^\(stagingPrefix)[A-Za-z0-9]{6}\\z", options: .regularExpression) != nil
     }
 
     /// What a path is, or nil. It must be `~/.cache/codex-runtimes/<name>` with no link in any part.

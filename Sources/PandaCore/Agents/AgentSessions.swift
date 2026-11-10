@@ -26,11 +26,11 @@ public enum AgentSessions {
     }
 
     private static func isPart(_ s: String) -> Bool {
-        s.range(of: #"^[A-Za-z0-9._-]{1,200}$"#, options: .regularExpression) != nil && s != "." && s != ".." && !s.contains("..")
+        s.range(of: #"^[A-Za-z0-9._-]{1,200}\z"#, options: .regularExpression) != nil && s != "." && s != ".." && !s.contains("..")
     }
 
     private static func isUUID(_ s: String) -> Bool {
-        s.range(of: #"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"#, options: .regularExpression) != nil
+        s.range(of: #"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\z"#, options: .regularExpression) != nil
     }
 
     /// True when `relative` (the path inside a root) is a transcript of this kind.
@@ -77,6 +77,16 @@ public enum AgentSessions {
             if path.hasPrefix(base), isTranscript(path.dropFirst(base.count).split(separator: "/").map(String.init), kind: kind) { return true }
         }
         return false
+    }
+
+    /// The days that the user set in `~/.claude/settings.json` as `cleanupPeriodDays`, or nil. We never delete sooner than the user chose.
+    public static func claudeRetentionDays(home: URL) -> Int? {
+        let file = home.appendingPathComponent(".claude/settings.json")
+        guard UpdateDownloads.isPlainPath(file), let data = try? Data(contentsOf: file),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let n = json["cleanupPeriodDays"] as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+        let days = n.intValue
+        return (1...36_500).contains(days) ? days : nil
     }
 
     /// The size of the chats of Gemini CLI (`~/.gemini/tmp/<hash>/chats`). We only tell about it. Gemini has its own commands.

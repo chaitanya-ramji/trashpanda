@@ -93,7 +93,7 @@ enum DemoData {
                  place: "~/.cache/uv", action: .owner(.uvCachePrune), note: "Up to this size. uv removes only what nothing uses."),
             item("51", .aiAgents, "Codex · old sessions", 2_400_000_000, .review, .never,
                  place: "212 sessions older than 30 days · the oldest is 140 days old",
-                 action: .agent(.removeOldSessions(kind: .codex, olderThan: Date()))),
+                 action: .agent(.removeOldSessions(kind: .codex, olderThan: Date(), minimumAgeDays: 30))),
             item("50", .aiAgents, "Zed · caches and language servers", 380_000_000, .safe, .download,
                  place: "~/Library/Caches/Zed, ~/Library/Application Support/Zed/languages",
                  action: .agent(.removeFixedFolders(appID: "zed")), note: "Your settings, extensions, and chats stay.", owner: FixedFolders.apps[0].owner),

@@ -22,14 +22,14 @@ public struct Ollama: Sendable {
     /// and it cannot hold `..`, a space, or a shell sign, so it can never be read as an option or a path.
     public static func isModelName(_ text: String) -> Bool {
         text.count <= 200 && !text.contains("..") && text.range(
-            of: #"^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9._-]{1,128})?$"#, options: .regularExpression) != nil
+            of: #"^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9._-]{1,128})?\z"#, options: .regularExpression) != nil
     }
 
     /// "4.7 GB" -> bytes. Ollama uses decimal units.
     static func parseSize(_ text: String) -> Int64? {
         let t = text.trimmingCharacters(in: .whitespaces)
-        guard let m = t.range(of: #"^([0-9]+(\.[0-9]+)?)\s*(B|KB|MB|GB|TB)$"#, options: [.regularExpression, .caseInsensitive]),
-              let split = t[m].range(of: #"[A-Za-z]+$"#, options: .regularExpression),
+        guard let m = t.range(of: #"^([0-9]+(\.[0-9]+)?)\s*(B|KB|MB|GB|TB)\z"#, options: [.regularExpression, .caseInsensitive]),
+              let split = t[m].range(of: #"[A-Za-z]+\z"#, options: .regularExpression),
               let value = Double(t[m][..<split.lowerBound].trimmingCharacters(in: .whitespaces)) else { return nil }
         let scale: Double
         switch t[m][split.lowerBound...].uppercased() {
@@ -45,7 +45,7 @@ public struct Ollama: Sendable {
     /// "2 weeks ago", "About an hour ago", "a day ago" -> days. nil when the text has another shape.
     static func parseAgeDays(_ text: String) -> Int? {
         let t = text.trimmingCharacters(in: .whitespaces).lowercased()
-        guard let r = t.range(of: #"^(about\s+)?([0-9]+|an?)\s+(second|minute|hour|day|week|month|year)s?\s+ago$"#, options: .regularExpression) else { return nil }
+        guard let r = t.range(of: #"^(about\s+)?([0-9]+|an?)\s+(second|minute|hour|day|week|month|year)s?\s+ago\z"#, options: .regularExpression) else { return nil }
         let words = t[r].split(separator: " ").map(String.init)
         let unit = words[words.count - 2].trimmingCharacters(in: CharacterSet(charactersIn: "s"))
         let countWord = words[words.count - 3]

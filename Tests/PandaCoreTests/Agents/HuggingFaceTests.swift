@@ -6,7 +6,7 @@ final class HuggingFaceTests: SimctlTestCase {
     private let hub = ".cache/huggingface/hub"
 
     /// A fake `hf`. It needs no Python. It handles only `cache rm <id> --yes`, records every call, and fails on anything else.
-    private func fakeHF(_ box: Sandbox, fails: Bool = false) throws -> (path: String, calls: () -> [String]) {
+    private func fakeHF(_ box: Sandbox, fails: Bool = false, noop: Bool = false) throws -> (path: String, calls: () -> [String]) {
         let dir = box.home.appendingPathComponent("fakehf", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let log = dir.appendingPathComponent("calls.log")
@@ -14,9 +14,10 @@ final class HuggingFaceTests: SimctlTestCase {
         let hubPath = box.home.appendingPathComponent(hub).path
         let script = """
         #!/bin/bash
-        echo "$@" >> "\(log.path)"
+        echo "$@ HF_HOME=${HF_HOME:-unset} HF_HUB_CACHE=${HF_HUB_CACHE:-unset} XDG_CACHE_HOME=${XDG_CACHE_HOME:-unset}" >> "\(log.path)"
         [ "$#" = "4" ] && [ "$1" = "cache" ] && [ "$2" = "rm" ] && [ "$4" = "--yes" ] || { echo "UNEXPECTED $@" >> "\(log.path)"; exit 2; }
         \(fails ? "echo 'Error: could not remove' >&2; exit 1" : "")
+        \(noop ? "exit 0" : "")
         f=$(echo "$3" | /usr/bin/sed 's#^model/#models--#; s#^dataset/#datasets--#; s#^space/#spaces--#; s#/#--#g')
         /bin/rm -rf "\(hubPath)/$f"
         exit 0
@@ -143,7 +144,8 @@ final class HuggingFaceTests: SimctlTestCase {
         let report = cleaner(box, hf: fake.path).clean([item])
         XCTAssertEqual(report.removed, 1)
         XCTAssertTrue(report.freed >= 3_000_000 && report.freed < 3_500_000, "\(report.freed)")
-        XCTAssertEqual(fake.calls(), ["cache rm model/org/name --yes"], "One command, with the id")
+        XCTAssertEqual(fake.calls().count, 1, "One command")
+        XCTAssertTrue(fake.calls()[0].hasPrefix("cache rm model/org/name --yes "), fake.calls()[0])
         XCTAssertFalse(exists(box, "\(hub)/models--org--name"))
         XCTAssertTrue(exists(box, "\(hub)/models--org--other/blobs/aaaa"))
         XCTAssertTrue(exists(box, ".cache/huggingface/token"), "The login stays")
@@ -162,6 +164,31 @@ final class HuggingFaceTests: SimctlTestCase {
         XCTAssertFalse(exists(box, "\(hub)/datasets--org--ds"))
         XCTAssertTrue(exists(box, "\(hub)/datasets--org--keep/blobs/aaaa"))
         XCTAssertTrue(exists(box, ".cache/huggingface/token") && exists(box, ".cache/huggingface/xet/c/x"))
+    }
+
+    func testTheToolDoesNotSeeTheVariablesThatMoveItsCache() throws {
+        let box = try Sandbox()
+        try makeRepo(box, "models--org--name")
+        let fake = try fakeHF(box)
+        for (k, v) in [("HF_HOME", "/elsewhere/a"), ("HF_HUB_CACHE", "/elsewhere/b"), ("XDG_CACHE_HOME", "/elsewhere/c")] { setenv(k, v, 1) }
+        defer { for k in ["HF_HOME", "HF_HUB_CACHE", "XDG_CACHE_HOME"] { unsetenv(k) } }
+        let item = try XCTUnwrap(items(box).first)
+        _ = cleaner(box, hf: fake.path).clean([item])
+        let call = try XCTUnwrap(fake.calls().first)
+        XCTAssertTrue(call.contains("HF_HOME=unset") && call.contains("HF_HUB_CACHE=unset") && call.contains("XDG_CACHE_HOME=unset"), call)
+    }
+
+    func testAToolThatSaysYesButLeavesTheFolderIsAFailure() throws {
+        let box = try Sandbox()
+        try makeRepo(box, "models--org--name")
+        let fake = try fakeHF(box, noop: true)
+        let item = try XCTUnwrap(items(box).first)
+        let report = cleaner(box, hf: fake.path).clean([item])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(report.freed, 0)
+        XCTAssertEqual(report.failed.count, 1)
+        XCTAssertTrue(report.failed[0].contains("did not remove"), report.failed[0])
+        XCTAssertTrue(exists(box, "\(hub)/models--org--name/blobs/aaaa"))
     }
 
     func testWhenTheToolFailsNothingIsDeletedByHand() throws {
