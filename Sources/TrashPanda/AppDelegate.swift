@@ -303,7 +303,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func submenu(for ecosystem: Ecosystem, items: [Finding]) -> NSMenu {
+    /// The AI agents group, split by product. One row for each product, with its icon and what it can free.
+    /// Each row opens the usual list of that product, with its own "Free up" line.
+    private func nestedAgentMenu(_ items: [Finding]) -> NSMenu {
+        let sub = NSMenu()
+        let safe = items.filter { $0.isActionable && $0.tier == .safe && blockers($0).isEmpty }
+        if !safe.isEmpty {
+            let total = safe.reduce(Int64(0)) { $0 + $1.bytes }
+            let bulk = NSMenuItem(title: "Free up \(Format.bytes(total))…", action: #selector(confirmAndClean(_:)), keyEquivalent: "")
+            bulk.target = self
+            bulk.representedObject = FindingBox(safe, title: "Free up \(Format.bytes(total)) of AI agents files?",
+                                                body: "Trash Panda will clear old build files and caches.")
+            sub.addItem(bulk)
+            sub.addItem(.separator())
+        }
+        for group in AgentMenu.groups(items) {
+            let parent = NSMenuItem()
+            parent.attributedTitle = line(group.product, group.bytes > 0 ? Format.bytes(group.bytes) : "info")
+            parent.image = group.info.flatMap(productImage) ?? NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: group.product)
+            parent.image?.size = NSSize(width: 16, height: 16)
+            parent.submenu = submenu(for: .aiAgents, items: group.items, nest: false)
+            sub.addItem(parent)
+        }
+        return sub
+    }
+
+    private func submenu(for ecosystem: Ecosystem, items: [Finding], nest: Bool = true) -> NSMenu {
+        if nest, ecosystem == .aiAgents, AgentMenu.shouldNest(items) { return nestedAgentMenu(items) }
         let sub = NSMenu()
         let font = NSFont.menuFont(ofSize: 0)
         let widest = items.map { ($0.title as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
@@ -408,6 +434,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func icon(for f: Finding) -> NSImage? {
         if let owner = f.owner, let icon = appIcon(owner) { return icon }
         guard f.ecosystem == .aiAgents, let info = AgentProduct.info(forTitle: f.title) else { return nil }
+        return productImage(info)
+    }
+
+    /// The icon of a product: its app when it is installed, and its symbol when it is not.
+    private func productImage(_ info: AgentProduct.Info) -> NSImage? {
         let workspace = NSWorkspace.shared
         for id in info.iconBundleIDs {
             if let url = workspace.urlForApplication(withBundleIdentifier: id) {
