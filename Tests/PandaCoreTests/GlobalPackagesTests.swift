@@ -108,13 +108,13 @@ final class GlobalPackagesTests: XCTestCase {
           "name": "lib",
           "dependencies": {
             "corepack": { "version": "0.36.0", "overridden": false },
-            "groww-mcp": { "version": "1.5.0", "overridden": false },
+            "example-mcp": { "version": "1.5.0", "overridden": false },
             "npm": { "version": "11.20.0", "overridden": false }
           }
         }
         """
         let p = GlobalPackages.parse(.npm, real)
-        XCTAssertEqual(p.map(\.name), ["corepack", "groww-mcp", "npm"])
+        XCTAssertEqual(p.map(\.name), ["corepack", "example-mcp", "npm"])
         XCTAssertEqual(p.map(\.version), ["0.36.0", "1.5.0", "11.20.0"])
         XCTAssertTrue(GlobalPackages.parse(.npm, "not json").isEmpty)
         XCTAssertTrue(GlobalPackages.parse(.npm, "{}").isEmpty)
@@ -159,19 +159,19 @@ final class GlobalPackagesTests: XCTestCase {
 
     func testEveryManagerIsListedAndTheManagersThemselvesAreNot() throws {
         let box = try Sandbox(), fake = try FakeManagers(box: box)
-        try fake.install(.npm, "groww-mcp", version: "1.5.0", bytes: 3_000_000, daysAgo: 200)
+        try fake.install(.npm, "example-mcp", version: "1.5.0", bytes: 3_000_000, daysAgo: 200)
         try fake.install(.npm, "npm"); try fake.install(.npm, "corepack")
         try fake.install(.pnpm, "typescript", version: "5.4.0")
         try fake.install(.pnpm, "pnpm")
         try fake.install(.yarn, "@angular/cli", version: "17.0.0")
         try fake.install(.bun, "bunx-tool")
         let found = scanner(box).scanGlobalPackages()
-        XCTAssertEqual(Set(found.map(\.title)), ["Global package · groww-mcp (npm)", "Global package · typescript (pnpm)", "Global package · @angular/cli (yarn)",
+        XCTAssertEqual(Set(found.map(\.title)), ["Global package · example-mcp (npm)", "Global package · typescript (pnpm)", "Global package · @angular/cli (yarn)",
                                                  "Global package · bunx-tool (bun)"])
-        let g = try XCTUnwrap(found.first { $0.id == "pkg.npm:groww-mcp" })
+        let g = try XCTUnwrap(found.first { $0.id == "pkg.npm:example-mcp" })
         XCTAssertEqual(g.tier, .review)
         XCTAssertEqual(g.ecosystem, .javascript)
-        XCTAssertTrue(g.location.contains("groww-mcp@1.5.0") && g.location.contains("200 days ago"), g.location)
+        XCTAssertTrue(g.location.contains("example-mcp@1.5.0") && g.location.contains("200 days ago"), g.location)
         XCTAssertTrue(g.note?.contains("MCP") == true)
         XCTAssertNil(g.owner)
         XCTAssertTrue(g.bytes >= 3_000_000 && g.bytes < 3_500_000, "\(g.bytes)")
@@ -201,17 +201,17 @@ final class GlobalPackagesTests: XCTestCase {
 
     func testACleanRunsOnlyTheRemoveOfTheChosenPackage() throws {
         let box = try Sandbox(), fake = try FakeManagers(box: box)
-        try fake.install(.npm, "groww-mcp", bytes: 3_000_000)
+        try fake.install(.npm, "example-mcp", bytes: 3_000_000)
         try fake.install(.npm, "other", bytes: 2_000_000)
         let s = scanner(box)
-        let item = try XCTUnwrap(s.scanGlobalPackages().first { $0.id == "pkg.npm:groww-mcp" })
+        let item = try XCTUnwrap(s.scanGlobalPackages().first { $0.id == "pkg.npm:example-mcp" })
         let before = fake.log.count
         let report = cleaner(box).clean([item])
         XCTAssertEqual(report.removed, 1)
         XCTAssertTrue(report.freed >= 3_000_000 && report.freed < 3_500_000, "\(report.freed)")
-        XCTAssertFalse(fake.installed(.npm, "groww-mcp"))
+        XCTAssertFalse(fake.installed(.npm, "example-mcp"))
         XCTAssertTrue(fake.installed(.npm, "other"))
-        XCTAssertEqual(fake.log.dropFirst(before).filter { $0.contains("uninstall") }, ["npm uninstall -g groww-mcp"], "Exactly one remove")
+        XCTAssertEqual(fake.log.dropFirst(before).filter { $0.contains("uninstall") }, ["npm uninstall -g example-mcp"], "Exactly one remove")
         XCTAssertFalse(fake.log.dropFirst(before).contains { $0.hasPrefix("npm UNEXPECTED") || $0.contains("UNEXPECTED") })
         XCTAssertEqual(s.remainingBytes(of: item), 0)
     }

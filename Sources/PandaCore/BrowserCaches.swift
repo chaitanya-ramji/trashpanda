@@ -109,7 +109,7 @@ public enum BrowserCaches {
 
     /// A folder that the path guard may allow inside Application Support: a cache folder, or Service Worker storage.
     public static func isCleanableShape(relative: String) -> Bool {
-        isCacheShape(relative: relative) || isServiceWorkerShape(relative: relative)
+        isCacheShape(relative: relative) || isServiceWorkerShape(relative: relative) || ServiceWorkerSites.isSiteShape(relative: relative)
     }
 
     /// The `Service Worker/CacheStorage` folders of a browser, now. A link is never followed.

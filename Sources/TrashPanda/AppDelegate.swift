@@ -363,13 +363,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !safeAll.isEmpty {
             if !safe.isEmpty { sub.addItem(.separator()) }
             for f in safeAll.prefix(12) { sub.addItem(findingItem(f)) }
-            if safeAll.count > 12 { sub.addItem(disabled("+ \(safeAll.count - 12) more")) }
+            if safeAll.count > 12 { sub.addItem(moreItem(Array(safeAll.dropFirst(12)))) }
         }
         if !review.isEmpty {
             if !safeAll.isEmpty { sub.addItem(.separator()) }
             sub.addItem(disabled("Take a look first"))
             for f in review.prefix(12) { sub.addItem(findingItem(f)) }
-            if review.count > 12 { sub.addItem(disabled("+ \(review.count - 12) more")) }
+            if review.count > 12 { sub.addItem(moreItem(Array(review.dropFirst(12)))) }
         }
         if !info.isEmpty {
             if !safeAll.isEmpty || !review.isEmpty { sub.addItem(.separator()) }
@@ -397,6 +397,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if info.count > 12 { sub.addItem(disabled("+ \(info.count - 12) more")) }
         }
         return sub
+    }
+
+    /// The rows after the first 12 of a list. They open in a submenu, so that no row is hidden behind a disabled "+ N more".
+    private func moreItem(_ rest: [Finding]) -> NSMenuItem {
+        let parent = NSMenuItem(title: "\(rest.count) more…", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        for f in rest { sub.addItem(findingItem(f)) }
+        if sub.items.contains(where: { $0.image != nil }) {
+            let blank = NSImage(size: NSSize(width: 16, height: 16))
+            for item in sub.items where item.image == nil { item.image = blank }
+        }
+        parent.submenu = sub
+        return parent
     }
 
     private func findingItem(_ f: Finding) -> NSMenuItem {
