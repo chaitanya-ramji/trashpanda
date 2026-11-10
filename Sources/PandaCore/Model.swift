@@ -224,6 +224,8 @@ public enum SimulatorAction: Sendable, Equatable {
 }
 
 public enum Action: Sendable {
+    /// One global package of npm, pnpm, Yarn, or Bun. The manager removes it. The cleaner checks it again first.
+    case globalPackage(manager: PackageManager, name: String)
     /// One action of the AI agents group. The cleaner finds the targets again at clean time.
     case agent(AgentAction)
     /// One Homebrew formula that no other formula needs. Brew removes it. The cleaner checks it again first.

@@ -41,6 +41,7 @@ Trash Panda looks in two places:
 | --- | --- | --- |
 | Swift, Obj-C, Xcode | Build data, simulator caches, Swift packages, CocoaPods. Review: simulator runtimes, old simulators, archives, device support files (one item for each OS version; the newest of each device model is kept). | `.build`, `Pods` |
 | JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright (old browser versions), Electron and node-gyp downloads | `node_modules`, `.next`, `.nuxt`, `.turbo` |
+| JavaScript global packages | Packages that you installed with `npm install -g`, `pnpm add -g`, `yarn global add`, or `bun add -g`: one review item for each. The manager removes it. | None |
 | Python | pip, uv, pre-commit, Poetry, Hugging Face, PyTorch | `.venv`, `.tox`, `.nox` |
 | Java, Kotlin | Gradle, Maven, Android, Kotlin/Native, JetBrains | `target`, `build`, `.gradle` |
 | C#, .NET | NuGet | `obj`, `bin`, `.vs` |
@@ -86,6 +87,7 @@ The menu shows the cost to get an item back. The cost is seconds, minutes, or a 
 
 Trash Panda deletes files for good. They do not go to the Trash. These rules reduce the risk:
 
+- Global JavaScript packages are review items, one for each package, and the default button keeps it. The package manager removes the package (`npm uninstall -g`, `pnpm remove -g`, `yarn global remove`, `bun remove -g`), with no option, and Trash Panda lists the packages again before and after to check the result. The managers themselves and their helpers (`npm`, `pnpm`, `yarn`, `bun`, `corepack`, `node`) are never listed. No manager records when a tool was last used, so the menu shows the date of the package folder and never says "unused". A program that calls the tool, such as an MCP server that an AI app starts, stops working, and the dialog says so. `npm` is checked on a real Mac. The output of `pnpm`, `yarn`, and `bun` follows their documentation and is not checked on a real install.
 - The AI agents menu is split by product when it has more than 6 rows from more than one product. Each product is one row with its icon (the icon of its app, or a symbol when the app is not installed) and the size that it can free, and it opens its own list with its own "Free up" line. Rows are no longer cut at 12 in this menu.
 - uv: Trash Panda runs `uv cache prune` (unused entries only, never `--force`) as a safe item. Its size cannot be previewed, so the menu shows the whole cache as an upper bound, and the report shows what was freed. Removing the whole cache (`uv cache clean`) is a separate review item. The Pythons and tools that uv installed (`~/.local/share/uv/python` and `tools`) are never deleted.
 - Session transcripts (Codex, Claude Code) are review items, and the default button of the dialog keeps them. Only transcript files older than the stale limit are listed, and the clean removes only files that were old at the time of the preview and were not used again. You cannot resume a deleted conversation, and the tool may still list it. Claude Code's `memory` folders, `history.jsonl`, the logins (`auth.json`, `.credentials.json`), the databases, and settings are never touched. Claude Code deletes old transcripts itself (`cleanupPeriodDays`), and the item says so. The chats of Gemini CLI are only named, with the command to remove them.
@@ -280,7 +282,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 ### Later: v0.6 Old tools
 - [ ] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
 - [x] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
-- [ ] Unused global JavaScript packages: npm, pnpm, Bun, Yarn ([#51](https://github.com/chaitanya-ramji/trashpanda/issues/51))
+- [x] Unused global JavaScript packages: npm, pnpm, Bun, Yarn ([#51](https://github.com/chaitanya-ramji/trashpanda/issues/51))
 - [x] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
 - [x] More languages (phase 2b): Scala, Haskell, R, Julia, Nim, OCaml, Crystal, Clojure, Perl, Lua ([#29](https://github.com/chaitanya-ramji/trashpanda/issues/29))
 
