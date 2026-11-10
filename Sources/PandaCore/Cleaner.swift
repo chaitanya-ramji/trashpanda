@@ -16,11 +16,15 @@ public final class Cleaner {
     private let simctl: () -> Simctl?
     /// The programs that run now, with their full paths. A test browser that runs is not removed.
     private let programPaths: () -> [String]
+    /// Empties the Trash. The app asks Finder. Tests give a fake one.
+    private let emptyTrash: () -> Result<Void, TrashRefusal>
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
                 runningApps: RunningApps = .system, simctl: (() -> Simctl?)? = nil,
-                programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths) {
+                programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths,
+                emptyTrash: @escaping () -> Result<Void, TrashRefusal> = TrashBin.emptyWithFinder) {
+        self.emptyTrash = emptyTrash
         self.guardian = guardian
         self.runningApps = runningApps
         self.programPaths = programPaths
@@ -100,6 +104,9 @@ public final class Cleaner {
 
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
+
+            case .emptyTrash:
+                runEmptyTrash(finding: finding, into: &report)
 
             case .inform:
                 skip(finding, "this item is information only", &report)
@@ -229,6 +236,24 @@ public final class Cleaner {
         } catch {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
+        }
+    }
+
+    /// Asks Finder to empty the Trash. We measure the Trash before and after, so the report shows what really left.
+    private func runEmptyTrash(finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        let before = TrashBin.bytes(home: home)
+        switch emptyTrash() {
+        case .failure(let refusal):
+            Log.error("empty trash failed: \(refusal.text)")
+            report.failed.append("Trash: \(refusal.text)")
+        case .success:
+            let after = TrashBin.bytes(home: home)
+            let freed = max(0, before - after)
+            report.freed += freed
+            if after > 0 { report.skipped.append("Trash: \(ByteText.string(after)) is still in the Trash. Finder left it.") }
+            report.removed += 1
+            Log.info("clean \(finding.id): Finder emptied the Trash, \(freed) bytes left (was \(before), now \(after))")
         }
     }
 

@@ -33,7 +33,7 @@ public enum Rebuild: Sendable {
 
 /// Language or tool group. Phase 1 groups ship now. Phase 2 groups are planned.
 public enum Ecosystem: String, CaseIterable, Sendable {
-    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers
+    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash
 
     /// A short name for places with little room, such as the legend of the bar.
     public var shortName: String {
@@ -55,6 +55,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .docker: return "Docker"
         case .apps: return "Updates"
         case .browsers: return "Browsers"
+        case .trash: return "Trash"
         }
     }
 
@@ -77,6 +78,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .docker: return "Docker"
         case .apps: return "App update downloads"
         case .browsers: return "Browser caches"
+        case .trash: return "Trash"
         }
     }
 }
@@ -193,6 +195,8 @@ public enum SimulatorAction: Sendable, Equatable {
 }
 
 public enum Action: Sendable {
+    /// The Trash of the user. The cleaner asks Finder to empty it. We never delete those files ourselves.
+    case emptyTrash
     /// One simulator runtime or device. The cleaner checks the state again before it runs.
     case simulator(SimulatorAction)
     /// One Xcode archive. It must be `Archives/<date>/<name>.xcarchive` in the home folder.
