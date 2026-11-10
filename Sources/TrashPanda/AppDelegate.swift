@@ -271,10 +271,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// One row for a group, with its items as a submenu.
     private func ecosystemItem(_ ecosystem: Ecosystem, _ items: [Finding]) -> NSMenuItem {
-        let amount = items.filter { $0.isActionable && blockers($0).isEmpty }.reduce(Int64(0)) { $0 + $1.bytes }
-        let waiting = items.contains { $0.isActionable && !blockers($0).isEmpty }
+        // An item of an open app is still an item. Its size shows here, like any other.
+        let amount = items.filter(\.isActionable).reduce(Int64(0)) { $0 + $1.bytes }
         let parent = NSMenuItem()
-        parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : (waiting ? "app open" : "info"))
+        parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : "info")
         parent.submenu = submenu(for: ecosystem, items: items)
         return parent
     }
@@ -302,14 +302,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func submenu(for ecosystem: Ecosystem, items: [Finding]) -> NSMenu {
         let sub = NSMenu()
+        let font = NSFont.menuFont(ofSize: 0)
+        let widest = items.map { ($0.title as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        tabLocation = min(520, max(268, widest + 90))
+        defer {
+            tabLocation = 268
+            // One column for the text: if any row has an app icon, the other rows get a blank one.
+            if sub.items.contains(where: { $0.image != nil }) {
+                let blank = NSImage(size: NSSize(width: 16, height: 16))
+                for item in sub.items where item.image == nil && !item.isSeparatorItem { item.image = blank }
+            }
+        }
         if ecosystem == .docker, let engine = items.first?.location, engine.hasPrefix("Docker engine: ") {
             sub.addItem(disabled(engine.replacingOccurrences(of: "Docker engine: ", with: "Engine: ") + " (local)"))
             sub.addItem(.separator())
         }
         let actionable = items.filter(\.isActionable)
-        let blocked = actionable.filter { !blockers($0).isEmpty }.sorted { $0.bytes > $1.bytes }
-        let safe = actionable.filter { blockers($0).isEmpty && $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
-        let review = actionable.filter { blockers($0).isEmpty && $0.tier == .review }.sorted { $0.bytes > $1.bytes }
+        // The bulk "Free up" line takes only items that need no quit. It never quits an app.
+        let safeAll = actionable.filter { $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
+        let safe = safeAll.filter { blockers($0).isEmpty }
+        let review = actionable.filter { $0.tier == .review }.sorted { $0.bytes > $1.bytes }
         let info = items.filter { !$0.isActionable }.sorted { $0.bytes > $1.bytes }
 
         if !safe.isEmpty {
@@ -321,41 +333,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 safe, title: "Free up \(Format.bytes(total)) of \(ecosystem.name) files?",
                 body: "Trash Panda will clear old build files and caches.")
             sub.addItem(item)
-            sub.addItem(.separator())
-            for f in safe.prefix(12) { sub.addItem(findingItem(f)) }
-            if safe.count > 12 { sub.addItem(disabled("+ \(safe.count - 12) more")) }
+        }
+        if !safeAll.isEmpty {
+            if !safe.isEmpty { sub.addItem(.separator()) }
+            for f in safeAll.prefix(12) { sub.addItem(findingItem(f)) }
+            if safeAll.count > 12 { sub.addItem(disabled("+ \(safeAll.count - 12) more")) }
         }
         if !review.isEmpty {
-            if !safe.isEmpty { sub.addItem(.separator()) }
+            if !safeAll.isEmpty { sub.addItem(.separator()) }
             sub.addItem(disabled("Take a look first"))
             for f in review.prefix(12) { sub.addItem(findingItem(f)) }
             if review.count > 12 { sub.addItem(disabled("+ \(review.count - 12) more")) }
         }
-        if !blocked.isEmpty {
-            if !safe.isEmpty || !review.isEmpty { sub.addItem(.separator()) }
-            sub.addItem(disabled("Quit an app first"))
-            for f in blocked.prefix(12) {
-                let item = NSMenuItem(title: f.title, action: nil, keyEquivalent: "")
-                item.attributedTitle = line(f.title, Format.bytes(f.bytes))
-                item.isEnabled = false
-                item.toolTip = f.location
-                sub.addItem(item)
-                let names = blockers(f).joined(separator: " and ")
-                let note = NSMenuItem(title: "Quit \(names) and clean…", action: #selector(confirmQuitAndClean(_:)), keyEquivalent: "")
-                note.attributedTitle = NSAttributedString(string: "  Quit \(names) and clean…", attributes: [
-                    .font: NSFont.menuFont(ofSize: 12), .foregroundColor: NSColor.controlAccentColor])
-                note.target = self
-                note.representedObject = FindingBox(
-                    [f], title: "Quit \(names) and clean?",
-                    body: "Trash Panda will ask \(names) to quit, then free \(Format.bytes(f.bytes)). If \(names) asks to save your work, answer it first.",
-                    footer: "Trash Panda never forces an app to quit. If it stays open, nothing is removed.",
-                    confirmTitle: "Quit \(names) and clean", cancelIsDefault: true, cancelTitle: "Not now")
-                sub.addItem(note)
-            }
-            if blocked.count > 12 { sub.addItem(disabled("+ \(blocked.count - 12) more")) }
-        }
         if !info.isEmpty {
-            if !safe.isEmpty || !review.isEmpty || !blocked.isEmpty { sub.addItem(.separator()) }
+            if !safeAll.isEmpty || !review.isEmpty { sub.addItem(.separator()) }
             sub.addItem(disabled("Information only. Cannot be removed here."))
             for f in info.prefix(12) {
                 let item = NSMenuItem(title: f.title, action: nil, keyEquivalent: "")
@@ -386,13 +377,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: f.title, action: #selector(confirmAndClean(_:)), keyEquivalent: "")
         item.attributedTitle = line(f.title, Format.bytes(f.bytes))
         item.target = self
-        item.representedObject = dialog(for: f)
+        item.image = f.owner.flatMap(appIcon)
+        let open = blockers(f)
+        if open.isEmpty {
+            item.representedObject = dialog(for: f)
+        } else {
+            // The app is open. The row looks like any other. The click asks, then quits the app politely, then cleans.
+            let names = open.joined(separator: " and ")
+            let c = Confirmation.forOne(f, staleDays: scanner.config.staleDays)
+            item.action = #selector(confirmQuitAndClean(_:))
+            item.representedObject = FindingBox(
+                [f], title: c.title,
+                body: c.body + "\n\n\(names) is open. Trash Panda will ask it to quit first. If it asks to save your work, answer it.",
+                footer: c.footer, confirmTitle: "Quit \(names) and free \(Format.bytes(f.bytes))",
+                cancelIsDefault: true, cancelTitle: "Not now")
+        }
         var tip = "\(f.location)\n\(f.rebuild.label)"
         if isProject(f), let days = daysSinceActivity(f) {
             tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")"
         }
         item.toolTip = tip
         return item
+    }
+
+    /// The small icon of the app that owns an item: the running app, or the installed one.
+    private func appIcon(_ owner: AppOwner) -> NSImage? {
+        let workspace = NSWorkspace.shared
+        var icon = workspace.runningApplications.first { app in app.bundleIdentifier.map(owner.matches(bundleID:)) ?? false
+            && app.activationPolicy == .regular }?.icon
+        if icon == nil {
+            for id in owner.bundleIDs where !id.hasSuffix("*") && !id.contains(".helper") {
+                if let url = workspace.urlForApplication(withBundleIdentifier: id) { icon = workspace.icon(forFile: url.path); break }
+            }
+        }
+        guard let small = icon?.copy() as? NSImage else { return nil }
+        small.size = NSSize(width: 16, height: 16)
+        return small
     }
 
     /// The words of the dialog for one item. They come from the core, where tests check them.
@@ -432,9 +452,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
+    /// Where the sizes end. A submenu with a long title widens it, so that the sizes stay in one column.
+    private var tabLocation: CGFloat = 268
+
     private func line(_ left: String, _ right: String) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
-        style.tabStops = [NSTextTab(textAlignment: .right, location: 268)]
+        style.tabStops = [NSTextTab(textAlignment: .right, location: tabLocation)]
         style.lineBreakMode = .byTruncatingTail
         return NSAttributedString(string: "\(left)\t\(right)", attributes: [
             .font: NSFont.menuFont(ofSize: 0),

@@ -16,7 +16,7 @@ public struct AppOwner: Sendable, Equatable {
         self.processNames = processNames
     }
 
-    func matches(bundleID: String) -> Bool {
+    public func matches(bundleID: String) -> Bool {
         let id = bundleID.lowercased()
         return bundleIDs.contains { pattern in
             let p = pattern.lowercased()
