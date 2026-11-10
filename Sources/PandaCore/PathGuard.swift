@@ -58,6 +58,9 @@ public struct PathGuard: Sendable {
         ".codex/auth.json", ".claude/.credentials.json",
     ]
 
+    /// Folders in `~/Library/Caches` that we never delete. Lower case, because the file system ignores the case.
+    static let protectedCacheFolders: Set<String> = ["cloudkit", "familycircle", "geoservices"]
+
     static let criticalExact: Set<String> = [
         "/", "/Applications", "/Library", "/Volumes", "/Network", "/cores", "/etc", "/home", "/net",
         "/tmp", "/var", "/private", "/private/tmp", "/private/var", "/private/var/tmp",
@@ -95,6 +98,15 @@ public struct PathGuard: Sendable {
 
         let relative = String(resolved.dropFirst(home.count + 1))
         if relative.split(separator: "/").count < 2 { return .tooShallow }
+
+        // `Library/Caches` itself, and the folders in it that are not ours to empty. They hold iCloud data, or they belong to macOS.
+        // The cache explorer (#20) labels them `keep`, and this rule is the backstop: a forged action cannot empty the whole folder.
+        if relative == "Library/Caches" { return .protectedData("Library/Caches") }
+        let cachePieces = relative.split(separator: "/").map { $0.lowercased() }
+        if cachePieces.count >= 3, cachePieces[0] == "library", cachePieces[1] == "caches",
+           Self.protectedCacheFolders.contains(cachePieces[2]) || cachePieces[2].hasPrefix("com.apple.") {
+            return .protectedData("Library/Caches/\(cachePieces[2])")
+        }
 
         for tree in Self.protectedHomeTrees where relative == tree || relative.hasPrefix(tree + "/") {
             // The one exception: a cache folder of a browser, in the exact shape <root>/<profile>/<cache name>.
