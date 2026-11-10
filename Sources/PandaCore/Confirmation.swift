@@ -36,7 +36,7 @@ public struct Confirmation: Equatable, Sendable {
         case .agent(.removeCodexRuntime) where f.tier == .review: return .agentRuntime
         case .agent(.removeOldClaudeDesktopRuntimes): return .agentRuntime
         case .agent(.removeClaudeVMBundle): return .vmBundle
-        case .agent(.removeOllamaModel): return .localModel
+        case .agent(.removeOllamaModel), .agent(.removeHuggingFaceRepo): return .localModel
         default: return .ordinary
         }
     }

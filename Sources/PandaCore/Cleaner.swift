@@ -26,6 +26,8 @@ public final class Cleaner {
     private let openClaudeBinaries: ([String]) -> [String]?
     /// Finds `ollama` at clean time. Tests give a fake one.
     private let ollama: () -> Ollama?
+    /// Finds the `hf` tool at clean time. Tests give a fake one. nil means that the folder is removed directly.
+    private let hfTool: () -> String?
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
@@ -35,7 +37,8 @@ public final class Cleaner {
                 mountedImages: @escaping () -> [String] = Installers.mountedImagePaths,
                 brew: (() -> Brew?)? = nil,
                 openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
-                ollama: (() -> Ollama?)? = nil) {
+                ollama: (() -> Ollama?)? = nil, hfTool: (() -> String?)? = nil) {
+        self.hfTool = hfTool ?? { Shell.resolve("hf") }
         self.ollama = ollama ?? { Shell.resolve("ollama").map { Ollama(path: $0) } }
         self.openClaudeBinaries = openClaudeBinaries
         self.brew = brew ?? { Shell.resolve("brew").map { Brew(path: $0) } }
@@ -279,6 +282,7 @@ public final class Cleaner {
         case .removeAgentCaches(let id): removeAgentCaches(id, finding: finding, into: &report)
         case .removeEditorCaches(let id): removeEditorCaches(id, finding: finding, into: &report)
         case .removeOllamaModel(let name): removeOllamaModel(name, finding: finding, into: &report)
+        case .removeHuggingFaceRepo(let id): removeHuggingFaceRepo(id, finding: finding, into: &report)
         case .removeObsoleteExtensions(let id): removeObsoleteExtensions(id, finding: finding, into: &report)
         case .removeClaudeVMBundle:
             removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
@@ -315,6 +319,34 @@ public final class Cleaner {
         if removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
+    /// One Hugging Face repository. We find its folder again now. With `hf`, the tool removes it. Without, we delete the folder.
+    private func removeHuggingFaceRepo(_ id: String, finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        guard HuggingFace.isRepoID(id) else { skip(finding, "the repository id is not valid", &report); return }
+        guard let repo = HuggingFace.repo(id: id, home: home, now: Date()) else {
+            skip(finding, "\(id) is not in the cache, or a download is running", &report); return
+        }
+        let size = Sizer.size(of: repo.folder)          // measure first, check last (see removeFolders)
+        let hubPrefix = HuggingFace.hubURL(home: home).standardizedFileURL.path + "/"
+        guard repo.folder.standardizedFileURL.path.hasPrefix(hubPrefix), UpdateDownloads.isPlainPath(repo.folder) else {
+            skip(finding, "not a repository folder of the cache", &report); return
+        }
+        if let reason = guardian.check(repo.folder) { skip(finding, "\(reason)", &report); return }
+        if let tool = hfTool(), let args = HuggingFace.removeArguments(id) {
+            let result = Shell.run(tool, args, timeout: 300)
+            guard result.status == 0, !result.timedOut else { report.failed.append("\(finding.title): hf cache rm failed"); return }
+        } else {
+            do { try FileManager.default.removeItem(at: repo.folder) } catch {
+                Log.error("remove failed \(repo.folder.path): \(error.localizedDescription)")
+                report.failed.append("\(repo.folder.path): \(error.localizedDescription)"); return
+            }
+        }
+        let left = FileManager.default.fileExists(atPath: repo.folder.path) ? Sizer.size(of: repo.folder) : 0
+        report.freed += max(0, size - left)
+        report.removed += 1
+        Log.info("clean \(finding.id): removed \(id), freed \(max(0, size - left))")
     }
 
     /// One Ollama model, removed by Ollama. We check the name, that the model is still there, and that it is not loaded.
