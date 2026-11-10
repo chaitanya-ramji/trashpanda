@@ -142,6 +142,9 @@ public final class Cleaner {
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
 
+            case .removeCacheFolderContents(let name):
+                removeCacheFolderContents(name, finding: finding, into: &report)
+
             case .removeRuntime(let storeID, let tool, let name):
                 removeRuntime(storeID, tool, name, finding: finding, into: &report)
 
@@ -302,6 +305,39 @@ public final class Cleaner {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")
         }
+    }
+
+    /// The contents of one folder in `~/Library/Caches` (the cache explorer). We check the name, the labels, the type, and every child.
+    /// The folder stays, because apps expect it. If the folder is owned by an app that runs, the owner check at the top of `clean` has skipped it.
+    private func removeCacheFolderContents(_ name: String, finding: Finding, into report: inout CleanReport) {
+        guard CacheExplorer.isFolderName(name) else { skip(finding, "not the name of one cache folder", &report); return }
+        guard CacheExplorer.keepReason(name) == nil else { skip(finding, "\(name) is not ours to empty", &report); return }
+        guard !CacheExplorer.catalogNames().contains(name) else { skip(finding, "\(name) has its own item in the group of its tool", &report); return }
+        let home = URL(fileURLWithPath: guardian.home)
+        let folder = home.appendingPathComponent("Library/Caches", isDirectory: true).appendingPathComponent(name, isDirectory: true)
+        guard (try? FileManager.default.attributesOfItem(atPath: folder.path))?[.type] as? FileAttributeType == .typeDirectory,
+              UpdateDownloads.isPlainPath(folder), UpdateDownloads.isPlainPath(folder.deletingLastPathComponent()) else {
+            skip(finding, "not a plain folder", &report); return
+        }
+        if let reason = guardian.check(folder) { skip(finding, "\(reason)", &report); return }
+        guard let children = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else {
+            report.failed.append("\(folder.path): cannot read folder"); return
+        }
+        let before = Sizer.size(of: folder)
+        var failures = 0
+        for child in children {
+            let url = folder.appendingPathComponent(child)
+            if let reason = guardian.check(url) { report.skipped.append("\(url.path): \(reason)"); continue }
+            do { try FileManager.default.removeItem(at: url) } catch {
+                failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            }
+        }
+        let left = Sizer.size(of: folder)
+        report.freed += max(0, before - left)
+        report.removed += 1
+        Log.info("clean \(finding.id): emptied \(name), freed \(max(0, before - left)) bytes, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.location): \(failures) items stayed") }
     }
 
     /// One runtime version. We decide again now: the default may have changed, a program may run from it, a project may ask for it.

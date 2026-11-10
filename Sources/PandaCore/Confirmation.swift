@@ -17,7 +17,7 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage, runtime
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage, runtime, cacheFolder
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -31,6 +31,7 @@ public struct Confirmation: Equatable, Sendable {
         case .removeServiceWorkerStorage, .removeServiceWorkerSite: return .serviceWorker
         case .globalPackage: return .globalPackage
         case .removeRuntime: return .runtime
+        case .removeCacheFolderContents: return .cacheFolder
         case .emptyTrash: return .trash
         case .removeInstaller: return .installer
         case .removeOldLogs: return .oldLogs
@@ -77,6 +78,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Remove saved website data?", body: detail,
                 footer: "Websites that work offline keep their files here. After this, such a site may not open without a network until you visit it online again. This can't be undone.",
                 confirmTitle: "Remove data", cancelIsDefault: true)
+        case .cacheFolder:
+            return Confirmation(
+                title: "Empty this cache folder?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))\n\(f.owner.map { "App: \($0.name)" } ?? "App: not known")",
+                footer: "Apps can download the files in a cache folder again. Trash Panda does not know what this one holds: an app may sign you out, lose offline files, or be slow the first time. Quit the app first. The folder stays, and its contents are deleted. This can't be undone.",
+                confirmTitle: "Empty folder", cancelIsDefault: true)
         case .runtime:
             return Confirmation(
                 title: "Remove this runtime version?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))",

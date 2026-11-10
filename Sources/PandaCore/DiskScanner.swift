@@ -160,7 +160,7 @@ public final class DiskScanner {
 
         // Tiny items add noise to the menu and free almost nothing.
         // Information lines are not part of any total, so they are always shown.
-        let sorted = findings.filter { $0.bytes >= Self.minimumBytes || !$0.isActionable }.sorted { $0.bytes > $1.bytes }
+        let sorted = Self.removeOverlap(findings, home: home).filter { $0.bytes >= Self.minimumBytes || !$0.isActionable }.sorted { $0.bytes > $1.bytes }
         let result = ScanResult(findings: sorted, disk: DiskUsage.current(for: home))
         for f in sorted {
             Log.info("found [\(f.tier == .safe ? "safe" : "review")] \(f.id) \(f.bytes) bytes — \(f.location)")
@@ -196,6 +196,9 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .removeCacheFolderContents(let name):
+            let folder = home.appendingPathComponent("Library/Caches/\(name)", isDirectory: true)
+            return FileManager.default.fileExists(atPath: folder.path) ? Sizer.size(of: folder) : 0
         case .removeRuntime(let storeID, let tool, let name):
             return RuntimeVersions.store(id: storeID).flatMap { RuntimeVersions.versions(in: $0, home: home).first { $0.tool == tool && $0.name == name } }?.bytes ?? 0
         case .globalPackage(let manager, let name):
@@ -923,14 +926,52 @@ public final class DiskScanner {
 
     // MARK: Cache explorer
 
-    /// The largest folders in `Library/Caches`, as information lines. Read only: there is no action, so nothing can be removed from here.
+    /// The largest folders in `Library/Caches`. A folder with an unknown owner is a review item that the user can empty. A folder that has
+    /// its own item, and a folder that is not ours to empty, are information lines with the reason.
     func scanCacheExplorer() -> [Finding] {
-        // Folders that have an item of their own: the catalog, the browsers, the test browsers, and the tools that clean themselves.
-        let cleanable = CacheExplorer.cleanableNames(paths: Catalog.caches.flatMap(\.paths) + BrowserCaches.browsers.flatMap(\.roots)
-                                                      + TestBrowsers.tools.map(\.root) + CacheExplorer.selfCleaningTools)
+        let cleanable = CacheExplorer.catalogNames()
         return CacheExplorer.entries(home: home, cleanable: cleanable, appName: appName).map { e in
-            Finding(id: "cache.explorer:\(e.folder)", ecosystem: .cacheExplorer, title: e.displayName == e.folder ? "\(e.displayName) · \(e.label.rawValue)" : "\(e.displayName) (\(e.folder)) · \(e.label.rawValue)",
-                    location: "~/Library/Caches/\(e.folder)", bytes: e.bytes, tier: .review, rebuild: .never, action: .inform, note: e.reason)
+            let name = e.displayName == e.folder ? e.displayName : "\(e.displayName) (\(e.folder))"
+            let place = "~/Library/Caches/\(e.folder)"
+            switch e.label {
+            case .unknown:
+                // A name like a bundle ID can be matched with an app, and then an open app blocks the item.
+                let owner = CacheExplorer.looksLikeBundleID(e.folder) ? AppOwner(name: e.displayName, bundleIDs: [e.folder, e.folder + ".*"]) : nil
+                let note = owner == nil ? "We do not know the app, so we cannot check that it is closed. It may sign you out or be slow the first time."
+                                        : "Apps can download these files again. It may sign you out or be slow the first time."
+                return Finding(id: "cache.explorer:\(e.folder)", ecosystem: .cacheExplorer, title: "\(name) · cache folder", location: place,
+                               bytes: e.bytes, tier: .review, rebuild: .download, action: .removeCacheFolderContents(name: e.folder), note: note, owner: owner)
+            case .canClean, .keep:
+                return Finding(id: "cache.explorer:\(e.folder)", ecosystem: .cacheExplorer, title: "\(name) · \(e.label.rawValue)", location: place,
+                               bytes: e.bytes, tier: .review, rebuild: .never, action: .inform, note: e.reason)
+            }
+        }
+    }
+
+    /// The part of a cache folder that another item already counts, for example the old update downloads of Arc inside its cache folder.
+    /// We take it off the size of the explorer item, so that the same bytes are not in two totals.
+    static func removeOverlap(_ findings: [Finding], home: URL) -> [Finding] {
+        let caches = home.appendingPathComponent("Library/Caches", isDirectory: true).standardizedFileURL.path + "/"
+        func url(of f: Finding) -> URL? {
+            switch f.action {
+            case .removeContents(let u), .removeArtifact(let u), .removeUpdateDownloads(let u), .removeArchive(let u), .removeDeviceSupport(let u): return u
+            default: return nil
+            }
+        }
+        return findings.map { f in
+            guard case .removeCacheFolderContents(let name) = f.action else { return f }
+            let prefix = caches + name + "/"
+            let inside = findings.filter { other in
+                if case .removeCacheFolderContents = other.action { return false }
+                guard other.isActionable, let u = url(of: other) else { return false }
+                return u.standardizedFileURL.path.hasPrefix(prefix)
+            }
+            let overlap = inside.reduce(Int64(0)) { $0 + $1.bytes }
+            guard overlap > 0 else { return f }
+            let names = inside.map(\.title).joined(separator: ", ")
+            return Finding(id: f.id, ecosystem: f.ecosystem, title: f.title, location: f.location, bytes: max(0, f.bytes - overlap), tier: f.tier,
+                           rebuild: f.rebuild, action: f.action, lastActivity: f.lastActivity,
+                           note: "\(f.note ?? "") Not counted here: \(ByteText.string(overlap)) of \(names).", helpURL: f.helpURL, owner: f.owner)
         }
     }
 
