@@ -150,6 +150,7 @@ public final class DiskScanner {
                 { add(self.scanOllama()) },
                 { add(self.scanGlobalPackages()) },
                 { add(self.scanSnapshots()) },
+                { add(self.scanCacheExplorer()) },
                 { add(self.scanDocker()) },
                 { add(self.scanGo()) },
                 { add(self.scanUv()) },
@@ -911,6 +912,19 @@ public final class DiskScanner {
                                note: "Up to this size. uv removes only what nothing uses. Agents such as Claude Code and Codex start uv."))
         }
         return out
+    }
+
+    // MARK: Cache explorer
+
+    /// The largest folders in `Library/Caches`, as information lines. Read only: there is no action, so nothing can be removed from here.
+    func scanCacheExplorer() -> [Finding] {
+        // Folders that have an item of their own: the catalog, the browsers, the test browsers, and the tools that clean themselves.
+        let cleanable = CacheExplorer.cleanableNames(paths: Catalog.caches.flatMap(\.paths) + BrowserCaches.browsers.flatMap(\.roots)
+                                                      + TestBrowsers.tools.map(\.root) + CacheExplorer.selfCleaningTools)
+        return CacheExplorer.entries(home: home, cleanable: cleanable, appName: appName).map { e in
+            Finding(id: "cache.explorer:\(e.folder)", ecosystem: .cacheExplorer, title: e.displayName == e.folder ? "\(e.displayName) · \(e.label.rawValue)" : "\(e.displayName) (\(e.folder)) · \(e.label.rawValue)",
+                    location: "~/Library/Caches/\(e.folder)", bytes: e.bytes, tier: .review, rebuild: .never, action: .inform, note: e.reason)
+        }
     }
 
     // MARK: Time Machine
