@@ -125,6 +125,7 @@ public final class DiskScanner {
             { add(self.scanServiceWorkerStorage()) },
             { add(self.scanTestBrowsers()) },
             { add(self.scanTrash()) },
+            { add(self.scanInstallers()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -173,6 +174,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .removeInstaller(let url):
+            return FileManager.default.fileExists(atPath: url.path) ? finding.bytes : 0
         case .removeOldTestBrowsers(let id):
             return TestBrowsers.tool(id: id).map { TestBrowsers.bytes(of: $0, home: home) } ?? finding.bytes
         case .removeUpdateDownloads(let url):
@@ -334,6 +337,17 @@ public final class DiskScanner {
                            location: "\(b.roots.map { "~/" + $0 }.joined(separator: " and ")) · pages load again the first time",
                            bytes: bytes, tier: .safe, rebuild: .download,
                            action: .removeBrowserCaches(browserID: b.id), owner: b.owner)
+        }
+    }
+
+    /// Old `.dmg` and `.pkg` files in `~/Downloads`. One review item for each file, so the user chooses each one.
+    func scanInstallers() -> [Finding] {
+        Installers.list(home: home, now: now()).compactMap { i in
+            guard i.bytes > 0, guardian.check(i.url) == nil else { return nil }
+            let name = i.url.lastPathComponent
+            return Finding(id: "installer:\(name)", ecosystem: .installers, title: "Installer · \(name)",
+                           location: "~/Downloads/\(name) · \(i.ageDays) days old",
+                           bytes: i.bytes, tier: .review, rebuild: .download, action: .removeInstaller(i.url))
         }
     }
 
