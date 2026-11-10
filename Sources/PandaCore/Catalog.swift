@@ -207,6 +207,12 @@ enum Catalog {
         // Crystal
         CacheSpec(id: "crystal.cache", title: "Crystal compiler cache", ecosystem: .crystal,
                   paths: [".cache/crystal"], tier: .safe, rebuild: .minutes),
+
+        // Clojure
+        CacheSpec(id: "clojure.gitlibs.libs", title: "Clojure git libraries", ecosystem: .clojure,
+                  paths: [".gitlibs/libs"], tier: .review, rebuild: .download),
+        CacheSpec(id: "clojure.gitlibs.repos", title: "Clojure git library clones", ecosystem: .clojure,
+                  paths: [".gitlibs/_repos"], tier: .review, rebuild: .download),
     ]
 
     // MARK: Project build outputs
@@ -288,6 +294,14 @@ enum Catalog {
                      markers: ["dune-project", "dune-workspace"], .ocaml, "Dune build output"),
         ArtifactRule(["_opam"],
                      markers: ["*.opam", "dune-project"], .ocaml, "Local opam switch", tier: .review),
+
+        // Clojure
+        ArtifactRule(["target"],
+                     markers: ["project.clj"], .clojure, "Leiningen build output"),
+        ArtifactRule([".cpcache"],
+                     markers: ["deps.edn"], .clojure, "Classpath cache", rebuild: .seconds),
+        ArtifactRule([".shadow-cljs"],
+                     markers: ["shadow-cljs.edn"], .clojure, "shadow-cljs cache", rebuild: .seconds),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
