@@ -42,6 +42,13 @@ public struct PathGuard: Sendable {
         ".mix", ".hex/hex.config",
     ]
 
+    /// Files that hold a login or a secret. Neither the file nor any folder that contains it may be deleted.
+    /// The folder above a file is protected too, so a bulk delete of the parent cannot take the file.
+    static let protectedFiles: [String] = [
+        // Hugging Face login. The documented place is $HF_HOME/token.
+        ".cache/huggingface/token", ".cache/huggingface/stored_tokens",
+    ]
+
     static let criticalExact: Set<String> = [
         "/", "/Applications", "/Library", "/Volumes", "/Network", "/cores", "/etc", "/home", "/net",
         "/tmp", "/var", "/private", "/private/tmp", "/private/var", "/private/var/tmp",
@@ -86,6 +93,10 @@ public struct PathGuard: Sendable {
             // Service Worker storage is the second one. It is only offered as a review item.
             if BrowserCaches.isCleanableShape(relative: relative) { break }
             return .protectedData(tree)
+        }
+
+        for file in Self.protectedFiles where relative == file || relative.hasPrefix(file + "/") || file.hasPrefix(relative + "/") {
+            return .protectedData(file)
         }
 
         for entry in keep where resolved == entry || resolved.hasPrefix(entry + "/") || entry.hasPrefix(resolved + "/") {
