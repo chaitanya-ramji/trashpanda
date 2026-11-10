@@ -89,6 +89,8 @@ enum DemoData {
             item("19", .docker, "Volume · cache_data", 118_000_000, .review, .never, place: "\(dk) · used by 1 container", action: .inform),
             item("20", .docker, "Docker Desktop disk image", 6_400_000_000, .review, .never, place: dk, action: .inform,
                  note: "Holds 3.0 GB of data. The file can stay large after a clean.", help: DockerDesktopDisk.helpURL),
+            item("32", .installers, "Installer · Docker-4.30.dmg", 720_000_000, .review, .download, place: "~/Downloads/Docker-4.30.dmg · 142 days old",
+                 action: .removeInstaller(URL(fileURLWithPath: "/tmp/none.dmg"))),
             item("31", .trash, "Trash", 5_300_000_000, .review, .never, place: "~/.Trash · Finder empties it", action: .emptyTrash),
             item("13", .homebrew, "Old downloads and versions", 412_000_000, .safe, .download),
         ]
