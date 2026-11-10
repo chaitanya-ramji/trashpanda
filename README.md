@@ -55,6 +55,7 @@ Trash Panda looks in two places:
 | Homebrew | Downloads and old versions | None |
 | Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia): cache, code cache, and GPU caches. Firefox and Zen: `cache2` and `startupCache`. Dia and Zen are not checked on a real install yet. Review: Service Worker storage. | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |
+| Trash | The size of `~/.Trash`. One review item. Finder empties it (see Safety rules). | None |
 | Docker | Build cache, untagged images (safe). Stopped containers, old unused images, and unused volumes (review). | None |
 
 Trash Panda does **not** touch your documents or app data. It removes a Docker image only when no container uses it, running or stopped. An old named image is a review item.
@@ -72,6 +73,7 @@ The menu shows the cost to get an item back. The cost is seconds, minutes, or a 
 
 Trash Panda deletes files for good. They do not go to the Trash. These rules reduce the risk:
 
+- The Trash is a review item. It is never in the one-click clean. Trash Panda does not delete those files itself: it asks Finder to empty the Trash, the same as the Finder menu. The first time, macOS asks if Trash Panda may control Finder. Say no, and nothing is deleted. The app reads only `~/.Trash`, not the Trash of an external drive. If macOS does not let the app read the Trash (Full Disk Access), the app shows nothing for it.
 - The app always shows a list and asks you before it deletes.
 - A project folder counts only when a marker file is next to it. For example, `node_modules` needs `package.json`.
 - The app skips a project when a running process uses it.
@@ -240,7 +242,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Cache explorer: show the largest folders in Library/Caches ([#20](https://github.com/chaitanya-ramji/trashpanda/issues/20))
 - [ ] Explain space that does not come back: local snapshots ([#21](https://github.com/chaitanya-ramji/trashpanda/issues/21))
 - [ ] Logs and crash reports (review) ([#22](https://github.com/chaitanya-ramji/trashpanda/issues/22))
-- [ ] Show the Trash size and offer to empty it ([#23](https://github.com/chaitanya-ramji/trashpanda/issues/23))
+- [x] Show the Trash size and offer to empty it ([#23](https://github.com/chaitanya-ramji/trashpanda/issues/23))
 - [ ] Old installers in Downloads (DMG, PKG, ZIP) ([#24](https://github.com/chaitanya-ramji/trashpanda/issues/24))
 - [ ] Docker: say when freed space is not back on the Mac yet ([#40](https://github.com/chaitanya-ramji/trashpanda/issues/40))
 - [ ] Service Worker storage: show each website by name ([#44](https://github.com/chaitanya-ramji/trashpanda/issues/44))
