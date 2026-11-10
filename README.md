@@ -61,6 +61,7 @@ Trash Panda looks in two places:
 | Crystal | Compiler cache (safe). | None (`lib` is left out: see the PR) |
 | Clojure | Git libraries (review). `~/.m2` is already covered under Java. | `target`, `.cpcache`, `.shadow-cljs` |
 | Perl | cpanm and CPAN build folders and downloads (safe). | `blib` (`local` is left out: see the PR) |
+| Lua | None (no global cache path could be confirmed on macOS). | `lua_modules` (review) |
 | Homebrew | Downloads and old versions (safe). Review: each package that no other package needs (`brew leaves`), with its install date. Brew removes it. | None |
 | Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia): cache, code cache, and GPU caches. Firefox and Zen: `cache2` and `startupCache`. Dia and Zen are not checked on a real install yet. Review: Service Worker storage. | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |
