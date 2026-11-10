@@ -199,6 +199,8 @@ public enum SimulatorAction: Sendable, Equatable {
 }
 
 public enum Action: Sendable {
+    /// One Homebrew formula that no other formula needs. Brew removes it. The cleaner checks it again first.
+    case brew(BrewAction)
     /// The old files of one group in `~/Library/Logs`. The cleaner finds the files again from the group.
     case removeOldLogs(OldLogs.Kind)
     /// One `.dmg` or `.pkg` file directly in `~/Downloads`. The cleaner reads its age again before it deletes it.

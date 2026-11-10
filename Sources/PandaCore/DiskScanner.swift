@@ -82,6 +82,7 @@ public final class DiskScanner {
     private let isSocket: (String) -> Bool
     /// Path of `xcrun`. Tests set it to a fake tool. The default finds the real one.
     private let xcrunOverride: String?
+    private let brewOverride: String?
     /// The current time. Tests set a fixed time, so that ages do not change from day to day.
     private let now: () -> Date
     /// The name of an installed app. Tests give their own.
@@ -90,11 +91,12 @@ public final class DiskScanner {
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
                 isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
-                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil,
+                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil,
                 appName: @escaping (String) -> String? = UpdateDownloads.systemAppName(for:)) {
         self.now = now
         self.appName = appName
         self.xcrunOverride = xcrunPath
+        self.brewOverride = brewPath
         self.home = home
         self.config = config
         self.guardian = PathGuard(home: home, keep: config.keep)
@@ -132,6 +134,7 @@ public final class DiskScanner {
             jobs += [
                 { add(self.scanSimulators()) },
                 { add(self.scanHomebrew()) },
+                { add(self.scanBrewLeaves()) },
                 { add(self.scanDocker()) },
                 { add(self.scanGo()) },
                 { add(self.scanUv()) },
@@ -175,6 +178,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .brew(let action):
+            return brew()?.bytes(of: action.name) ?? finding.bytes
         case .removeOldLogs(let kind):
             return OldLogs.bytes(kind, home: home, now: now())
         case .removeInstaller(let url):
@@ -462,6 +467,25 @@ public final class DiskScanner {
         return [Finding(id: "brew.cleanup", ecosystem: .homebrew, title: "Old downloads and versions",
                         location: cache.path, bytes: bytes, tier: .safe, rebuild: .download,
                         action: .owner(.brewCleanup))]
+    }
+
+    func brew() -> Brew? {
+        (brewOverride ?? Shell.resolve("brew")).map { Brew(path: $0) }
+    }
+
+    /// Formulae that no other formula needs. One review item for each, so the user chooses each one.
+    /// Brew does not say when a tool was last used, so we show the install date and never say "unused".
+    func scanBrewLeaves() -> [Finding] {
+        guard let brew = brew(), let leaves = brew.leaves() else { return [] }
+        let current = now()
+        return leaves.compactMap { name in
+            guard let p = brew.package(name, now: current), p.bytes > 0 else { return nil }
+            var place = "Nothing else needs it"
+            if let d = p.installedDaysAgo { place += " · installed \(d) days ago" }
+            if !p.onRequest { place += " · added only as a dependency" }
+            return Finding(id: "brew.leaf:\(name)", ecosystem: .homebrew, title: "Package · \(name)", location: place,
+                           bytes: p.bytes, tier: .review, rebuild: .download, action: .brew(.uninstall(name: name)))
+        }
     }
 
     func brewReclaimableBytes() -> Int64 {
