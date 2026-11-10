@@ -200,6 +200,7 @@ public final class DiskScanner {
         case .emptyTrash:
             return TrashBin.bytes(home: home)
         case .removeCacheFolderContents(let name):
+            guard CacheExplorer.isFolderName(name) else { return 0 }
             let folder = home.appendingPathComponent("Library/Caches/\(name)", isDirectory: true)
             return FileManager.default.fileExists(atPath: folder.path) ? Sizer.size(of: folder) : 0
         case .removeRuntime(let storeID, let tool, let name):
@@ -975,23 +976,24 @@ public final class DiskScanner {
     // MARK: Cache explorer
 
     /// The largest folders in `Library/Caches`. A folder with an unknown owner is a review item that the user can empty. A folder that has
-    /// its own item, and a folder that is not ours to empty, are information lines with the reason.
+    /// its own item are not listed again. Every folder that is listed can be emptied.
     func scanCacheExplorer() -> [Finding] {
         let cleanable = CacheExplorer.catalogNames()
-        return CacheExplorer.entries(home: home, cleanable: cleanable, appName: appName).map { e in
+        return CacheExplorer.entries(home: home, cleanable: cleanable, appName: appName).compactMap { e -> Finding? in
             let name = e.displayName == e.folder ? e.displayName : "\(e.displayName) (\(e.folder))"
             let place = "~/Library/Caches/\(e.folder)"
             switch e.label {
-            case .unknown:
+            case .unknown, .keep:
                 // A name like a bundle ID can be matched with an app, and then an open app blocks the item.
-                let owner = CacheExplorer.looksLikeBundleID(e.folder) ? AppOwner(name: e.displayName, bundleIDs: [e.folder, e.folder + ".*"]) : nil
-                let note = owner == nil ? "We do not know the app, so we cannot check that it is closed. It may sign you out or be slow the first time."
-                                        : "Apps can download these files again. It may sign you out or be slow the first time."
-                return Finding(id: "cache.explorer:\(e.folder)", ecosystem: .cacheExplorer, title: "\(name) · cache folder", location: place,
+                let owner = CacheExplorer.looksLikeBundleID(e.folder) && e.label != .keep ? AppOwner(name: e.displayName, bundleIDs: [e.folder, e.folder + ".*"]) : nil
+                let system = e.label == .keep
+                let note = system ? "\(e.reason) It builds the files again, but it may be slow, and data that is not synced yet can be lost."
+                    : (owner == nil ? "We do not know the app, so we cannot check that it is closed. It may sign you out or be slow the first time."
+                                    : "Apps can download these files again. It may sign you out or be slow the first time.")
+                return Finding(id: "cache.explorer:\(e.folder)", ecosystem: .cacheExplorer, title: "\(name) · \(system ? "system cache" : "cache folder")", location: place,
                                bytes: e.bytes, tier: .review, rebuild: .download, action: .removeCacheFolderContents(name: e.folder), note: note, owner: owner)
-            case .canClean, .keep:
-                return Finding(id: "cache.explorer:\(e.folder)", ecosystem: .cacheExplorer, title: "\(name) · \(e.label.rawValue)", location: place,
-                               bytes: e.bytes, tier: .review, rebuild: .never, action: .inform, note: e.reason)
+            case .canClean:
+                return nil
             }
         }
     }

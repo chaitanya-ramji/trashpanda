@@ -90,6 +90,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Remove saved website data?", body: detail,
                 footer: "Websites that work offline keep their files here. After this, such a site may not open without a network until you visit it online again. This can't be undone.",
                 confirmTitle: "Remove data", cancelIsDefault: true)
+        case .cacheFolder where { if case .removeCacheFolderContents(let n) = f.action { return CacheExplorer.keepReason(n) != nil } else { return false } }():
+            return Confirmation(
+                title: "Empty this system cache?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))\n\(f.note ?? "")",
+                footer: "This folder belongs to iCloud or to macOS. They build the files again, and that can take a while. Data that is not synced yet can be lost, and a system service may need a restart. Trash Panda cannot check this for you. This can't be undone.",
+                confirmTitle: "Empty system cache", cancelIsDefault: true)
         case .cacheFolder:
             return Confirmation(
                 title: "Empty this cache folder?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))\n\(f.owner.map { "App: \($0.name)" } ?? "App: not known")",

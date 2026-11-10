@@ -380,7 +380,6 @@ public final class Cleaner {
     /// The folder stays, because apps expect it. If the folder is owned by an app that runs, the owner check at the top of `clean` has skipped it.
     private func removeCacheFolderContents(_ name: String, finding: Finding, into report: inout CleanReport) {
         guard CacheExplorer.isFolderName(name) else { skip(finding, "not the name of one cache folder", &report); return }
-        guard CacheExplorer.keepReason(name) == nil else { skip(finding, "\(name) is not ours to empty", &report); return }
         guard !CacheExplorer.catalogNames().contains(name) else { skip(finding, "\(name) has its own item in the group of its tool", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
         let folder = home.appendingPathComponent("Library/Caches", isDirectory: true).appendingPathComponent(name, isDirectory: true)
@@ -388,7 +387,10 @@ public final class Cleaner {
               UpdateDownloads.isPlainPath(folder), UpdateDownloads.isPlainPath(folder.deletingLastPathComponent()) else {
             skip(finding, "not a plain folder", &report); return
         }
-        if let reason = guardian.check(folder) { skip(finding, "\(reason)", &report); return }
+        // A folder of iCloud or macOS is emptied only because the owner chose it, with the strongest dialog. The guard still refuses
+        // `Library/Caches` itself and everything else.
+        let system: String? = CacheExplorer.keepReason(name) != nil ? name : nil
+        if let reason = guardian.check(folder, allowingSystemCache: system) { skip(finding, "\(reason)", &report); return }
         guard let children = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else {
             report.failed.append("\(folder.path): cannot read folder"); return
         }
@@ -396,7 +398,12 @@ public final class Cleaner {
         var failures = 0
         for child in children {
             let url = folder.appendingPathComponent(child)
-            if let reason = guardian.check(url) { report.skipped.append("\(url.path): \(reason)"); continue }
+            // The folder may have been swapped for a link after the check above. Every child must still be inside it, and nothing is a link.
+            guard UpdateDownloads.isPlainPath(folder), UpdateDownloads.isPlainPath(url),
+                  url.standardizedFileURL.path.hasPrefix(folder.standardizedFileURL.path + "/") else {
+                report.skipped.append("\(url.path): not a plain path inside the folder"); continue
+            }
+            if let reason = guardian.check(url, allowingSystemCache: system) { report.skipped.append("\(url.path): \(reason)"); continue }
             do { try FileManager.default.removeItem(at: url) } catch {
                 failures += 1
                 Log.error("remove failed \(url.path): \(error.localizedDescription)")

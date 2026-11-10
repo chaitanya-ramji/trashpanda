@@ -79,7 +79,10 @@ public struct PathGuard: Sendable {
     }
 
     /// Returns nil when the path may be deleted. Returns the reason when it may not.
-    public func check(_ url: URL) -> Refusal? {
+    /// `allowingSystemCache` is for one thing only: the owner chose to empty ONE folder in `~/Library/Caches` that is iCloud data or belongs
+    /// to macOS (the cache explorer). It names that folder, and it lifts the rule for that folder only, not for the other protected ones.
+    /// `Library/Caches` itself, and every other rule, stay.
+    public func check(_ url: URL, allowingSystemCache: String? = nil) -> Refusal? {
         let path = url.standardizedFileURL.path
         guard path.hasPrefix("/"), !path.contains("\0") else { return .notAbsolute }
 
@@ -100,10 +103,10 @@ public struct PathGuard: Sendable {
         if relative.split(separator: "/").count < 2 { return .tooShallow }
 
         // `Library/Caches` itself, and the folders in it that are not ours to empty. They hold iCloud data, or they belong to macOS.
-        // The cache explorer (#20) labels them `keep`, and this rule is the backstop: a forged action cannot empty the whole folder.
+        // The cache explorer (#20) offers them as review items with the strongest dialog, and only through `removeCacheFolderContents`, which names the folder.
         if relative == "Library/Caches" { return .protectedData("Library/Caches") }
         let cachePieces = relative.split(separator: "/").map { $0.lowercased() }
-        if cachePieces.count >= 3, cachePieces[0] == "library", cachePieces[1] == "caches",
+        if cachePieces.count >= 3, cachePieces[2] != allowingSystemCache?.lowercased(), cachePieces[0] == "library", cachePieces[1] == "caches",
            Self.protectedCacheFolders.contains(cachePieces[2]) || cachePieces[2].hasPrefix("com.apple.") {
             return .protectedData("Library/Caches/\(cachePieces[2])")
         }
