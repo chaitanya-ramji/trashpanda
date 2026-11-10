@@ -40,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var flash: String?
     private var timer: Timer?
     private let updates = UpdateController()
+    /// Waits a moment after an app opens or quits, so that a burst of changes gives one refresh.
+    private var appsChangedTimer: Timer?
     private var spinnerTimer: Timer?
     private var spinnerStep = 0
     private let panda = PandaArt.menuBarIcon()
@@ -142,6 +144,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenu()
         scan()
         timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.scan() }
+        // An app that opens or quits changes which items are blocked. The bar and the rows must follow, also while
+        // the menu is open. A scan, a clean, and opening the menu rebuild the menu already.
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in self?.appsChanged() }
+        }
+    }
+
+    /// Called when an app opens or quits. After a short wait, the menu is rebuilt if an item became blocked or free.
+    private func appsChanged() {
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.appsChanged() }; return }
+        appsChangedTimer?.invalidate()
+        // The common modes, so that the timer also fires while the menu is open.
+        let t = Timer(timeInterval: 1.0, repeats: false) { [weak self] _ in
+            guard let self, let result = self.result, !self.cleaning else { return }
+            let before = result.findings.map(self.blockers)
+            self.running = self.runningApps.take()
+            // Rebuild only when it changes something. A rebuild closes a submenu that the user has open.
+            if result.findings.map(self.blockers) != before { self.rebuildMenu() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        appsChangedTimer = t
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -207,15 +231,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         running = runningApps.take()
 
-        // The numbers count only what can be cleaned now. An item of a running app is not in them.
-        let usable = (result?.findings ?? []).filter { $0.isActionable && blockers($0).isEmpty }
-        let usableSafe = usable.filter { $0.tier == .safe }
-        let usableReview = usable.filter { $0.tier == .review }
+        // "Free up" takes only safe items that need no quit.
+        let usableSafe = (result?.findings ?? []).filter { $0.isActionable && $0.tier == .safe && blockers($0).isEmpty }
         let safeBytes = usableSafe.reduce(Int64(0)) { $0 + $1.bytes }
-        // The split bar shows the same data: what can be cleaned now, by group.
-        let segments = cleaning ? [] : SplitBar.segments(from: result?.findings ?? [], isBlocked: { !blockers($0).isEmpty })
-        header.update(disk: disk, reclaimable: safeBytes, reviewable: usableReview.reduce(Int64(0)) { $0 + $1.bytes },
-                      activity: activity, segments: segments)
+        // The bar has one part for each group row that shows a size, with the same number as the row.
+        // An item of an open app stays in the bar, drawn with stripes. The line under the title does not count it
+        // as "free now", because it cannot be freed now. It counts it as "when apps quit", so it does not vanish.
+        let all = result?.findings ?? []
+        let segments = cleaning ? [] : SplitBar.segments(from: all, blockers: blockers)
+        header.update(disk: disk, totals: SplitBar.totals(from: all, blockers: blockers), activity: activity, segments: segments)
         header.onSelect = { [weak self] segment in self?.showGroup(segment) }
         let headerItem = NSMenuItem()
         headerItem.view = header
@@ -279,18 +303,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func addEcosystems(_ findings: [Finding]) {
         let grouped = Dictionary(grouping: findings, by: \.ecosystem)
-        // Information lines (for example a volume that is in use) are not part of any total.
-        func total(_ items: [Finding]) -> Int64 {
-            items.filter { $0.isActionable && blockers($0).isEmpty }.reduce(0) { $0 + $1.bytes }
+        // The rows follow the number that each row shows, like the parts of the bar. A tie is broken by name.
+        // A row that only says "info" has no number, so it goes after the rows with a size.
+        let sizes = grouped.mapValues(SplitBar.rowBytes)
+        let ordered = grouped.sorted { a, b in
+            let x = sizes[a.key] ?? 0, y = sizes[b.key] ?? 0
+            return x != y ? x > y : a.key.name < b.key.name
         }
-        let ordered = grouped.sorted { total($0.value) > total($1.value) }
         for (ecosystem, items) in ordered { menu.addItem(ecosystemItem(ecosystem, items)) }
     }
 
     /// One row for a group, with its items as a submenu.
     private func ecosystemItem(_ ecosystem: Ecosystem, _ items: [Finding]) -> NSMenuItem {
         // An item of an open app is still an item. Its size shows here, like any other.
-        let amount = items.filter(\.isActionable).reduce(Int64(0)) { $0 + $1.bytes }
+        let amount = SplitBar.rowBytes(items)
         let parent = NSMenuItem()
         parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : "info")
         parent.submenu = submenu(for: ecosystem, items: items)

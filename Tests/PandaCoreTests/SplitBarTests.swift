@@ -21,20 +21,141 @@ final class SplitBarTests: XCTestCase {
         XCTAssertEqual(parts[2].safeBytes, 0)
     }
 
-    func testBlockedItemsAndInformationLinesAreNotInTheBar() {
+    func testBlockedItemsStayInTheBarAndInformationLinesDoNot() {
         let blocked = item(.swift, 4_000_000_000)
         let findings = [blocked, item(.swift, 1_000_000_000, action: .inform),   // information only
                         item(.javascript, 3_000_000_000), item(.python, 0)]       // nothing to free
-        let parts = SplitBar.segments(from: findings, isBlocked: { $0.id == blocked.id })
-        XCTAssertEqual(parts.map(\.shortName), ["JavaScript"])
-        XCTAssertEqual(parts[0].bytes, 3_000_000_000)
-        XCTAssertEqual(parts[0].share, 1.0)
+        let parts = SplitBar.segments(from: findings, blockers: { $0.id == blocked.id ? ["Xcode"] : [] })
+        XCTAssertEqual(parts.map(\.shortName), ["Xcode", "JavaScript"])
+        guard parts.count == 2 else { return XCTFail("The blocked group must have its part") }
+        XCTAssertEqual(parts[0].bytes, 4_000_000_000, "The information line is not in the part")
+        XCTAssertTrue(parts[0].isBlockedOnly)
+        XCTAssertEqual(parts[0].safeBytes, 0, "Free up does not take an item of an open app")
+        XCTAssertFalse(parts[1].isBlockedOnly)
     }
 
     func testNothingToCleanGivesNoBar() {
         XCTAssertTrue(SplitBar.segments(from: []).isEmpty)
         XCTAssertTrue(SplitBar.segments(from: [item(.swift, 100, action: .inform)]).isEmpty)
-        XCTAssertTrue(SplitBar.segments(from: [item(.swift, 100)], isBlocked: { _ in true }).isEmpty)
+        XCTAssertTrue(SplitBar.totals(from: [item(.swift, 100, action: .inform)]).summary() == "All tidy. Nothing to clean.")
+    }
+
+    // MARK: The bar matches the rows of the menu
+
+    /// The menu of the bug report: the bar showed only JavaScript and Homebrew,
+    /// but the rows below it also listed Browser caches and AI agents with a size.
+    private let mib: Int64 = 1_000_000
+    private func reportedMenu() -> (findings: [Finding], blockers: (Finding) -> [String]) {
+        var findings = [
+            item(.javascript, 1_400 * mib), item(.javascript, 1_400 * mib, tier: .review),
+            item(.homebrew, 40 * mib),
+            item(.aiAgents, 93 * mib), item(.aiAgents, 100 * mib, tier: .review),
+            item(.cacheExplorer, 5_000 * mib, action: .inform),                                   // information only
+            item(.docker, 0, action: .inform), item(.docker, 700 * mib, action: .inform),        // only info lines
+        ]
+        let browser = [item(.browsers, 228 * mib), item(.browsers, 70 * mib, tier: .review)]
+        findings += browser
+        let browserIDs = Set(browser.map(\.id)), claudeID = findings[4].id
+        return (findings, { f in
+            if browserIDs.contains(f.id) { return ["Safari"] }
+            return f.id == claudeID ? ["Claude"] : []
+        })
+    }
+
+    func testThePartsAreTheGroupRowsThatShowASize() {
+        let (findings, blockers) = reportedMenu()
+        let parts = SplitBar.segments(from: findings, blockers: blockers)
+        // One part for each row with a size, with the number of the row.
+        let rows = Dictionary(grouping: findings, by: \.ecosystem).mapValues(SplitBar.rowBytes).filter { $0.value > 0 }
+        XCTAssertEqual(Set(parts.flatMap(\.ecosystems)), Set(rows.keys))
+        for p in parts { XCTAssertEqual(p.bytes, rows[p.ecosystems[0]], p.name) }
+        XCTAssertEqual(parts.map(\.bytes).reduce(0, +), rows.values.reduce(0, +))
+        XCTAssertEqual(parts.map(\.shortName), ["JavaScript", "Browsers", "AI agents", "Homebrew"], "The largest first")
+        XCTAssertEqual(parts.map(\.share).reduce(0, +), 1.0, accuracy: 1e-9)
+    }
+
+    func testAnInformationOnlyGroupHasNoPart() {
+        let (findings, blockers) = reportedMenu()
+        let groups = SplitBar.segments(from: findings, blockers: blockers).flatMap(\.ecosystems)
+        XCTAssertFalse(groups.contains(.cacheExplorer))
+        XCTAssertFalse(groups.contains(.docker))
+        XCTAssertEqual(SplitBar.rowBytes(findings.filter { $0.ecosystem == .docker }), 0, "The row says info")
+    }
+
+    func testABlockedOnlyGroupHasAMarkedPart() throws {
+        let (findings, blockers) = reportedMenu()
+        let parts = SplitBar.segments(from: findings, blockers: blockers)
+        let browsers = try XCTUnwrap(parts.first { $0.ecosystems == [.browsers] })
+        XCTAssertEqual(browsers.bytes, 298 * mib)
+        XCTAssertTrue(browsers.isBlockedOnly)
+        XCTAssertEqual(browsers.blockingApps, ["Safari"])
+        XCTAssertEqual(browsers.safeBytes, 0)
+        XCTAssertEqual(browsers.hoverText, "Browser caches · 298 MB · 9% · quit Safari to clean")
+        XCTAssertTrue(browsers.accessibilityLabel.hasSuffix(", quit Safari to clean"))
+
+        let agents = try XCTUnwrap(parts.first { $0.ecosystems == [.aiAgents] })
+        XCTAssertFalse(agents.isBlockedOnly)
+        XCTAssertEqual(agents.blockedBytes, 100 * mib)
+        XCTAssertEqual(agents.safeBytes, 93 * mib)
+        XCTAssertEqual(agents.hoverText, "AI agents & local models · 193 MB · 6% · 93 MB safe · quit Claude to clean 100 MB")
+        XCTAssertEqual(agents.hoverText(shortName: true), "AI agents · 193 MB · 6% · 93 MB safe · quit Claude to clean 100 MB")
+
+        let js = parts[0]
+        XCTAssertEqual(js.blockedBytes, 0)
+        XCTAssertEqual(js.hoverText, "JavaScript & TypeScript · 2.8 GB · 84% · 1.4 GB safe", "No quit words when no app blocks it")
+    }
+
+    func testTheLineUnderTheTitleCountsEveryRowOnce() {
+        let (findings, blockers) = reportedMenu()
+        let totals = SplitBar.totals(from: findings, blockers: blockers)
+        XCTAssertEqual(totals.free, (1_400 + 40 + 93) * mib, "Only safe items that need no quit")
+        XCTAssertEqual(totals.review, 1_400 * mib)
+        XCTAssertEqual(totals.waiting, (298 + 100) * mib, "Items of open apps do not vanish")
+        XCTAssertEqual(totals.all, SplitBar.segments(from: findings, blockers: blockers).map(\.bytes).reduce(0, +),
+                       "The three totals are the whole bar")
+        XCTAssertEqual(totals.summary(), "You can free 1.5 GB now · 1.4 GB to look through · 398 MB when apps quit")
+        XCTAssertEqual(totals.summary(compact: true), "Free 1.5 GB now · 1.4 GB to review · 398 MB in open apps")
+        // With no open app, the words are the same as before.
+        let none = SplitBar.totals(from: findings)
+        XCTAssertEqual(none.waiting, 0)
+        XCTAssertEqual(none.summary(), "You can free 1.8 GB now · 1.6 GB to look through")
+        XCTAssertEqual(SplitTotals(free: 0, review: 5 * mib, waiting: 0).summary(), "5 MB to look through")
+        XCTAssertEqual(SplitTotals(free: 0, review: 0, waiting: 5 * mib).summary(), "5 MB when apps quit")
+    }
+
+    func testTheBarFollowsTheOpenApps() throws {
+        let (findings, blockers) = reportedMenu()
+        // Safari quits: the browser part is a plain part again, and its safe data can be freed now.
+        let after = SplitBar.segments(from: findings, blockers: { blockers($0) == ["Safari"] ? [] : blockers($0) })
+        let browsers = try XCTUnwrap(after.first { $0.ecosystems == [.browsers] })
+        XCTAssertFalse(browsers.isBlockedOnly)
+        XCTAssertEqual(browsers.blockedBytes, 0)
+        XCTAssertEqual(browsers.safeBytes, 228 * mib)
+        XCTAssertEqual(after.map(\.bytes), SplitBar.segments(from: findings, blockers: blockers).map(\.bytes),
+                       "The sizes stay the same. Only the marks change.")
+    }
+
+    func testTheOrderIsStableWithBlockedItemsAndTies() {
+        let (findings, blockers) = reportedMenu()
+        let first = SplitBar.segments(from: findings, blockers: blockers)
+        for _ in 0..<5 { XCTAssertEqual(SplitBar.segments(from: findings.shuffled(), blockers: blockers), first) }
+        // Equal sizes, one of them blocked: the tie is broken by name, not by the open app.
+        let tie = [item(.rust, 100), item(.go, 100), item(.python, 100)]
+        let names = SplitBar.segments(from: tie, blockers: { $0.ecosystem == .go ? ["GoLand"] : [] }).map(\.shortName)
+        XCTAssertEqual(names, ["Go", "Python", "Rust"])
+    }
+
+    func testOtherJoinsTheBlockedDataOfItsGroups() throws {
+        let sizes: [(Ecosystem, Int64)] = [(.swift, 80), (.javascript, 70), (.python, 60), (.rust, 50), (.go, 40),
+                                           (.docker, 30), (.ruby, 20)]
+        let findings = sizes.map { item($0.0, $0.1) }
+        let parts = SplitBar.segments(from: findings, blockers: { $0.ecosystem == .ruby ? ["RubyMine"] : [] })
+        let other = try XCTUnwrap(parts.last)
+        XCTAssertTrue(other.isOther)
+        XCTAssertEqual(other.bytes, 50)
+        XCTAssertEqual(other.blockedBytes, 20)
+        XCTAssertEqual(other.blockingApps, ["RubyMine"])
+        XCTAssertFalse(other.isBlockedOnly)
     }
 
     func testTheSmallestGroupsAreJoinedAsOther() {

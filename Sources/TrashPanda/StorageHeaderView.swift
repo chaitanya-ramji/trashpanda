@@ -20,8 +20,7 @@ final class SegmentElement: NSAccessibilityElement {
 /// The top of the menu: free space, what you can free, and one bar that shows where the reclaimable data is. A spinner shows when the app is busy.
 final class StorageHeaderView: NSView {
     private var disk = DiskUsage(total: 0, free: 0)
-    private var reclaimable: Int64 = 0
-    private var reviewable: Int64 = 0
+    private var totals = SplitTotals(free: 0, review: 0, waiting: 0)
     private var activity = Activity.scanning
     private var segments: [SplitSegment] = []
     private var slots: [SplitSlot] = []
@@ -66,10 +65,9 @@ final class StorageHeaderView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func update(disk: DiskUsage, reclaimable: Int64, reviewable: Int64, activity: Activity, segments: [SplitSegment]) {
+    func update(disk: DiskUsage, totals: SplitTotals, activity: Activity, segments: [SplitSegment]) {
         self.disk = disk
-        self.reclaimable = reclaimable
-        self.reviewable = reviewable
+        self.totals = totals
         self.activity = activity
         self.segments = segments
         self.hovered = nil
@@ -94,16 +92,21 @@ final class StorageHeaderView: NSView {
 
     // MARK: Words
 
+    private static let detailFont = NSFont.systemFont(ofSize: 11)
+
+    /// The line under the title. When the long words do not fit the menu, it uses the short words.
     private var detail: String {
-        if let i = hovered, segments.indices.contains(i) { return segments[i].hoverText }
+        let room = bounds.width - Self.inset - Self.rightInset
+        func fit(_ long: String, _ short: String) -> String {
+            long.size(withAttributes: [.font: Self.detailFont]).width <= room ? long : short
+        }
+        if let i = hovered, segments.indices.contains(i) {
+            return fit(segments[i].hoverText, segments[i].hoverText(shortName: true))
+        }
         switch activity {
         case .scanning: return "Scanning for things to clean…"
         case .cleaning: return "Cleaning up…"
-        case .idle:
-            if reclaimable == 0 && reviewable == 0 { return "All tidy. Nothing to clean." }
-            if reclaimable == 0 { return "\(Format.bytes(reviewable)) to look through" }
-            if reviewable == 0 { return "You can free \(Format.bytes(reclaimable)) now" }
-            return "You can free \(Format.bytes(reclaimable)) now · \(Format.bytes(reviewable)) to look through"
+        case .idle: return fit(totals.summary(), totals.summary(compact: true))
         }
     }
 
@@ -186,7 +189,7 @@ final class StorageHeaderView: NSView {
                 .foregroundColor: NSColor.labelColor,
             ])
         detail.draw(at: NSPoint(x: inset, y: bounds.height - 46), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 11),
+            .font: Self.detailFont,
             .foregroundColor: hovered == nil ? NSColor.secondaryLabelColor : NSColor.labelColor,
         ])
 
@@ -194,17 +197,43 @@ final class StorageHeaderView: NSView {
         drawLegend()
     }
 
-    /// The second bar. Its whole width is the data that can be cleaned now, split by group.
+    /// The second bar. Its whole width is the data of the group rows below it, split by group.
+    /// The data of an open app is drawn lighter, with stripes, at the end of its part. The hover text says why.
     private func drawSplitBar() {
         guard !segments.isEmpty else { return }
         let bar = splitBarRect
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(roundedRect: bar, xRadius: 5, yRadius: 5).addClip()
         for (i, slot) in slots.enumerated() {
-            let dimmed = hovered != nil && hovered != i
-            color(i).withAlphaComponent(dimmed ? 0.30 : 1).setFill()
-            NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height).fill()
+            let s = segments[i]
+            let alpha: CGFloat = hovered != nil && hovered != i ? 0.30 : 1
+            let rect = NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height)
+            let blockedShare = s.bytes > 0 ? CGFloat(min(s.blockedBytes, s.bytes)) / CGFloat(s.bytes) : 0
+            let blockedWidth = (rect.width * blockedShare).rounded()
+            let (open, solid) = rect.divided(atDistance: blockedWidth, from: .maxXEdge)
+            color(i).withAlphaComponent(alpha).setFill()
+            solid.fill()
+            if blockedWidth > 0 { drawStripes(in: open, color: color(i), alpha: alpha) }
         }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// A light fill with diagonal stripes. It marks data that waits for an app to quit.
+    private func drawStripes(in rect: NSRect, color: NSColor, alpha: CGFloat) {
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: rect).addClip()
+        color.withAlphaComponent(0.30 * alpha).setFill()
+        rect.fill()
+        let path = NSBezierPath()
+        path.lineWidth = 1.5
+        var x = rect.minX - rect.height
+        while x < rect.maxX {
+            path.move(to: NSPoint(x: x, y: rect.minY))
+            path.line(to: NSPoint(x: x + rect.height, y: rect.maxY))
+            x += 4
+        }
+        color.withAlphaComponent(0.85 * alpha).setStroke()
+        path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
 
@@ -224,8 +253,16 @@ final class StorageHeaderView: NSView {
             ]
             let size = text.size(withAttributes: attributes)
             guard x + 10 + size.width <= bounds.width - Self.rightInset else { break }
-            color(i).setFill()
-            NSBezierPath(ovalIn: NSRect(x: x, y: y + 2.5, width: 6.5, height: 6.5)).fill()
+            // A part that waits for an app to quit has a ring, not a dot, like its light part in the bar.
+            let dot = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: y + 3, width: 5.5, height: 5.5))
+            if s.isBlockedOnly {
+                color(i).setStroke()
+                dot.lineWidth = 1
+                dot.stroke()
+            } else {
+                color(i).setFill()
+                dot.fill()
+            }
             text.draw(at: NSPoint(x: x + 10, y: y), withAttributes: attributes)
             x += 10 + size.width + 8
             shown += 1
