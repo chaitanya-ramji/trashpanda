@@ -11,7 +11,7 @@ The app has no window. It has only a menu.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/menu-dark.png">
-    <img src="assets/menu-light.png" width="340" alt="The Trash Panda menu. It shows 61 GB free of 245 GB, a bar for the disk, a second bar that splits the data you can clean by language, a button to free up 9.3 GB, and one line for each language.">
+    <img src="assets/menu-light.png" width="340" alt="The Trash Panda menu. It shows 61 GB free of 245 GB, one bar that splits the data you can clean by language, a button to free up 9.3 GB, and one line for each language.">
   </picture>
 </p>
 
@@ -20,15 +20,14 @@ The picture uses made-up data.
 Click the panda in the menu bar. The menu shows:
 
 - The free space and the total space of your disk.
-- A bar that splits the disk into used, review, reclaimable, and free space.
-- A second bar that shows where the data that you can clean is. Its whole width is that data. It is split by language or tool, and a short legend names the largest three.
+- A bar that shows where the data that you can clean is. Its whole width is that data. It is split by language or tool, and a short legend names the largest three.
 - The space that you can reclaim now.
 - One line for each language or tool. Open a line to see each item.
 
-**Hover** a part of the second bar to see its name, its size, its share, and how much of it is safe. **Click** a part to open the items of that language or tool. An item of an app that is open, and a line that is for information only, are not in the bar.
+**Hover** a part of the bar to see its name, its size, its share, and how much of it is safe. **Click** a part to open the items of that language or tool. An item of an app that is open, and a line that is for information only, are not in the bar.
 
 <p align="center">
-  <img src="assets/menu-hover.png" width="340" alt="The same menu with the mouse over the JavaScript part of the second bar. The line under the title reads JavaScript and TypeScript, 3.7 GB, 15 percent, 2.2 GB safe.">
+  <img src="assets/menu-hover.png" width="340" alt="The same menu with the mouse over the JavaScript part of the bar. The line under the title reads JavaScript and TypeScript, 3.7 GB, 15 percent, 2.2 GB safe.">
 </p>
 
 ## What it cleans
@@ -225,6 +224,9 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Xcode: old simulator runtimes, devices, and archives (review) ([#27](https://github.com/chaitanya-ramji/trashpanda/issues/27))
 - [x] Xcode: iOS device support files, one item for each iOS version ([#41](https://github.com/chaitanya-ramji/trashpanda/issues/41))
 - [ ] Xcode: keep the device support folder of a connected device ([#43](https://github.com/chaitanya-ramji/trashpanda/issues/43))
+- [x] Menu header: one bar, aligned to the menu edge ([#45](https://github.com/chaitanya-ramji/trashpanda/issues/45))
+- [ ] Browsers: Dia, Zen, and Safari ([#46](https://github.com/chaitanya-ramji/trashpanda/issues/46))
+- [ ] Blocked app: offer Quit and clean ([#47](https://github.com/chaitanya-ramji/trashpanda/issues/47))
 - [x] Clean stale app update downloads ([#13](https://github.com/chaitanya-ramji/trashpanda/issues/13))
 - [x] Browser caches: Chromium browsers ([#14](https://github.com/chaitanya-ramji/trashpanda/issues/14))
 - [x] Browser caches: Firefox ([#15](https://github.com/chaitanya-ramji/trashpanda/issues/15))

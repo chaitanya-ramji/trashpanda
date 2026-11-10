@@ -17,8 +17,7 @@ final class SegmentElement: NSAccessibilityElement {
     }
 }
 
-/// The top of the menu: free space, what you can free, one bar for the disk, and a second bar that
-/// shows where the reclaimable data is. A spinner shows when the app is busy.
+/// The top of the menu: free space, what you can free, and one bar that shows where the reclaimable data is. A spinner shows when the app is busy.
 final class StorageHeaderView: NSView {
     private var disk = DiskUsage(total: 0, free: 0)
     private var reclaimable: Int64 = 0
@@ -37,10 +36,14 @@ final class StorageHeaderView: NSView {
 
     private static let width: CGFloat = 300
     private static let inset: CGFloat = 16
-    private static let barWidth: CGFloat = width - inset * 2
-    private static let plainHeight: CGFloat = 74
-    private static let splitHeight: CGFloat = 116
+    /// The chevrons of the rows below end about 20 points from the right edge of the menu. The bar ends there too.
+    private static let rightInset: CGFloat = 20
+    private static let plainHeight: CGFloat = 54
+    private static let splitHeight: CGFloat = 96
     private static let splitBarHeight: CGFloat = 14
+
+    /// The menu is wider than the first size of this view, so the bar follows the real width.
+    private var barWidth: CGFloat { max(40, bounds.width - Self.inset - Self.rightInset) }
 
     /// The palette has no yellow and no orange. The disk bar uses those two for "review" and "safe".
     private static let palette: [NSColor] = [.systemBlue, .systemPurple, .systemGreen, .systemPink, .systemTeal, .systemIndigo]
@@ -48,11 +51,12 @@ final class StorageHeaderView: NSView {
     var preferredHeight: CGFloat { segments.isEmpty ? Self.plainHeight : Self.splitHeight }
 
     private var splitBarRect: NSRect {
-        NSRect(x: Self.inset, y: bounds.height - 88, width: Self.barWidth, height: Self.splitBarHeight)
+        NSRect(x: Self.inset, y: bounds.height - 68, width: barWidth, height: Self.splitBarHeight)
     }
 
     override init(frame: NSRect) {
         super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: Self.plainHeight))
+        autoresizingMask = [.width]
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isIndeterminate = true
@@ -68,13 +72,24 @@ final class StorageHeaderView: NSView {
         self.reviewable = reviewable
         self.activity = activity
         self.segments = segments
-        self.slots = SplitBar.layout(segments, width: Self.barWidth)
         self.hovered = nil
-        setFrameSize(NSSize(width: Self.width, height: preferredHeight))
-        spinner.frame = NSRect(x: Self.width - 32, y: bounds.height - 30, width: 16, height: 16)
+        setFrameSize(NSSize(width: max(bounds.width, Self.width), height: preferredHeight))
+        relayout()
         if activity == .idle { spinner.stopAnimation(nil) } else { spinner.startAnimation(nil) }
+    }
+
+    /// Called when the width changes: the bar, the hit areas, and the spinner follow the menu width.
+    private func relayout() {
+        slots = SplitBar.layout(segments, width: barWidth)
+        spinner.frame = NSRect(x: bounds.width - Self.rightInset - 16, y: bounds.height - 30, width: 16, height: 16)
         rebuildAccessibility()
         needsDisplay = true
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if widthChanged { relayout() }
     }
 
     // MARK: Words
@@ -175,33 +190,8 @@ final class StorageHeaderView: NSView {
             .foregroundColor: hovered == nil ? NSColor.secondaryLabelColor : NSColor.labelColor,
         ])
 
-        drawDiskBar()
         drawSplitBar()
         drawLegend()
-    }
-
-    private func drawDiskBar() {
-        guard disk.total > 0 else { return }
-        let bar = NSRect(x: Self.inset, y: bounds.height - 62, width: Self.barWidth, height: 8)
-        let total = Double(disk.total)
-        let other = max(0, disk.used - reclaimable - reviewable)
-        let parts: [(Int64, NSColor)] = [
-            // Used space is clearly darker than free space, in light and dark mode.
-            (other, NSColor.labelColor.withAlphaComponent(0.38)),
-            (reviewable, NSColor.systemYellow),
-            (reclaimable, NSColor.systemOrange),
-            (disk.free, NSColor.labelColor.withAlphaComponent(0.10)),
-        ]
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(roundedRect: bar, xRadius: 4, yRadius: 4).addClip()
-        var x = bar.minX
-        for (bytes, color) in parts where bytes > 0 {
-            let w = bar.width * CGFloat(Double(bytes) / total)
-            color.setFill()
-            NSRect(x: x, y: bar.minY, width: w, height: bar.height).fill()
-            x += w
-        }
-        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// The second bar. Its whole width is the data that can be cleaned now, split by group.
@@ -233,7 +223,7 @@ final class StorageHeaderView: NSView {
                 .foregroundColor: hovered == i ? NSColor.labelColor : NSColor.secondaryLabelColor,
             ]
             let size = text.size(withAttributes: attributes)
-            guard x + 10 + size.width <= Self.width - Self.inset else { break }
+            guard x + 10 + size.width <= bounds.width - Self.rightInset else { break }
             color(i).setFill()
             NSBezierPath(ovalIn: NSRect(x: x, y: y + 2.5, width: 6.5, height: 6.5)).fill()
             text.draw(at: NSPoint(x: x + 10, y: y), withAttributes: attributes)
@@ -244,7 +234,7 @@ final class StorageHeaderView: NSView {
         if left > 0 {
             let more = "+\(left) more"
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]
-            if x + more.size(withAttributes: attributes).width <= Self.width - Self.inset {
+            if x + more.size(withAttributes: attributes).width <= bounds.width - Self.rightInset {
                 more.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
             }
         }
