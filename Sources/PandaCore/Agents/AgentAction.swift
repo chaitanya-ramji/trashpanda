@@ -27,6 +27,9 @@ public enum AgentAction: Sendable, Equatable {
     case removeLocalModel(storeID: String, name: String)
     /// The fixed folders of one app (`FixedFolders.apps`). The cleaner finds them again from the app id.
     case removeFixedFolders(appID: String)
+    /// Transcripts of one agent that were last changed at or before `olderThan`. The date is the one of the preview, so a session that
+    /// became old, or that was used again, after the preview is not removed.
+    case removeOldSessions(kind: AgentSessions.Kind, olderThan: Date)
 }
 
 /// The apps that own the folders of the AI agents group. An open app blocks its items (see #16 and #47).

@@ -185,6 +185,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeOldSessions(let kind, let cutoff)):
+            return AgentSessions.entries(kind, home: home, olderThan: cutoff).reduce(Int64(0)) { $0 + $1.bytes }
         case .agent(.removeFixedFolders(let id)):
             guard let app = FixedFolders.app(id: id) else { return finding.bytes }
             return FixedFolders.targets(of: app, home: home).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
@@ -509,7 +511,29 @@ public final class DiskScanner {
 
     /// The AI agents group. Each product has its own function, and its items start with the product name.
     func scanAgents() -> [Finding] {
-        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches() + scanHuggingFace() + scanLocalModels() + scanFixedFolders()
+        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches() + scanHuggingFace() + scanLocalModels() + scanFixedFolders() + scanAgentSessions()
+    }
+
+    /// Old transcripts of Codex and Claude Code (review), and a note about the chats of Gemini CLI.
+    func scanAgentSessions() -> [Finding] {
+        let cutoff = now().addingTimeInterval(-Double(config.staleDays) * 86_400)
+        var out: [Finding] = AgentSessions.Kind.allCases.compactMap { kind in
+            let files = AgentSessions.entries(kind, home: home, olderThan: cutoff).filter { guardian.check($0.url) == nil }
+            let bytes = files.reduce(Int64(0)) { $0 + $1.bytes }
+            guard bytes > 0, let oldest = files.first else { return nil }
+            let days = max(0, Int(now().timeIntervalSince(oldest.modified) / 86_400))
+            let setting = kind == .claude ? " · Claude Code also deletes them by itself (cleanupPeriodDays)" : ""
+            return Finding(id: kind.findingID, ecosystem: .aiAgents, title: kind.title,
+                           location: "\(files.count) session\(files.count == 1 ? "" : "s") older than \(config.staleDays) days · the oldest is \(days) days old\(setting)",
+                           bytes: bytes, tier: .review, rebuild: .never, action: .agent(.removeOldSessions(kind: kind, olderThan: cutoff)))
+        }
+        let gemini = AgentSessions.geminiChatBytes(home: home)
+        if gemini >= 50_000_000 {
+            out.append(Finding(id: "agent.sessions.gemini", ecosystem: .aiAgents, title: "Gemini · saved chats",
+                               location: "~/.gemini/tmp · gemini --delete-session removes one, or set general.sessionRetention",
+                               bytes: gemini, tier: .review, rebuild: .never, action: .inform))
+        }
+        return out
     }
 
     /// Apps with a few fixed rebuildable folders (Zed). One safe item for each app, and the app must be closed.
