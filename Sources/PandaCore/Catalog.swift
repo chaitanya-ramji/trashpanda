@@ -199,6 +199,10 @@ enum Catalog {
         // Nim
         CacheSpec(id: "nim.cache", title: "Nim build cache", ecosystem: .nim,
                   paths: [".cache/nim"], tier: .safe, rebuild: .minutes),
+
+        // OCaml
+        CacheSpec(id: "ocaml.dune.cache", title: "Dune cache", ecosystem: .ocaml,
+                  paths: [".cache/dune/db"], tier: .safe, rebuild: .minutes),
     ]
 
     // MARK: Project build outputs
@@ -274,6 +278,12 @@ enum Catalog {
         // Nim
         ArtifactRule(["nimcache"],
                      markers: ["*.nimble", "nim.cfg", "config.nims"], .nim, "Nim build cache"),
+
+        // OCaml
+        ArtifactRule(["_build"],
+                     markers: ["dune-project", "dune-workspace"], .ocaml, "Dune build output"),
+        ArtifactRule(["_opam"],
+                     markers: ["*.opam", "dune-project"], .ocaml, "Local opam switch", tier: .review),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
