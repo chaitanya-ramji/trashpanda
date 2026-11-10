@@ -67,7 +67,7 @@ Trash Panda looks in two places:
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |
 | Logs and crash reports | Old files in `~/Library/Logs`: one review item for logs, one for crash reports (`DiagnosticReports`, `CrashReporter`). Files at least 30 days old only. | None |
 | Old installers | `.dmg` and `.pkg` files in `~/Downloads` that are older than 30 days. One review item for each file. No other file type. | None |
-| AI agents | Codex desktop app: leftover runtime installs (`~/.cache/codex-runtimes/codex-runtime-install-*`, at least 1 day old, safe) and the downloaded runtime (review). More products are added by their own issues (see #28). | None |
+| AI agents | Claude Code command line tool: old versions in `~/.local/share/claude/versions` (safe). Codex desktop app: leftover runtime installs (`~/.cache/codex-runtimes/codex-runtime-install-*`, at least 1 day old, safe) and the downloaded runtime (review). More products are added by their own issues (see #28). | None |
 | Trash | The size of `~/.Trash`. One review item. Finder empties it (see Safety rules). | None |
 | Docker | Build cache, untagged images (safe). Stopped containers, old unused images, and unused volumes (review). | None |
 
@@ -86,6 +86,7 @@ The menu shows the cost to get an item back. The cost is seconds, minutes, or a 
 
 Trash Panda deletes files for good. They do not go to the Trash. These rules reduce the risk:
 
+- Old Claude Code versions: the newest version, the version that `~/.local/bin/claude` points to, and every version that is open now (found with `lsof` by file name) always stay. If `lsof` cannot answer, nothing is removed. `claude update` downloads a version again.
 - The AI agents group has its own menu. Each item starts with the product name and shows its icon. The Codex runtime is a review item, and its dialog keeps it by default. A leftover install must be at least a day old, and the app is not touched while it runs (the app, or a program that starts from the folder). Chat history, logins, and settings of these tools are never in a list.
 - Logins and secrets are protected by name. The Hugging Face login (`~/.cache/huggingface/token` and `stored_tokens`) and the folder that holds it can never be deleted. The Hugging Face item covers only `hub` and `xet`.
 - A Homebrew package is a review item, one for each package that no other package needs. Trash Panda does not delete its files: it runs `brew uninstall --formula <name>`, and never `--force` or `--ignore-dependencies`, so brew itself refuses when another package needs it. The app reads the list again when you confirm, and it skips a package that runs. Brew does not record when a tool was last used, so the menu shows the install date and never says "unused".
