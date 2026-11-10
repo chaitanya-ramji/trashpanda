@@ -187,7 +187,7 @@ public final class DiskScanner {
                 return left ? finding.bytes : 0
             case .removeVolume(let name):
                 return inventory.volumes.contains { $0.name == name } ? finding.bytes : 0
-            case .removeStoppedContainerWithVolumes(let id, let names):
+            case .removeStoppedContainerWithVolumes(let id, let names), .stopAndRemoveContainerWithVolumes(let id, let names):
                 let box = inventory.containers.first { $0.id == id }?.writableBytes ?? 0
                 return box + inventory.volumes.filter { names.contains($0.name) }.reduce(Int64(0)) { $0 + $1.bytes }
             }
@@ -817,6 +817,22 @@ public final class DiskScanner {
                                    action: .docker(.removeStoppedContainerWithVolumes(id: c.id, volumes: own.map(\.name))),
                                    note: "Only this container uses the volumes. They can hold a database. Export it first if you need it."))
             }
+        }
+
+        // Running containers. The owner may want to delete one with its data. The app stops it with `docker stop` first (never a kill),
+        // so this is a review item with the strongest dialog, and its default button keeps everything.
+        for c in inventory.containers where c.state == "running" && DockerAction.isHexID(c.id) {
+            let label = c.name.isEmpty ? String(c.id.prefix(12)) : c.name
+            let own = (mounts[c.id] ?? []).compactMap { name in inventory.volumes.first { $0.name == name } }
+                .filter { $0.driver == "local" && $0.links == 1 && users[$0.name] == [c.id] && DockerAction.isVolumeName($0.name) }
+            own.forEach { handled.insert($0.name) }
+            let vols = own.isEmpty ? "" : " · volumes: " + own.map { $0.anonymousShort }.joined(separator: ", ")
+            out.append(Finding(id: "docker.running:\(c.id.prefix(12))", ecosystem: .docker,
+                               title: "Running container · \(label)\(own.isEmpty ? "" : " and \(own.count) volume\(own.count == 1 ? "" : "s")")",
+                               location: "\(place) · image \(c.image) · \(c.status)\(vols) · will be stopped first",
+                               bytes: c.writableBytes + own.reduce(Int64(0)) { $0 + $1.bytes }, tier: .review, rebuild: .never,
+                               action: .docker(.stopAndRemoveContainerWithVolumes(id: c.id, volumes: own.map(\.name))),
+                               note: "It is running now. Programs that use it stop. It can hold a database: export it first if you need it."))
         }
 
         // Named images that no container uses and that have been on this Mac for a long time.

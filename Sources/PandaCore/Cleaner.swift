@@ -233,6 +233,44 @@ public final class Cleaner {
             guard volume.isRemovable else {
                 skip(finding, "the volume is in use, or it is not a local volume", &report); return
             }
+        case .stopAndRemoveContainerWithVolumes(let id, let volumes):
+            guard let container = current.containers.first(where: { $0.id == id }) else {
+                skip(finding, "the container is already gone", &report); return
+            }
+            guard let mounts = engine.volumes(ofContainers: current.containers.map(\.id)) else {
+                skip(finding, "Docker did not say which container uses which volume", &report); return
+            }
+            for name in volumes {
+                guard let v = current.volumes.first(where: { $0.name == name }), v.driver == "local", v.links == 1 else {
+                    skip(finding, "volume \(name) is gone, is not local, or is used by another container", &report); return
+                }
+                guard mounts.filter({ $0.value.contains(name) }).map(\.key) == [id] else {
+                    skip(finding, "volume \(name) is used by another container now", &report); return
+                }
+            }
+            // `docker stop` asks the program to end, and waits (10 s by default) before Docker ends it. It is not a force kill.
+            if !container.isStopped {
+                let stop = engine.run(arguments, timeout: 120)
+                guard stop.status == 0, !stop.timedOut else { report.failed.append("\(finding.title): Docker did not stop the container"); return }
+                guard let after = engine.inventory(), let now = after.containers.first(where: { $0.id == id }), now.isStopped else {
+                    report.failed.append("\(finding.title): the container is still running, so nothing was removed"); return
+                }
+            }
+            var failures: [String] = []
+            for (index, extra) in action.followUpArguments.enumerated() {
+                let r = engine.run(extra, timeout: 120)
+                if r.status != 0 || r.timedOut {
+                    if index == 0 { report.failed.append("\(finding.title): the container is stopped, but Docker did not remove it"); return }
+                    failures.append(extra.last ?? "")
+                }
+            }
+            let left = remaining?(finding) ?? 0
+            let freed = max(0, finding.bytes - left)
+            report.freed += freed
+            report.removed += 1
+            if !failures.isEmpty { report.failed.append("\(finding.title): the container is gone, but Docker kept the volume\(failures.count == 1 ? "" : "s") \(failures.joined(separator: ", "))") }
+            Log.info("clean \(finding.id): stopped and removed container and \(volumes.count - failures.count) volumes, estimate \(finding.bytes), left \(left), freed \(freed)")
+            return
         case .removeStoppedContainerWithVolumes(let id, let volumes):
             guard let container = current.containers.first(where: { $0.id == id }) else {
                 skip(finding, "the container is already gone", &report); return

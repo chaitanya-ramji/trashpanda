@@ -49,12 +49,20 @@ final class DockerStoppedContainerVolumesTests: DockerTestCase {
         XCTAssertTrue(fake.unexpected.isEmpty)
     }
 
-    func testAVolumeOfARunningContainerStaysInformationAndSaysWhy() throws {
+    func testAVolumeOfARunningContainerIsPartOfAStopAndDeleteItem() throws {
         let box = try Sandbox()
         let (_, s) = try setup(box, volumes: [("live_pgdata", "244MB", 1)], mounts: "\(running)|live_pgdata,\n")
-        let info = try XCTUnwrap(s.scanDocker().first { $0.id == "docker.volume.info:live_pgdata" })
+        let found = s.scanDocker()
+        XCTAssertNil(found.first { $0.id == "docker.volume.info:live_pgdata" }, "It is not a dead end any more")
+        XCTAssertNotNil(found.first { $0.id == "docker.running:\(running.prefix(12))" })
+    }
+
+    func testAVolumeThatARunningAndAStoppedContainerShareStaysInformationAndNamesBoth() throws {
+        let box = try Sandbox()
+        let (_, s) = try setup(box, volumes: [("shared_data", "244MB", 2)], mounts: "\(running)|shared_data,\n\(stopped)|shared_data,\n")
+        let info = try XCTUnwrap(s.scanDocker().first { $0.id == "docker.volume.info:shared_data" })
         XCTAssertFalse(info.isActionable)
-        XCTAssertTrue(info.location.contains("live-db (running)") && info.location.contains("stop it to free this"), info.location)
+        XCTAssertTrue(info.location.contains("live-db (running)") && info.location.contains("old-db (stopped)") && info.location.contains("stop it to free this"), info.location)
     }
 
     func testAVolumeShownByTwoContainersIsNotOffered() throws {

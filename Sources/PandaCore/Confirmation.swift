@@ -17,7 +17,7 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage, runtime, cacheFolder, containerWithVolumes
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage, runtime, cacheFolder, containerWithVolumes, runningContainer
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -25,6 +25,7 @@ public struct Confirmation: Equatable, Sendable {
         case .docker(.removeContainer): return .container
         case .docker(.removeVolume): return .volume
         case .docker(.removeStoppedContainerWithVolumes): return .containerWithVolumes
+        case .docker(.stopAndRemoveContainerWithVolumes): return .runningContainer
         case .simulator(.deleteRuntime): return .simulatorRuntime
         case .simulator(.deleteDevice): return .simulatorDevice
         case .removeArchive: return .archive
@@ -54,6 +55,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Delete this volume?", body: detail,
                 footer: "Databases and files inside a volume are lost for good. If it holds a database, export it first. This can't be undone.",
                 confirmTitle: "Delete volume", cancelIsDefault: true)
+        case .runningContainer:
+            return Confirmation(
+                title: "Stop and delete this running container?", body: "\(detail)\n\(ByteText.string(f.bytes)) in all",
+                footer: "It is running now. Trash Panda stops it with docker stop, which asks it to shut down and waits, and then deletes it and the volumes that only it uses. Programs and databases that use it stop working now. A volume can hold a database: export it first (for Postgres, with pg_dump). This can't be undone.",
+                confirmTitle: "Stop and delete", cancelIsDefault: true)
         case .containerWithVolumes:
             return Confirmation(
                 title: "Delete this container and its volumes?", body: "\(detail)\n\(ByteText.string(f.bytes)) in all",
