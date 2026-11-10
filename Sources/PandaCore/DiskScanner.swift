@@ -182,13 +182,16 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
-        case .agent(.removeOldClaudeDesktopRuntimes):
-            return ClaudeDesktop.oldRuntimes(home: home).reduce(Int64(0)) { $0 + $1.bytes }
+        case .agent(.removeAgentCaches(let id)):
+            guard let app = AgentCaches.electronApp(id: id) else { return finding.bytes }
+            return AgentCaches.targets(of: app, home: home).reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+        case .agent(.removeOldClaudeDesktopRuntimes(let names)):
+            return ClaudeDesktop.oldRuntimes(home: home).filter { names.contains(ClaudeDesktop.runtimeName($0)) }.reduce(Int64(0)) { $0 + $1.bytes }
         case .agent(.removeClaudeVMBundle):
             return ClaudeDesktop.vmBundles(home: home).reduce(Int64(0)) { $0 + $1.bytes }
-        case .agent(.removeOldClaudeVersions):
+        case .agent(.removeOldClaudeVersions(let names)):
             guard let running = openClaudeBinaries(ClaudeVersions.entries(home: home).map { $0.url.path }) else { return finding.bytes }
-            return ClaudeVersions.old(home: home, running: running).old.reduce(Int64(0)) { $0 + $1.bytes }
+            return ClaudeVersions.old(home: home, running: running).old.filter { names.contains($0.name) }.reduce(Int64(0)) { $0 + $1.bytes }
         case .agent(.removeCodexRuntime(let url)):
             return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url) : 0
         case .brew(let action):
@@ -488,7 +491,20 @@ public final class DiskScanner {
 
     /// The AI agents group. Each product has its own function, and its items start with the product name.
     func scanAgents() -> [Finding] {
-        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop()
+        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches()
+    }
+
+    /// The Chromium cache folders of the Electron apps in the table. One safe item for each app.
+    func scanElectronCaches() -> [Finding] {
+        AgentCaches.electronApps.compactMap { app in
+            let targets = AgentCaches.targets(of: app, home: home).filter { guardian.check($0) == nil }
+            let bytes = targets.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+            guard bytes > 0 else { return nil }
+            return Finding(id: "agent.electron:\(app.id)", ecosystem: .aiAgents, title: app.title,
+                           location: "~/\(app.supportRoot) · \(targets.count) cache folder\(targets.count == 1 ? "" : "s") · logins and chats stay",
+                           bytes: bytes, tier: .safe, rebuild: .download, action: .agent(.removeAgentCaches(appID: app.id)),
+                           owner: app.owner)
+        }
     }
 
     /// Old runtimes and the Cowork VM of Claude Desktop. Both are review items, and Claude Desktop must be closed.
@@ -501,7 +517,7 @@ public final class DiskScanner {
             let names = old.map { "\($0.family) \($0.url.lastPathComponent)" }.joined(separator: ", ")
             out.append(Finding(id: "agent.claude.runtimes", ecosystem: .aiAgents, title: "Claude · old Desktop runtimes",
                                location: "\(place) · \(names) · the newest of each stays", bytes: oldBytes, tier: .review, rebuild: .download,
-                               action: .agent(.removeOldClaudeDesktopRuntimes), owner: AgentOwners.claudeDesktop))
+                               action: .agent(.removeOldClaudeDesktopRuntimes(names: old.map { ClaudeDesktop.runtimeName($0) })), owner: AgentOwners.claudeDesktop))
         }
         let vm = ClaudeDesktop.vmBundles(home: home).filter { guardian.check($0.url) == nil }
         let vmBytes = vm.reduce(Int64(0)) { $0 + $1.bytes }
@@ -524,7 +540,7 @@ public final class DiskScanner {
         guard bytes > 0 else { return [] }
         return [Finding(id: "agent.claude.versions", ecosystem: .aiAgents, title: "Claude · old Code versions",
                         location: "~/\(ClaudeVersions.directory) · \(list.count) older version\(list.count == 1 ? "" : "s") · \(kept.joined(separator: ", ")) stay\(kept.count == 1 ? "s" : "")",
-                        bytes: bytes, tier: .safe, rebuild: .download, action: .agent(.removeOldClaudeVersions))]
+                        bytes: bytes, tier: .safe, rebuild: .download, action: .agent(.removeOldClaudeVersions(names: list.map(\.name))))]
     }
 
     /// Leftover installs and the downloaded runtime of the Codex app.

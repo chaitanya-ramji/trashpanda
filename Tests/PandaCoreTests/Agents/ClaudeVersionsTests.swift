@@ -54,8 +54,11 @@ final class ClaudeVersionsTests: XCTestCase {
     func testARunningProgramStartedThroughTheLinkIsResolved() throws {
         let box = try Sandbox()
         try makeVersions(box, link: "2.1.314")
-        let link = box.home.appendingPathComponent(".local/bin/claude").path
-        XCTAssertEqual(names(ClaudeVersions.old(home: box.home, running: [link])), ["2.1.319"])
+        // The link points to 2.1.314. The program that runs is started through another link, to 2.1.319.
+        let other = box.home.appendingPathComponent("other-link")
+        try FileManager.default.createSymbolicLink(at: other, withDestinationURL: box.home.appendingPathComponent("\(dir)/2.1.319"))
+        let r = ClaudeVersions.old(home: box.home, running: [other.path])
+        XCTAssertTrue(r.old.isEmpty, "321 is newest, 314 is linked, 319 runs through a link: \(names(r))")
     }
 
     func testAProgramOutsideTheFolderKeepsNothing() throws {
@@ -81,11 +84,82 @@ final class ClaudeVersionsTests: XCTestCase {
         XCTAssertFalse(ClaudeVersions.isNewer("2.1.9", than: "2.1.10"))
         XCTAssertTrue(ClaudeVersions.isNewer("2.1.0", than: "2.1.0-beta.1"), "A plain version is newer than its beta")
         XCTAssertFalse(ClaudeVersions.isNewer("2.1.0", than: "2.1.0"))
+        XCTAssertTrue(ClaudeVersions.isNewer("2.2.0-beta.2", than: "2.2.0-beta.1"))
+        XCTAssertTrue(ClaudeVersions.isNewer("2.2.0-beta.10", than: "2.2.0-beta.2"), "Numbers by value")
+        XCTAssertTrue(ClaudeVersions.isNewer("2.2.0-rc.1", than: "2.2.0-beta.9"), "Words by text")
+        XCTAssertTrue(ClaudeVersions.isNewer("2.2.0-beta", than: "2.2.0-1"), "A word is newer than a number")
+        XCTAssertTrue(ClaudeVersions.isNewer("2.2.0-beta.1", than: "2.2.0-beta"), "More parts are newer")
+        XCTAssertFalse(ClaudeVersions.isNewer("2.2.0-beta.1", than: "2.2.0"))
+    }
+
+    func testTheNewestDoesNotDependOnTheOrder() {
+        let names = ["2.1.03", "2.1.3", "2.1.2", "2.0.9"]
+        XCTAssertEqual(ClaudeVersions.newest(of: names), ClaudeVersions.newest(of: names.reversed()))
+        XCTAssertEqual(ClaudeVersions.newest(of: ["2.1.9", "2.1.10"]), "2.1.10")
+        XCTAssertNil(ClaudeVersions.newest(of: []))
+    }
+
+    func testALeftoverNameCannotBecomeTheNewest() throws {
+        let box = try Sandbox()
+        try makeVersions(box, ["2.1.10", "2.1.10.tmp", "2.1.9", "2.1.11.partial"], link: nil)
+        XCTAssertEqual(Set(ClaudeVersions.entries(home: box.home).map(\.name)), ["2.1.10", "2.1.9"], "A leftover file is not a version")
+        XCTAssertEqual(names(ClaudeVersions.old(home: box.home, running: [])), ["2.1.9"])
+    }
+
+    // MARK: Links
+
+    func testTheLinkIsFollowedThroughAFolderThatIsALink() throws {
+        let box = try Sandbox()
+        try makeVersions(box, link: nil)
+        // ~/.local/bin is a link to dotfiles/bin, and claude there is a relative link to a pinned older version.
+        try FileManager.default.createDirectory(at: box.home.appendingPathComponent("dotfiles/bin"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: box.home.appendingPathComponent("dotfiles/bin/claude").path,
+                                                   withDestinationPath: "../../\(dir)/2.1.314")
+        try FileManager.default.createSymbolicLink(at: box.home.appendingPathComponent(".local/bin"),
+                                                   withDestinationURL: box.home.appendingPathComponent("dotfiles/bin"))
+        XCTAssertEqual(ClaudeVersions.linkedVersion(home: box.home), "2.1.314")
+        XCTAssertEqual(names(ClaudeVersions.old(home: box.home, running: [])), ["2.1.319"], "The pinned version stays")
+    }
+
+    func testALinkToALinkIsFollowed() throws {
+        let box = try Sandbox()
+        try makeVersions(box, link: nil)
+        try FileManager.default.createDirectory(at: box.home.appendingPathComponent(".local/bin"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: box.home.appendingPathComponent("hop"),
+                                                   withDestinationURL: box.home.appendingPathComponent("\(dir)/2.1.314"))
+        try FileManager.default.createSymbolicLink(at: box.home.appendingPathComponent(".local/bin/claude"),
+                                                   withDestinationURL: box.home.appendingPathComponent("hop"))
+        XCTAssertEqual(ClaudeVersions.linkedVersion(home: box.home), "2.1.314")
+    }
+
+    func testALinkOutsideTheFolderKeepsNothing() throws {
+        let box = try Sandbox()
+        try makeVersions(box, link: nil)
+        try box.file("elsewhere/claude", bytes: 100)
+        try FileManager.default.createDirectory(at: box.home.appendingPathComponent(".local/bin"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: box.home.appendingPathComponent(".local/bin/claude"),
+                                                   withDestinationURL: box.home.appendingPathComponent("elsewhere/claude"))
+        XCTAssertNil(ClaudeVersions.linkedVersion(home: box.home))
+    }
+
+    // MARK: lsof answers
+
+    func testAnAnswerOfLsofIsReadCarefully() {
+        func read(_ status: Int32, _ out: String = "", _ err: String = "", timedOut: Bool = false) -> [String]? {
+            ClaudeVersions.interpret(status: status, stdout: out, stderr: err, timedOut: timedOut)
+        }
+        XCTAssertEqual(read(0, "p1\nn/a/2.1.3\nn/a/2.1.3\n"), ["/a/2.1.3"])
+        XCTAssertEqual(read(1), [], "Nothing is open")
+        XCTAssertNil(read(1, "", "lsof: WARNING: can't stat() file system"), "An error is not an answer")
+        XCTAssertNil(read(2))
+        XCTAssertNil(read(0, "n/a", timedOut: true))
+        XCTAssertNil(read(-1))
     }
 
     func testOnlyVersionNamesCount() {
-        for good in ["2.1.321", "10.0.1", "2.2.0-beta.1", "2.1.3.4"] { XCTAssertTrue(ClaudeVersions.isVersionName(good), good) }
-        for bad in ["latest", ".tmp", "2.1", "2.1.x", "../2.1.3", "2.1.3/x", "v2.1.3", "", "2.1.3 ", "current"] {
+        for good in ["2.1.321", "10.0.1", "2.2.0-beta.1", "2.2.0-rc.1.2"] { XCTAssertTrue(ClaudeVersions.isVersionName(good), good) }
+        for bad in ["latest", ".tmp", "2.1", "2.1.x", "../2.1.3", "2.1.3/x", "v2.1.3", "", "2.1.3 ", "current", "2.1.10.tmp", "2.1.3.4",
+                    "2.1.11.partial", "1234567890.0.0", "2.1.3-", "2.1.3-beta..1", "2.1.3\n", "2.1.3-beta.1/x"] {
             XCTAssertFalse(ClaudeVersions.isVersionName(bad), bad)
         }
     }
@@ -138,7 +212,7 @@ final class ClaudeVersionsTests: XCTestCase {
         try makeVersions(box)
         XCTAssertTrue(scanner(box, running: nil).scanClaudeVersions().isEmpty)
         let forged = Finding(id: "f", ecosystem: .aiAgents, title: "Claude · old Code versions", location: "x", bytes: 4_000_000,
-                             tier: .safe, rebuild: .download, action: .agent(.removeOldClaudeVersions))
+                             tier: .safe, rebuild: .download, action: .agent(.removeOldClaudeVersions(names: ["2.1.314", "2.1.319"])))
         let report = cleaner(box, running: nil).clean([forged])
         XCTAssertEqual(report.removed, 0)
         XCTAssertEqual(report.skipped.count, 1)
@@ -172,6 +246,27 @@ final class ClaudeVersionsTests: XCTestCase {
         XCTAssertEqual(report.removed, 1)
         XCTAssertTrue(exists(box, "\(dir)/2.1.319"))
         XCTAssertFalse(exists(box, "\(dir)/2.1.314"))
+    }
+
+    func testACleanRemovesOnlyWhatThePreviewNamed() throws {
+        let box = try Sandbox()
+        try makeVersions(box)
+        let item = try XCTUnwrap(scanner(box).scanClaudeVersions().first)
+        XCTAssertEqual(item.action.agentNames, ["2.1.319", "2.1.314"])
+        try box.file("\(dir)/2.1.100", bytes: 2_000_000)       // an old-looking extra file that the preview did not name
+        let report = cleaner(box).clean([item])
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertTrue(exists(box, "\(dir)/2.1.321") && exists(box, "\(dir)/2.1.100"), "Not named in the preview, so not removed")
+        XCTAssertFalse(exists(box, "\(dir)/2.1.314") || exists(box, "\(dir)/2.1.319"))
+    }
+
+    func testAForgedNameListRemovesNothingThatIsNotOld() throws {
+        let box = try Sandbox()
+        try makeVersions(box)
+        let forged = Finding(id: "f", ecosystem: .aiAgents, title: "x", location: "x", bytes: 1, tier: .safe, rebuild: .download,
+                             action: .agent(.removeOldClaudeVersions(names: ["2.1.321", "../x", "latest"])))
+        XCTAssertEqual(cleaner(box).clean([forged]).removed, 0)
+        for n in ["2.1.314", "2.1.319", "2.1.321"] { XCTAssertTrue(exists(box, "\(dir)/\(n)"), n) }
     }
 
     func testTheItemIsInTheOneClickTotal() throws {

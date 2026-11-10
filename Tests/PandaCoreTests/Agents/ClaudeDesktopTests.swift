@@ -111,6 +111,70 @@ final class ClaudeDesktopTests: XCTestCase {
         XCTAssertEqual(ClaudeDesktop.vmBundles(home: box.home).map { $0.url.lastPathComponent }, ["claudevm.bundle", "warm"])
     }
 
+    // MARK: Pinned versions and the preview
+
+    func testTheVersionThatTheAppPinsStays() throws {
+        let box = try Sandbox()
+        try box.file("\(root)/claude-code-vm/2.1.156/claude", bytes: 1_000)
+        try box.file("\(root)/claude-code-vm/2.1.140/claude", bytes: 1_000)
+        try box.file("\(root)/claude-code-vm/2.1.100/claude", bytes: 1_000)
+        try "2.1.140\n".write(to: box.home.appendingPathComponent("\(root)/claude-code-vm/.sdk-version"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(ClaudeDesktop.oldRuntimes(home: box.home).map { $0.url.lastPathComponent }, ["2.1.100"],
+                       "2.1.156 is newest and 2.1.140 is pinned")
+    }
+
+    func testAPinFileWithJunkIsIgnored() throws {
+        let box = try Sandbox()
+        try box.file("\(root)/claude-code-vm/2.1.156/claude", bytes: 1_000)
+        try box.file("\(root)/claude-code-vm/2.1.140/claude", bytes: 1_000)
+        for junk in ["latest", "../2.1.140", "2.1.140 x", ""] {
+            try junk.write(to: box.home.appendingPathComponent("\(root)/claude-code-vm/.sdk-version"), atomically: true, encoding: .utf8)
+            XCTAssertEqual(ClaudeDesktop.oldRuntimes(home: box.home).map { $0.url.lastPathComponent }, ["2.1.140"], junk)
+        }
+    }
+
+    func testACleanRemovesOnlyWhatThePreviewNamed() throws {
+        let box = try Sandbox()
+        try makeClaude(box, vm: false)
+        let item = try XCTUnwrap(scanner(box).scanClaudeDesktop().first { $0.id == "agent.claude.runtimes" })
+        XCTAssertEqual(item.action.agentNames, ["claude-code/2.1.309", "claude-code-vm/2.1.140"])
+        try box.file("\(root)/claude-code/2.1.330/x", bytes: 1_000)          // the app updated after the preview: 2.1.317 is old now
+        let report = cleaner(box).clean([item])
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertFalse(exists(box, "claude-code/2.1.309"))
+        XCTAssertTrue(exists(box, "claude-code/2.1.317/hash/claude.app/bin"), "It was the newest in the preview, so it was not named")
+    }
+
+    func testAFolderThatBecameALinkAfterThePreviewIsNotFollowed() throws {
+        let box = try Sandbox()
+        try makeClaude(box, vm: false)
+        try box.file("proj/Cache/precious", bytes: 1_000)
+        let item = try XCTUnwrap(scanner(box).scanClaudeDesktop().first { $0.id == "agent.claude.runtimes" })
+        try FileManager.default.removeItem(at: box.home.appendingPathComponent("\(root)/claude-code/2.1.309"))
+        try FileManager.default.createSymbolicLink(at: box.home.appendingPathComponent("\(root)/claude-code/2.1.309"),
+                                                   withDestinationURL: box.home.appendingPathComponent("proj"))
+        _ = cleaner(box).clean([item])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: box.home.appendingPathComponent("proj/Cache/precious").path))
+    }
+
+    func testALinkAboveTheAppFolderIsNotFollowed() throws {
+        let box = try Sandbox()
+        try box.file("elsewhere/Claude/claude-code/2.1.1/x", bytes: 1_000_000)
+        try box.file("elsewhere/Claude/claude-code/2.1.2/x", bytes: 1_000_000)
+        try box.file("elsewhere/Claude/vm_bundles/warm/x", bytes: 1_000_000)
+        try FileManager.default.createDirectory(at: box.home.appendingPathComponent("Library"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: box.home.appendingPathComponent("Library/Application Support"),
+                                                   withDestinationURL: box.home.appendingPathComponent("elsewhere"))
+        XCTAssertTrue(scanner(box).scanClaudeDesktop().isEmpty)
+        let forged = Finding(id: "f", ecosystem: .aiAgents, title: "x", location: "x", bytes: 1, tier: .review, rebuild: .download,
+                             action: .agent(.removeOldClaudeDesktopRuntimes(names: ["claude-code/2.1.1"])))
+        let vm = Finding(id: "g", ecosystem: .aiAgents, title: "y", location: "y", bytes: 1, tier: .review, rebuild: .download,
+                         action: .agent(.removeClaudeVMBundle))
+        XCTAssertEqual(cleaner(box).clean([forged, vm]).removed, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: box.home.appendingPathComponent("elsewhere/Claude/claude-code/2.1.1/x").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: box.home.appendingPathComponent("elsewhere/Claude/vm_bundles/warm/x").path))
+    }
+
     // MARK: The items
 
     func testTheRuntimeItemIsAReviewItemOfClaudeDesktop() throws {

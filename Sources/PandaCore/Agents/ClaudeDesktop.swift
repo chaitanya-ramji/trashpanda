@@ -35,12 +35,24 @@ public enum ClaudeDesktop {
         }
     }
 
-    /// Every version except the newest of each family.
+    /// The version that the app pins in `<family>/.sdk-version`, if the file names a version. It stays.
+    static func pinnedVersion(_ family: String, home: URL) -> String? {
+        let file = rootURL(home: home).appendingPathComponent(family, isDirectory: true).appendingPathComponent(".sdk-version")
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ClaudeVersions.isVersionName(name) ? name : nil
+    }
+
+    /// The name that identifies one runtime in an action: `claude-code/2.1.309`.
+    public static func runtimeName(_ entry: Entry) -> String { "\(entry.family)/\(entry.url.lastPathComponent)" }
+
+    /// Every version except the newest of each family, and except the version that the app pins.
     public static func oldRuntimes(home: URL) -> [Entry] {
         AgentCaches.claudeRuntimeFamilies.flatMap { family -> [Entry] in
             let folders = versionFolders(family, home: home)
-            guard let newest = folders.map(\.lastPathComponent).max(by: { ClaudeVersions.isNewer($1, than: $0) }) else { return [] }
-            return folders.filter { $0.lastPathComponent != newest }
+            guard let newest = ClaudeVersions.newest(of: folders.map(\.lastPathComponent)) else { return [] }
+            let pinned = pinnedVersion(family, home: home)
+            return folders.filter { $0.lastPathComponent != newest && $0.lastPathComponent != pinned }
                 .sorted { ClaudeVersions.isNewer($0.lastPathComponent, than: $1.lastPathComponent) }
                 .map { Entry(url: $0, family: family, bytes: Sizer.size(of: $0)) }
         }
