@@ -5,6 +5,8 @@ import Foundation
 public enum AgentAction: Sendable, Equatable {
     /// One folder of the Codex runtime cache: a leftover install, or the downloaded runtime itself.
     case removeCodexRuntime(URL)
+    /// The old versions of the Claude Code command line tool. The cleaner finds them again, and keeps the newest, the linked one, and any that runs.
+    case removeOldClaudeVersions
 }
 
 /// The apps that own the folders of the AI agents group. An open app blocks its items (see #16 and #47).

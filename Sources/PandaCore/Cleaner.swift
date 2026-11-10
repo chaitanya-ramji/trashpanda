@@ -22,6 +22,8 @@ public final class Cleaner {
     private let mountedImages: () -> [String]
     /// Finds `brew` at clean time. Tests give a fake one.
     private let brew: () -> Brew?
+    /// The program files that `claude` processes execute now. nil means that we cannot tell, and then no version is removed.
+    private let openClaudeBinaries: ([String]) -> [String]?
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
@@ -29,7 +31,9 @@ public final class Cleaner {
                 programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths,
                 emptyTrash: @escaping () -> Result<Void, TrashRefusal> = TrashBin.emptyWithFinder,
                 mountedImages: @escaping () -> [String] = Installers.mountedImagePaths,
-                brew: (() -> Brew?)? = nil) {
+                brew: (() -> Brew?)? = nil,
+                openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:)) {
+        self.openClaudeBinaries = openClaudeBinaries
         self.brew = brew ?? { Shell.resolve("brew").map { Brew(path: $0) } }
         self.mountedImages = mountedImages
         self.emptyTrash = emptyTrash
@@ -264,7 +268,37 @@ public final class Cleaner {
     private func runAgent(_ action: AgentAction, finding: Finding, into report: inout CleanReport) {
         switch action {
         case .removeCodexRuntime(let url): removeCodexRuntime(url, finding: finding, into: &report)
+        case .removeOldClaudeVersions: removeOldClaudeVersions(finding: finding, into: &report)
         }
+    }
+
+    /// The old versions of the Claude Code tool. We list them again now and ask which ones run. If we cannot ask, nothing is removed.
+    private func removeOldClaudeVersions(finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        let files = ClaudeVersions.entries(home: home).map { $0.url.path }
+        guard let running = openClaudeBinaries(files) else {
+            skip(finding, "could not tell which versions run", &report); return
+        }
+        var removed = 0, failures = 0
+        for entry in ClaudeVersions.old(home: home, running: running).old {
+            guard ClaudeVersions.isVersionName(entry.name), UpdateDownloads.isPlainPath(entry.url) else {
+                report.skipped.append("\(entry.url.path): not a version file"); continue
+            }
+            if let reason = guardian.check(entry.url) {
+                report.skipped.append("\(entry.url.path): \(reason)"); continue
+            }
+            do {
+                try FileManager.default.removeItem(at: entry.url)
+                report.freed += entry.bytes
+                removed += 1
+            } catch {
+                failures += 1
+                Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
+            }
+        }
+        if removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(removed) old versions, failures \(failures)")
+        if failures > 0 { report.failed.append("\(finding.title): \(failures) files stayed") }
     }
 
     /// One folder of the Codex runtime cache. We read the kind and the age again now. A running program keeps it.

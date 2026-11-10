@@ -83,6 +83,8 @@ public final class DiskScanner {
     /// Path of `xcrun`. Tests set it to a fake tool. The default finds the real one.
     private let xcrunOverride: String?
     private let brewOverride: String?
+    /// The program files that `claude` processes execute now. Tests give a list. nil means that we cannot tell.
+    private let openClaudeBinaries: ([String]) -> [String]?
     /// The current time. Tests set a fixed time, so that ages do not change from day to day.
     private let now: () -> Date
     /// The name of an installed app. Tests give their own.
@@ -91,12 +93,13 @@ public final class DiskScanner {
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
                 isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
-                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil,
+                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil, openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
                 appName: @escaping (String) -> String? = UpdateDownloads.systemAppName(for:)) {
         self.now = now
         self.appName = appName
         self.xcrunOverride = xcrunPath
         self.brewOverride = brewPath
+        self.openClaudeBinaries = openClaudeBinaries
         self.home = home
         self.config = config
         self.guardian = PathGuard(home: home, keep: config.keep)
@@ -179,6 +182,9 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeOldClaudeVersions):
+            guard let running = openClaudeBinaries(ClaudeVersions.entries(home: home).map { $0.url.path }) else { return finding.bytes }
+            return ClaudeVersions.old(home: home, running: running).old.reduce(Int64(0)) { $0 + $1.bytes }
         case .agent(.removeCodexRuntime(let url)):
             return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url) : 0
         case .brew(let action):
@@ -478,7 +484,19 @@ public final class DiskScanner {
 
     /// The AI agents group. Each product has its own function, and its items start with the product name.
     func scanAgents() -> [Finding] {
-        scanCodexRuntimes()
+        scanCodexRuntimes() + scanClaudeVersions()
+    }
+
+    /// Old versions of the Claude Code tool. One item. If we cannot tell which versions run, there is no item.
+    func scanClaudeVersions() -> [Finding] {
+        guard let running = openClaudeBinaries(ClaudeVersions.entries(home: home).map { $0.url.path }) else { return [] }
+        let (old, kept) = ClaudeVersions.old(home: home, running: running)
+        let list = old.filter { guardian.check($0.url) == nil }
+        let bytes = list.reduce(Int64(0)) { $0 + $1.bytes }
+        guard bytes > 0 else { return [] }
+        return [Finding(id: "agent.claude.versions", ecosystem: .aiAgents, title: "Claude · old Code versions",
+                        location: "~/\(ClaudeVersions.directory) · \(list.count) older version\(list.count == 1 ? "" : "s") · \(kept.joined(separator: ", ")) stay\(kept.count == 1 ? "s" : "")",
+                        bytes: bytes, tier: .safe, rebuild: .download, action: .agent(.removeOldClaudeVersions))]
     }
 
     /// Leftover installs and the downloaded runtime of the Codex app.
