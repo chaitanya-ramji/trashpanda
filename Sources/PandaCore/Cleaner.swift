@@ -113,6 +113,9 @@ public final class Cleaner {
             case .removeUpdateDownloads(let url):
                 removeUpdateDownloads(url, finding: finding, into: &report)
 
+            case .agent(let action):
+                runAgent(action, finding: finding, into: &report)
+
             case .brew(let action):
                 runBrew(action, finding: finding, into: &report)
 
@@ -250,6 +253,39 @@ public final class Cleaner {
             report.freed += finding.bytes
             report.removed += 1
             Log.info("clean \(finding.id): removed archive \(finding.bytes) bytes — \(url.path)")
+        } catch {
+            Log.error("remove failed \(url.path): \(error.localizedDescription)")
+            report.failed.append("\(url.path): \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: AI agents
+
+    private func runAgent(_ action: AgentAction, finding: Finding, into report: inout CleanReport) {
+        switch action {
+        case .removeCodexRuntime(let url): removeCodexRuntime(url, finding: finding, into: &report)
+        }
+    }
+
+    /// One folder of the Codex runtime cache. We read the kind and the age again now. A running program keeps it.
+    private func removeCodexRuntime(_ url: URL, finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        guard let kind = CodexRuntimes.kind(of: url, home: home) else {
+            skip(finding, "not a folder of the Codex runtime cache", &report); return
+        }
+        if kind == .staging, (CodexRuntimes.ageDays(of: url, now: Date()) ?? 0) < CodexRuntimes.minimumAgeDays {
+            skip(finding, "the install is less than a day old and may still run", &report); return
+        }
+        if let reason = guardian.check(url) { skip(finding, "\(reason)", &report); return }
+        if CodexRuntimes.isInUse(url, programs: programPaths()) {
+            report.skipped.append("\(finding.location): a program runs from it. Quit Codex and try again."); return
+        }
+        let before = Sizer.size(of: url)
+        do {
+            try FileManager.default.removeItem(at: url)
+            report.freed += before
+            report.removed += 1
+            Log.info("clean \(finding.id): removed \(kind) \(before) bytes — \(url.path)")
         } catch {
             Log.error("remove failed \(url.path): \(error.localizedDescription)")
             report.failed.append("\(url.path): \(error.localizedDescription)")

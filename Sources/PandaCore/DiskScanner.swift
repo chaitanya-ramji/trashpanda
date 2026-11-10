@@ -129,6 +129,7 @@ public final class DiskScanner {
             { add(self.scanTrash()) },
             { add(self.scanInstallers()) },
             { add(self.scanLogs()) },
+            { add(self.scanAgents()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -178,6 +179,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeCodexRuntime(let url)):
+            return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url) : 0
         case .brew(let action):
             return brew()?.bytes(of: action.name) ?? finding.bytes
         case .removeOldLogs(let kind):
@@ -471,6 +474,35 @@ public final class DiskScanner {
 
     func brew() -> Brew? {
         (brewOverride ?? Shell.resolve("brew")).map { Brew(path: $0) }
+    }
+
+    /// The AI agents group. Each product has its own function, and its items start with the product name.
+    func scanAgents() -> [Finding] {
+        scanCodexRuntimes()
+    }
+
+    /// Leftover installs and the downloaded runtime of the Codex app.
+    func scanCodexRuntimes() -> [Finding] {
+        let place = "~/" + CodexRuntimes.root
+        return CodexRuntimes.list(home: home, now: now()).compactMap { entry in
+            guard guardian.check(entry.url) == nil else { return nil }
+            let bytes = Sizer.size(of: entry.url)
+            guard bytes > 0 else { return nil }
+            let name = entry.url.lastPathComponent
+            switch entry.kind {
+            case .staging:
+                return Finding(id: "agent.codex.staging:\(name)", ecosystem: .aiAgents, title: "Codex · leftover runtime install",
+                               location: "\(place)/\(name) · \(entry.ageDays) days old",
+                               bytes: bytes, tier: .safe, rebuild: .download,
+                               action: .agent(.removeCodexRuntime(entry.url)), owner: AgentOwners.codex)
+            case .primary:
+                return Finding(id: "agent.codex.runtime", ecosystem: .aiAgents, title: "Codex · downloaded runtime",
+                               location: "\(place)/\(name)", bytes: bytes, tier: .review, rebuild: .download,
+                               action: .agent(.removeCodexRuntime(entry.url)),
+                               note: "The app downloads it again (about 1.7 GB). Document and spreadsheet tools stop until then.",
+                               owner: AgentOwners.codex)
+            }
+        }
     }
 
     /// Formulae that no other formula needs. One review item for each, so the user chooses each one.

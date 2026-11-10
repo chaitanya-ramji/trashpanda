@@ -276,6 +276,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let parent = NSMenuItem()
         parent.attributedTitle = line(ecosystem.name, amount > 0 ? Format.bytes(amount) : "info")
         parent.submenu = submenu(for: ecosystem, items: items)
+        if ecosystem == .aiAgents {
+            parent.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: ecosystem.name)
+        }
         return parent
     }
 
@@ -377,7 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: f.title, action: #selector(confirmAndClean(_:)), keyEquivalent: "")
         item.attributedTitle = line(f.title, Format.bytes(f.bytes))
         item.target = self
-        item.image = f.owner.flatMap(appIcon)
+        item.image = icon(for: f)
         let open = blockers(f)
         if open.isEmpty {
             item.representedObject = dialog(for: f)
@@ -401,6 +404,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The small icon of the app that owns an item: the running app, or the installed one.
+    /// The icon of an item: the icon of its owner app, or the icon of its product (AI agents), or a symbol.
+    private func icon(for f: Finding) -> NSImage? {
+        if let owner = f.owner, let icon = appIcon(owner) { return icon }
+        guard f.ecosystem == .aiAgents, let info = AgentProduct.info(forTitle: f.title) else { return nil }
+        let workspace = NSWorkspace.shared
+        for id in info.iconBundleIDs {
+            if let url = workspace.urlForApplication(withBundleIdentifier: id) {
+                let icon = workspace.icon(forFile: url.path)
+                icon.size = NSSize(width: 16, height: 16)
+                return icon
+            }
+        }
+        let symbol = NSImage(systemSymbolName: info.symbol, accessibilityDescription: info.name)
+        symbol?.size = NSSize(width: 16, height: 16)
+        return symbol
+    }
+
     private func appIcon(_ owner: AppOwner) -> NSImage? {
         let workspace = NSWorkspace.shared
         var icon = workspace.runningApplications.first { app in app.bundleIdentifier.map(owner.matches(bundleID:)) ?? false

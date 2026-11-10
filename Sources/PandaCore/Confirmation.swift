@@ -17,7 +17,7 @@ public struct Confirmation: Equatable, Sendable {
 
     /// What kind of thing the item is decides how careful the dialog is.
     public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage
+        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -33,6 +33,7 @@ public struct Confirmation: Equatable, Sendable {
         case .removeInstaller: return .installer
         case .removeOldLogs: return .oldLogs
         case .brew: return .brewPackage
+        case .agent(.removeCodexRuntime) where f.tier == .review: return .agentRuntime
         default: return .ordinary
         }
     }
@@ -70,6 +71,11 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Remove saved website data?", body: detail,
                 footer: "Websites that work offline keep their files here. After this, such a site may not open without a network until you visit it online again. This can't be undone.",
                 confirmTitle: "Remove data", cancelIsDefault: true)
+        case .agentRuntime:
+            return Confirmation(
+                title: "Remove this downloaded runtime?", body: "\(f.title)\n\(f.location)\n\(f.note ?? "")",
+                footer: "The app downloads it again the next time it needs it. This can't be undone.",
+                confirmTitle: "Remove runtime", cancelIsDefault: true)
         case .brewPackage:
             return Confirmation(
                 title: "Uninstall this package?", body: "\(f.title)\n\(f.location)",
