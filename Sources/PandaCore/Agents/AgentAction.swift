@@ -23,6 +23,8 @@ public enum AgentAction: Sendable, Equatable {
     case removeOllamaModel(name: String)
     /// One Hugging Face repository (`model/org/name`). The cleaner finds its folder again, and removes it with `hf` or by folder.
     case removeHuggingFaceRepo(id: String)
+    /// One model of LM Studio, Jan, or GPT4All (`LocalModels.stores`). The cleaner finds it again from the store id and the name.
+    case removeLocalModel(storeID: String, name: String)
 }
 
 /// The apps that own the folders of the AI agents group. An open app blocks its items (see #16 and #47).

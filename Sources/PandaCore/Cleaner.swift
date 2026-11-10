@@ -283,6 +283,7 @@ public final class Cleaner {
         case .removeEditorCaches(let id): removeEditorCaches(id, finding: finding, into: &report)
         case .removeOllamaModel(let name): removeOllamaModel(name, finding: finding, into: &report)
         case .removeHuggingFaceRepo(let id): removeHuggingFaceRepo(id, finding: finding, into: &report)
+        case .removeLocalModel(let storeID, let name): removeLocalModel(storeID, name, finding: finding, into: &report)
         case .removeObsoleteExtensions(let id): removeObsoleteExtensions(id, finding: finding, into: &report)
         case .removeClaudeVMBundle:
             removeFolders(ClaudeDesktop.vmBundles(home: URL(fileURLWithPath: guardian.home)), finding: finding, into: &report)
@@ -319,6 +320,28 @@ public final class Cleaner {
         if removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+    }
+
+    /// One model of a desktop app. We find it again now at the exact depth of the store, and check the path and the guard last.
+    private func removeLocalModel(_ storeID: String, _ name: String, finding: Finding, into report: inout CleanReport) {
+        let home = URL(fileURLWithPath: guardian.home)
+        guard let model = LocalModels.model(storeID: storeID, name: name, home: home) else {
+            skip(finding, "\(name) is not a model of the app any more, or the name is not valid", &report); return
+        }
+        let size = Sizer.size(of: model.url)          // measure first, check last (see removeFolders)
+        let rootPrefix = home.appendingPathComponent(model.store.root, isDirectory: true).standardizedFileURL.path + "/"
+        guard model.url.standardizedFileURL.path.hasPrefix(rootPrefix), UpdateDownloads.isPlainPath(model.url),
+              LocalModels.isModelName(name, in: model.store) else { skip(finding, "not a model of the store", &report); return }
+        if let reason = guardian.check(model.url) { skip(finding, "\(reason)", &report); return }
+        do {
+            try FileManager.default.removeItem(at: model.url)
+            report.freed += size
+            report.removed += 1
+            Log.info("clean \(finding.id): removed \(size) bytes — \(model.url.path)")
+        } catch {
+            Log.error("remove failed \(model.url.path): \(error.localizedDescription)")
+            report.failed.append("\(model.url.path): \(error.localizedDescription)")
+        }
     }
 
     /// One Hugging Face repository. We find its folder again now. With `hf`, the tool removes it. Without, we delete the folder.

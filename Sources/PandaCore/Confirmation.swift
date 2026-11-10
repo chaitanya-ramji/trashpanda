@@ -36,7 +36,7 @@ public struct Confirmation: Equatable, Sendable {
         case .agent(.removeCodexRuntime) where f.tier == .review: return .agentRuntime
         case .agent(.removeOldClaudeDesktopRuntimes): return .agentRuntime
         case .agent(.removeClaudeVMBundle): return .vmBundle
-        case .agent(.removeOllamaModel), .agent(.removeHuggingFaceRepo): return .localModel
+        case .agent(.removeOllamaModel), .agent(.removeHuggingFaceRepo), .agent(.removeLocalModel): return .localModel
         default: return .ordinary
         }
     }
@@ -77,7 +77,7 @@ public struct Confirmation: Equatable, Sendable {
         case .localModel:
             return Confirmation(
                 title: "Remove this model?", body: "\(f.title)\n\(ByteText.string(f.bytes))",
-                footer: "Ollama removes it. The model is downloaded again when you need it, and that can take a while. Layers that other models share stay. This can't be undone.",
+                footer: "The model is downloaded again when you need it, and that can take a while. If it shares layers with another model, those layers stay. This can't be undone.",
                 confirmTitle: "Remove model", cancelIsDefault: true)
         case .vmBundle:
             return Confirmation(

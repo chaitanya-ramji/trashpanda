@@ -185,6 +185,8 @@ public final class DiskScanner {
             return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerBytes(of: $0, home: home) } ?? finding.bytes
         case .emptyTrash:
             return TrashBin.bytes(home: home)
+        case .agent(.removeLocalModel(let storeID, let name)):
+            return LocalModels.model(storeID: storeID, name: name, home: home)?.bytes ?? 0
         case .agent(.removeHuggingFaceRepo(let id)):
             return HuggingFace.repo(id: id, home: home, now: now()).map(\.bytes) ?? 0
         case .agent(.removeOllamaModel(let name)):
@@ -504,7 +506,20 @@ public final class DiskScanner {
 
     /// The AI agents group. Each product has its own function, and its items start with the product name.
     func scanAgents() -> [Finding] {
-        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches() + scanHuggingFace()
+        scanCodexRuntimes() + scanClaudeVersions() + scanClaudeDesktop() + scanElectronCaches() + scanEditorCaches() + scanHuggingFace() + scanLocalModels()
+    }
+
+    /// The models of LM Studio, Jan, and GPT4All. One review item for each model, and the app must be closed.
+    func scanLocalModels() -> [Finding] {
+        LocalModels.stores.flatMap { store in
+            LocalModels.models(in: store, home: home).compactMap { m -> Finding? in
+                guard guardian.check(m.url) == nil else { return nil }
+                return Finding(id: "agent.model:\(store.id):\(m.name)", ecosystem: .aiAgents, title: "\(store.product) · model \(m.name)",
+                               location: "~/\(store.root)", bytes: m.bytes, tier: .review, rebuild: .download,
+                               action: .agent(.removeLocalModel(storeID: store.id, name: m.name)),
+                               note: "Downloaded again when you need it. Your chats and settings stay.", owner: store.owner)
+            }
+        }
     }
 
     /// The repositories of the Hugging Face hub cache. One review item for each. Datasets are costly to get again.
