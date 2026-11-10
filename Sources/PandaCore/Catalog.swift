@@ -213,6 +213,14 @@ enum Catalog {
                   paths: [".gitlibs/libs"], tier: .review, rebuild: .download),
         CacheSpec(id: "clojure.gitlibs.repos", title: "Clojure git library clones", ecosystem: .clojure,
                   paths: [".gitlibs/_repos"], tier: .review, rebuild: .download),
+
+        // Perl
+        CacheSpec(id: "perl.cpanm.work", title: "cpanm build folders", ecosystem: .perl,
+                  paths: [".cpanm/work"], tier: .safe, rebuild: .minutes),
+        CacheSpec(id: "perl.cpan.build", title: "CPAN build folders", ecosystem: .perl,
+                  paths: [".cpan/build"], tier: .safe, rebuild: .minutes),
+        CacheSpec(id: "perl.cpan.sources", title: "CPAN downloads", ecosystem: .perl,
+                  paths: [".cpan/sources"], tier: .safe, rebuild: .download),
     ]
 
     // MARK: Project build outputs
@@ -302,6 +310,10 @@ enum Catalog {
                      markers: ["deps.edn"], .clojure, "Classpath cache", rebuild: .seconds),
         ArtifactRule([".shadow-cljs"],
                      markers: ["shadow-cljs.edn"], .clojure, "shadow-cljs cache", rebuild: .seconds),
+
+        // Perl
+        ArtifactRule(["blib"],
+                     markers: ["Makefile.PL", "Build.PL", "dist.ini"], .perl, "Build output"),
 
         // PHP
         ArtifactRule(["vendor"], markers: ["composer.json"], .php, "Composer packages"),
