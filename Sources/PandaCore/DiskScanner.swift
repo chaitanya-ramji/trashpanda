@@ -86,6 +86,7 @@ public final class DiskScanner {
     private let ollamaOverride: String?
     /// The programs that run now, with their full paths. A runtime that a program starts from stays.
     private let programPaths: () -> [String]
+    private let tmutilOverride: String?
     /// The program files that `claude` processes execute now. Tests give a list. nil means that we cannot tell.
     private let openClaudeBinaries: ([String]) -> [String]?
     /// The current time. Tests set a fixed time, so that ages do not change from day to day.
@@ -96,7 +97,7 @@ public final class DiskScanner {
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, config: Config = .load(),
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
                 isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
-                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil, ollamaPath: String? = nil, programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths, openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
+                now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil, ollamaPath: String? = nil, programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths, tmutilPath: String? = nil, openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
                 appName: @escaping (String) -> String? = UpdateDownloads.systemAppName(for:)) {
         self.now = now
         self.appName = appName
@@ -104,6 +105,7 @@ public final class DiskScanner {
         self.brewOverride = brewPath
         self.ollamaOverride = ollamaPath
         self.programPaths = programPaths
+        self.tmutilOverride = tmutilPath
         self.openClaudeBinaries = openClaudeBinaries
         self.home = home
         self.config = config
@@ -147,6 +149,7 @@ public final class DiskScanner {
                 { add(self.scanBrewLeaves()) },
                 { add(self.scanOllama()) },
                 { add(self.scanGlobalPackages()) },
+                { add(self.scanSnapshots()) },
                 { add(self.scanDocker()) },
                 { add(self.scanGo()) },
                 { add(self.scanUv()) },
@@ -908,6 +911,19 @@ public final class DiskScanner {
                                note: "Up to this size. uv removes only what nothing uses. Agents such as Claude Code and Codex start uv."))
         }
         return out
+    }
+
+    // MARK: Time Machine
+
+    /// A note, only when Time Machine keeps local snapshots. Information only: the app deletes nothing here.
+    func scanSnapshots() -> [Finding] {
+        guard let info = LocalSnapshots.read(tool: tmutilOverride ?? LocalSnapshots.tmutilPath, now: now()) else { return [] }
+        let age = info.oldestDays.map { " · the oldest is \($0) days old" } ?? ""
+        let word = info.count == 1 ? "1 local snapshot" : "\(info.count) local snapshots"
+        return [Finding(id: "snapshots.local", ecosystem: .snapshots, title: "Time Machine · \(word)",
+                        location: "Read with tmutil, read only\(age)", bytes: 0, tier: .review, rebuild: .never, action: .inform,
+                        note: "They can hold space that deleting files does not free at once. macOS removes them by itself when the disk needs the space. Trash Panda does not delete them.",
+                        helpURL: LocalSnapshots.helpURL)]
     }
 
     // MARK: Projects
