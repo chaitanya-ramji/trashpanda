@@ -43,9 +43,9 @@ public enum EditorCaches {
                   names: editorNames, extensionsRoot: nil, owner: AgentOwners.antigravityIDE),
     ]
 
-    static let vscodeOwner = AppOwner(name: "VS Code", bundleIDs: ["com.microsoft.VSCode*"])
-    static let cursorOwner = AppOwner(name: "Cursor", bundleIDs: ["com.todesktop.230313mzl4w4u92*"])
-    static let windsurfOwner = AppOwner(name: "Windsurf", bundleIDs: ["com.exafunction.windsurf*"])
+    public static let vscodeOwner = AppOwner(name: "VS Code", bundleIDs: ["com.microsoft.VSCode*"])
+    public static let cursorOwner = AppOwner(name: "Cursor", bundleIDs: ["com.todesktop.230313mzl4w4u92*"])
+    public static let windsurfOwner = AppOwner(name: "Windsurf", bundleIDs: ["com.exafunction.windsurf*"])
 
     public static func app(id: String) -> EditorApp? { apps.first { $0.id == id } }
 
