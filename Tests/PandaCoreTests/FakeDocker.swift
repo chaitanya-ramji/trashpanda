@@ -59,6 +59,7 @@ final class FakeDocker {
             exit 0;;
           *"system df"*) cat "\(files["summary"]!)"; exit 0;;
           *"image inspect"*) cat "\(files["tagtimes"]!)"; exit 0;;
+          *"container inspect"*) cat "$(dirname "$0")/mounts.txt" 2>/dev/null; exit 0;;
           *"builder prune"*|*"image prune"*|*"image rm "*|*"container rm "*|*"volume rm "*) touch "\(marker)"; exit 0;;
         esac
         echo "UNEXPECTED $*" >> "\(logPath)"
@@ -95,6 +96,22 @@ final class FakeDocker {
                       summary: try summaryFixture.map { try FakeDocker.fixture($0, ext: "jsonl") }
                           ?? FakeDocker.buildCacheOnly,
                       tagTimes: try tagTimesFixture.map { try FakeDocker.fixture($0, ext: "txt") } ?? "")
+    }
+
+    /// What `docker container inspect` answers: one line `<container id>|<volume>,<volume>,` for each container.
+    /// The names are plain here: the fake prints each as a `volume:<name>` mount, like the real tool.
+    func setMounts(_ text: String) throws {
+        let lines = text.split(whereSeparator: \.isNewline).map { line -> String in
+            let parts = line.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 2 else { return String(line) }
+            return parts[0] + "|" + parts[1].split(separator: ",").map { "volume:\($0)," }.joined()
+        }
+        try setRawMounts(lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n"))
+    }
+
+    func setRawMounts(_ text: String) throws {
+        let dir = (path as NSString).deletingLastPathComponent
+        try text.write(toFile: dir + "/mounts.txt", atomically: true, encoding: .utf8)
     }
 
     /// Changes what the engine reports from now on. Use it to test a change after the scan.

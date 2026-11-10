@@ -233,6 +233,37 @@ public final class Cleaner {
             guard volume.isRemovable else {
                 skip(finding, "the volume is in use, or it is not a local volume", &report); return
             }
+        case .removeStoppedContainerWithVolumes(let id, let volumes):
+            guard let container = current.containers.first(where: { $0.id == id }) else {
+                skip(finding, "the container is already gone", &report); return
+            }
+            guard container.isStopped else { skip(finding, "the container is not stopped (\(container.state))", &report); return }
+            // Every volume must still be local, and used by this container only. We ask Docker again who mounts what.
+            guard let mounts = engine.volumes(ofContainers: current.containers.map(\.id)) else {
+                skip(finding, "Docker did not say which container uses which volume", &report); return
+            }
+            for name in volumes {
+                guard let v = current.volumes.first(where: { $0.name == name }), v.driver == "local", v.links == 1 else {
+                    skip(finding, "volume \(name) is gone, is not local, or is used by another container", &report); return
+                }
+                let users = mounts.filter { $0.value.contains(name) }.map(\.key)
+                guard users == [id] else { skip(finding, "volume \(name) is used by another container now", &report); return }
+            }
+            // The container goes first. Then each volume. Nothing is forced.
+            let first = engine.run(arguments, timeout: action.timeout)
+            guard first.status == 0, !first.timedOut else { report.failed.append("\(finding.title): Docker did not remove the container"); return }
+            var failures: [String] = []
+            for extra in action.followUpArguments {
+                let r = engine.run(extra, timeout: action.timeout)
+                if r.status != 0 || r.timedOut { failures.append(extra.last ?? "") }
+            }
+            let left = remaining?(finding) ?? 0
+            let freed = max(0, finding.bytes - left)
+            report.freed += freed
+            report.removed += 1
+            if !failures.isEmpty { report.failed.append("\(finding.title): the container is gone, but Docker kept the volume\(failures.count == 1 ? "" : "s") \(failures.joined(separator: ", "))") }
+            Log.info("clean \(finding.id): removed container and \(volumes.count - failures.count) volumes, estimate \(finding.bytes), left \(left), freed \(freed)")
+            return
         }
 
         let result = engine.run(arguments, timeout: action.timeout)

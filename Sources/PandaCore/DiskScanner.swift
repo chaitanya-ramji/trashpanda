@@ -187,6 +187,9 @@ public final class DiskScanner {
                 return left ? finding.bytes : 0
             case .removeVolume(let name):
                 return inventory.volumes.contains { $0.name == name } ? finding.bytes : 0
+            case .removeStoppedContainerWithVolumes(let id, let names):
+                let box = inventory.containers.first { $0.id == id }?.writableBytes ?? 0
+                return box + inventory.volumes.filter { names.contains($0.name) }.reduce(Int64(0)) { $0 + $1.bytes }
             }
         case .removeServiceWorkerSite(let id, let profile, let folder):
             return BrowserCaches.browser(id: id).flatMap { ServiceWorkerSites.site(browser: $0, profile: profile, folder: folder, home: home) }?.bytes ?? 0
@@ -781,15 +784,39 @@ public final class DiskScanner {
                                action: .owner(.dockerImagePrune)))
         }
 
+        // Who mounts which volume. A volume that only a stopped container uses is locked: Docker refuses `volume rm` while any container
+        // uses it, even a stopped one. So the container and its volumes are one item, and the owner chooses both together.
+        let mounts = engine.volumes(ofContainers: inventory.containers.map(\.id)) ?? [:]
+        var users: [String: [String]] = [:]
+        for (id, names) in mounts { for n in names { users[n, default: []].append(id) } }
+        func containerName(_ id: String) -> String {
+            let c = inventory.containers.first { $0.id == id }
+            return (c?.name.isEmpty == false ? c?.name : nil) ?? String(id.prefix(12))
+        }
+        var handled: Set<String> = []
+
         // Stopped containers, one by one. A container can hold data that is stored nowhere else,
         // so each one is a review item. A running container never appears.
         for c in inventory.stoppedContainers where DockerAction.isHexID(c.id) {
             let label = c.name.isEmpty ? String(c.id.prefix(12)) : c.name
-            out.append(Finding(id: "docker.container:\(c.id.prefix(12))", ecosystem: .docker,
-                               title: "Stopped container · \(label)",
-                               location: "\(place) · image \(c.image) · \(c.status)",
-                               bytes: c.writableBytes, tier: .review, rebuild: .recreate,
-                               action: .docker(.removeContainer(id: c.id))))
+            let own = (mounts[c.id] ?? []).compactMap { name in inventory.volumes.first { $0.name == name } }
+                .filter { $0.driver == "local" && $0.links == 1 && users[$0.name] == [c.id] && DockerAction.isVolumeName($0.name) }
+            if own.isEmpty {
+                out.append(Finding(id: "docker.container:\(c.id.prefix(12))", ecosystem: .docker,
+                                   title: "Stopped container · \(label)",
+                                   location: "\(place) · image \(c.image) · \(c.status)",
+                                   bytes: c.writableBytes, tier: .review, rebuild: .recreate,
+                                   action: .docker(.removeContainer(id: c.id))))
+            } else {
+                own.forEach { handled.insert($0.name) }
+                let names = own.map { $0.anonymousShort }.joined(separator: ", ")
+                out.append(Finding(id: "docker.container.volumes:\(c.id.prefix(12))", ecosystem: .docker,
+                                   title: "Stopped container · \(label) and \(own.count) volume\(own.count == 1 ? "" : "s")",
+                                   location: "\(place) · image \(c.image) · \(c.status) · volumes: \(names)",
+                                   bytes: c.writableBytes + own.reduce(Int64(0)) { $0 + $1.bytes }, tier: .review, rebuild: .never,
+                                   action: .docker(.removeStoppedContainerWithVolumes(id: c.id, volumes: own.map(\.name))),
+                                   note: "Only this container uses the volumes. They can hold a database. Export it first if you need it."))
+            }
         }
 
         // Named images that no container uses and that have been on this Mac for a long time.
@@ -832,14 +859,19 @@ public final class DiskScanner {
 
         // Volumes. They can hold databases, so a removable one is offered one by one, with a strong warning.
         // A volume that a container uses is shown for information only. It has no action.
-        for v in inventory.volumes where DockerAction.isVolumeName(v.name) {
+        for v in inventory.volumes where DockerAction.isVolumeName(v.name) && !handled.contains(v.name) {
             let label = v.isAnonymous ? "Anonymous volume · \(v.name.prefix(12))…" : "Volume · \(v.name)"
             if v.isRemovable {
                 out.append(Finding(id: "docker.volume:\(v.name)", ecosystem: .docker, title: "Unused \(label.prefix(1).lowercased() + label.dropFirst())",
                                    location: "\(place) · no container uses it", bytes: v.bytes, tier: .review,
                                    rebuild: .never, action: .docker(.removeVolume(name: v.name))))
             } else {
-                let why = v.links > 0 ? "used by \(v.links) container\(v.links == 1 ? "" : "s")"
+                let who = (users[v.name] ?? []).map { id -> String in
+                    let c = inventory.containers.first { $0.id == id }
+                    return "\(containerName(id)) (\(c?.isStopped == true ? "stopped" : "running"))"
+                }
+                let why = v.links > 0 ? (who.isEmpty ? "used by \(v.links) container\(v.links == 1 ? "" : "s")"
+                                                       : "used by \(who.joined(separator: ", "))\(who.contains { $0.hasSuffix("(running)") } ? " · stop it to free this" : "")")
                     : (v.driver != "local" ? "driver \(v.driver), may not be on this Mac" : "Docker did not say if it is used")
                 out.append(Finding(id: "docker.volume.info:\(v.name)", ecosystem: .docker, title: label,
                                    location: "\(place) · \(why)", bytes: v.bytes, tier: .review,
