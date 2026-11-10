@@ -16,8 +16,28 @@ public struct Confirmation: Equatable, Sendable {
         "Your code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
 
     /// What kind of thing the item is decides how careful the dialog is.
-    public enum Kind: Equatable, Sendable {
-        case ordinary, container, volume, simulatorRuntime, simulatorDevice, archive, deviceSupport, serviceWorker, trash, installer, oldLogs, brewPackage, agentRuntime, vmBundle, localModel, agentSessions, globalPackage, runtime, cacheFolder, containerWithVolumes, runningContainer
+    public enum Kind: Equatable, Sendable, CaseIterable {
+        case ordinary
+        case container
+        case volume
+        case simulatorRuntime
+        case simulatorDevice
+        case archive
+        case deviceSupport
+        case serviceWorker
+        case trash
+        case installer
+        case oldLogs
+        case brewPackage
+        case agentRuntime
+        case vmBundle
+        case localModel
+        case agentSessions
+        case globalPackage
+        case runtime
+        case cacheFolder
+        case containerWithVolumes
+        case runningContainer
     }
 
     public static func kind(of f: Finding) -> Kind {
@@ -69,7 +89,7 @@ public struct Confirmation: Equatable, Sendable {
             return Confirmation(
                 title: "Remove this container?", body: "\(detail)\n\(f.rebuild.label).",
                 footer: "A container can hold data that is stored nowhere else. This can't be undone.",
-                confirmTitle: "Remove", cancelIsDefault: false)
+                confirmTitle: "Remove", cancelIsDefault: true)
         case .simulatorDevice:
             return Confirmation(
                 title: "Delete this simulator?", body: detail,

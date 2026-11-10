@@ -585,7 +585,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func makeAlert(for box: FindingBox) -> (alert: NSAlert, confirmed: NSApplication.ModalResponse) {
         let total = box.findings.reduce(Int64(0)) { $0 + $1.bytes }
         let alert = NSAlert()
-        alert.alertStyle = .informational
+        // A dialog where Cancel is the default is for a delete that loses data. It gets the critical style.
+        alert.alertStyle = box.cancelIsDefault ? .critical : .informational
         alert.messageText = box.title
         let footer = box.footer
             ?? "Your code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
