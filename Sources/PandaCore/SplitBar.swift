@@ -1,34 +1,63 @@
 import Foundation
 
-/// One part of the bar that shows where the reclaimable data is. It is one group, or "Other".
+/// One part of the bar that shows where the data of the menu rows is. It is one group, or "Other".
 public struct SplitSegment: Equatable, Sendable {
     /// The groups in this part. One group, or several when it is "Other".
     public let ecosystems: [Ecosystem]
     public let name: String
     /// A short name for the legend.
     public let shortName: String
+    /// The same number as the group row in the menu.
     public let bytes: Int64
-    /// The part of `bytes` that "Free up" takes without asking. The rest is review.
+    /// The part of `bytes` that "Free up" takes without asking. An item of an open app is not in it.
     public let safeBytes: Int64
     /// Between 0 and 1. All shares add up to 1.
     public let share: Double
     public let isOther: Bool
+    /// The part of `bytes` that belongs to an open app. It can be cleaned only after the app quits.
+    public var blockedBytes: Int64 = 0
+    /// The open apps that block `blockedBytes`, sorted by name.
+    public var blockingApps: [String] = []
+
+    /// True when every item of the part belongs to an open app. The bar draws it lighter, with stripes.
+    public var isBlockedOnly: Bool { bytes > 0 && blockedBytes >= bytes }
 
     public var percentText: String {
         share < 0.01 ? "<1%" : "\(Int((share * 100).rounded()))%"
     }
 
+    /// "Safari", "Safari and Arc", or "the open apps".
+    private var appsText: String {
+        switch blockingApps.count {
+        case 1: return blockingApps[0]
+        case 2: return "\(blockingApps[0]) and \(blockingApps[1])"
+        default: return "the open apps"
+        }
+    }
+
+    /// "quit Safari to clean", or "quit Claude to clean 100 MB" when only some of the part is blocked.
+    private var blockedText: String? {
+        guard blockedBytes > 0 else { return nil }
+        return isBlockedOnly ? "quit \(appsText) to clean" : "quit \(appsText) to clean \(ByteText.string(blockedBytes))"
+    }
+
     /// What the user reads when the mouse is over the part: "Xcode & Swift · 10 GB · 31%".
-    public var hoverText: String {
-        var text = "\(name) · \(ByteText.string(bytes)) · \(percentText)"
+    public var hoverText: String { hoverText(shortName: false) }
+
+    /// The hover text. With `shortName`, it uses the short name, for a narrow menu.
+    public func hoverText(shortName short: Bool) -> String {
+        var text = "\(short ? shortName : name) · \(ByteText.string(bytes)) · \(percentText)"
         if safeBytes > 0 && safeBytes < bytes { text += " · \(ByteText.string(safeBytes)) safe" }
+        if let blocked = blockedText { text += " · \(blocked)" }
         return text
     }
 
     /// What VoiceOver says.
     public var accessibilityLabel: String {
         let pct = share < 0.01 ? "less than 1 percent" : "\(Int((share * 100).rounded())) percent"
-        return "\(name), \(ByteText.string(bytes)), \(pct) of what you can clean"
+        var text = "\(name), \(ByteText.string(bytes)), \(pct) of what you can clean"
+        if let blocked = blockedText { text += ", \(blocked)" }
+        return text
     }
 }
 
@@ -37,15 +66,70 @@ public struct SplitSlot: Equatable, Sendable {
     public let width: CGFloat
 }
 
+/// The totals of the line under the title of the menu. Together they are the whole bar.
+public struct SplitTotals: Equatable, Sendable {
+    /// Safe items that "Free up" takes now.
+    public let free: Int64
+    /// Items that the user must look at first, and that can be cleaned now.
+    public let review: Int64
+    /// Items of open apps. They can be cleaned only after the app quits.
+    public let waiting: Int64
+
+    public init(free: Int64, review: Int64, waiting: Int64) {
+        self.free = free
+        self.review = review
+        self.waiting = waiting
+    }
+
+    public var all: Int64 { free + review + waiting }
+
+    /// "You can free 1.5 GB now · 1.4 GB to look through · 491 MB when apps quit".
+    /// With `compact`, the words are shorter, for a narrow menu.
+    public func summary(compact: Bool = false) -> String {
+        guard all > 0 else { return "All tidy. Nothing to clean." }
+        var parts: [String] = []
+        if free > 0 { parts.append(compact ? "Free \(ByteText.string(free)) now" : "You can free \(ByteText.string(free)) now") }
+        if review > 0 { parts.append(compact ? "\(ByteText.string(review)) to review" : "\(ByteText.string(review)) to look through") }
+        if waiting > 0 { parts.append(compact ? "\(ByteText.string(waiting)) in open apps" : "\(ByteText.string(waiting)) when apps quit") }
+        return parts.joined(separator: " · ")
+    }
+}
+
 public enum SplitBar {
-    /// Groups the findings that can be cleaned now. An item of a running app, and an information line, is not in it.
+    /// The size that a group row of the menu shows: all the items that have an action.
+    /// An item of an open app is in it. An information line is not. Zero means that the row says "info".
+    public static func rowBytes(_ items: [Finding]) -> Int64 {
+        items.filter(\.isActionable).reduce(Int64(0)) { $0 + $1.bytes }
+    }
+
+    /// The totals of the line under the title.
+    /// An item of an open app cannot be freed now, so it is not in "free" or "review". It is in "waiting".
+    /// So the three totals add up to the bar, and to the sum of the group rows. No item is lost.
+    public static func totals(from findings: [Finding], blockers: (Finding) -> [String] = { _ in [] }) -> SplitTotals {
+        var free: Int64 = 0, review: Int64 = 0, waiting: Int64 = 0
+        for f in findings where f.isActionable {
+            if !blockers(f).isEmpty { waiting += f.bytes } else if f.tier == .safe { free += f.bytes } else { review += f.bytes }
+        }
+        return SplitTotals(free: free, review: review, waiting: waiting)
+    }
+
+    /// One part for each group row that shows a size. The size of a part is the number on its row.
+    /// An item of an open app is in its part, and `blockers` gives the names of the apps that block it.
+    /// A row that only says "info" has no part.
     /// The largest `maxNamed` groups are named. The rest are joined as "Other". The parts add up to the total.
-    public static func segments(from findings: [Finding], isBlocked: (Finding) -> Bool = { _ in false },
+    public static func segments(from findings: [Finding], blockers: (Finding) -> [String] = { _ in [] },
                                 maxNamed: Int = 5) -> [SplitSegment] {
-        var bytes: [Ecosystem: Int64] = [:], safe: [Ecosystem: Int64] = [:]
-        for f in findings where f.isActionable && f.bytes > 0 && !isBlocked(f) {
+        var bytes: [Ecosystem: Int64] = [:], safe: [Ecosystem: Int64] = [:], blocked: [Ecosystem: Int64] = [:]
+        var apps: [Ecosystem: Set<String>] = [:]
+        for f in findings where f.isActionable && f.bytes > 0 {
             bytes[f.ecosystem, default: 0] += f.bytes
-            if f.tier == .safe { safe[f.ecosystem, default: 0] += f.bytes }
+            let open = blockers(f)
+            if !open.isEmpty {
+                blocked[f.ecosystem, default: 0] += f.bytes
+                apps[f.ecosystem, default: []].formUnion(open)
+            } else if f.tier == .safe {
+                safe[f.ecosystem, default: 0] += f.bytes
+            }
         }
         let total = bytes.values.reduce(0, +)
         guard total > 0 else { return [] }
@@ -59,7 +143,9 @@ public enum SplitBar {
                 name: other ? "Other" : list[0].key.name,
                 shortName: other ? "Other" : list[0].key.shortName,
                 bytes: sum, safeBytes: list.reduce(Int64(0)) { $0 + (safe[$1.key] ?? 0) },
-                share: Double(sum) / Double(total), isOther: other)
+                share: Double(sum) / Double(total), isOther: other,
+                blockedBytes: list.reduce(Int64(0)) { $0 + (blocked[$1.key] ?? 0) },
+                blockingApps: list.reduce(into: Set<String>()) { $0.formUnion(apps[$1.key] ?? []) }.sorted())
         }
 
         // If only one group is left over, it keeps its own name.

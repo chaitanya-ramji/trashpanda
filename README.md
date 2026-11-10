@@ -20,11 +20,11 @@ The picture uses made-up data.
 Click the panda in the menu bar. The menu shows:
 
 - The free space and the total space of your disk.
-- A bar that shows where the data that you can clean is. Its whole width is that data. It is split by language or tool, and a short legend names the largest three.
+- A bar that shows where the data that you can clean is. It has one part for each line below it that shows a size, and each part has the size of its line. A short legend names the largest three.
 - The space that you can reclaim now.
 - One line for each language or tool. Open a line to see each item.
 
-**Hover** a part of the bar to see its name, its size, its share, and how much of it is safe. **Click** a part to open the items of that language or tool. An item of an app that is open, and a line that is for information only, are not in the bar.
+**Hover** a part of the bar to see its name, its size, its share, and how much of it is safe. **Click** a part to open the items of that language or tool. An item of an app that is open stays in the bar, with a light striped fill. The hover tells you which app to quit. A line that is for information only has no part. When an app opens or quits, the bar and the lines change.
 
 <p align="center">
   <img src="assets/menu-hover.png" width="340" alt="The same menu with the mouse over the JavaScript part of the bar. The line under the title reads JavaScript and TypeScript, 3.7 GB, 15 percent, 2.2 GB safe.">
