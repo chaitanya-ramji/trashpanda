@@ -88,6 +88,7 @@ The menu shows the cost to get an item back. The cost is seconds, minutes, or a 
 
 Trash Panda deletes files for good. They do not go to the Trash. These rules reduce the risk:
 
+- Check for updates: once a day, and when you choose "Check for updates…", the app asks the GitHub releases of this project for the list of releases (`api.github.com`) and shows the menu line "Update available: <version>…" when a newer one exists. A beta sees newer betas and newer stable versions. A stable version sees stable versions only. The line opens the release page in your browser, and only a page on `github.com` in this repository is opened. **The app never downloads or installs an update.** The request has no body, no cookie, no id, no version, and a general name (`TrashPanda`) as user agent, and it uses a session that stores nothing, so GitHub sees an IP address and a request, as for any web page. The menu item "Check for updates every day" turns the automatic check off (it is on by default).
 - A list in a group menu that has more than 12 rows shows the first 12, and the rest open in a submenu ("N more…"), so that no row is hidden.
 - The cache explorer is a read-only list of the 10 largest folders in `~/Library/Caches` (at least 10 MB). It has no action and is in no total, so nothing can be removed from it. Each folder is labelled `can clean` (Trash Panda has an item for it in the group of its tool), `keep` (with a short reason, for example `CloudKit` is iCloud data and `com.apple.*` is managed by macOS), or `unknown` (we do not know the owner, so it is never removed). A folder that is a bundle ID of an installed app shows the name of the app.
 - Time Machine local snapshots: when `tmutil listlocalsnapshots /` shows snapshots, the menu has one information line with their number and the age of the oldest, and says in one sentence that they can hold space that deleting files does not free at once. Trash Panda only reads the list. It never deletes or thins a snapshot (a test forbids those commands). The link opens a search of Apple Support, because I could not confirm one Apple page.
@@ -295,7 +296,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 ### Later: v1.0 Signed and stable
 - [ ] Notarize the app and publish signed releases ([#30](https://github.com/chaitanya-ramji/trashpanda/issues/30))
 - [ ] Homebrew cask and tap ([#31](https://github.com/chaitanya-ramji/trashpanda/issues/31))
-- [ ] Check for updates ([#32](https://github.com/chaitanya-ramji/trashpanda/issues/32))
+- [x] Check for updates ([#32](https://github.com/chaitanya-ramji/trashpanda/issues/32))
 - [ ] Move to Trash delete mode ([#33](https://github.com/chaitanya-ramji/trashpanda/issues/33))
 - [ ] Low-disk alert ([#34](https://github.com/chaitanya-ramji/trashpanda/issues/34))
 - [ ] Scheduled clean (opt in) ([#35](https://github.com/chaitanya-ramji/trashpanda/issues/35))
