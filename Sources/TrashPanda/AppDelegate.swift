@@ -216,6 +216,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if activity == .idle { statusItem.button?.image = panda }
         let text = cleaning ? "Cleaning…" : (flash ?? Format.bytes(disk.free))
         statusItem.button?.title = " \(text)"
+        let label = MenuText.statusLabel(free: disk.free, total: disk.total, activity: activity)
+        statusItem.button?.setAccessibilityLabel(label.accessibility)
+        statusItem.button?.toolTip = label.tooltip
     }
 
     // MARK: Menu
