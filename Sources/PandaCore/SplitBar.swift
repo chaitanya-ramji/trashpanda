@@ -89,14 +89,43 @@ public struct SplitTotals: Equatable, Sendable {
 
     public var all: Int64 { free + review + waiting }
 
+    /// How many words the line uses. The menu picks the longest one that fits.
+    public enum Wording: CaseIterable, Sendable {
+        case long, compact, short
+    }
+
     /// "You can free 1.5 GB now · 1.4 GB to look through · 491 MB when apps quit".
     /// With `compact`, the words are shorter, for a narrow menu.
-    public func summary(compact: Bool = false) -> String {
+    public func summary(compact: Bool = false) -> String { summary(compact ? .compact : .long) }
+
+    /// The same three numbers in three lengths:
+    /// long "You can free 1.5 GB now · 1.4 GB to look through · 491 MB when apps quit",
+    /// compact "Free 1.5 GB now · 1.4 GB to review · 491 MB in open apps",
+    /// short "Free 1.5 GB · 1.4 GB review · 491 MB in apps". The short one keeps all three numbers.
+    public func summary(_ wording: Wording) -> String {
         guard all > 0 else { return "All tidy. Nothing to clean." }
         var parts: [String] = []
-        if free > 0 { parts.append(compact ? "Free \(ByteText.string(free)) now" : "You can free \(ByteText.string(free)) now") }
-        if review > 0 { parts.append(compact ? "\(ByteText.string(review)) to review" : "\(ByteText.string(review)) to look through") }
-        if waiting > 0 { parts.append(compact ? "\(ByteText.string(waiting)) in open apps" : "\(ByteText.string(waiting)) when apps quit") }
+        if free > 0 {
+            switch wording {
+            case .long: parts.append("You can free \(ByteText.string(free)) now")
+            case .compact: parts.append("Free \(ByteText.string(free)) now")
+            case .short: parts.append("Free \(ByteText.string(free))")
+            }
+        }
+        if review > 0 {
+            switch wording {
+            case .long: parts.append("\(ByteText.string(review)) to look through")
+            case .compact: parts.append("\(ByteText.string(review)) to review")
+            case .short: parts.append("\(ByteText.string(review)) review")
+            }
+        }
+        if waiting > 0 {
+            switch wording {
+            case .long: parts.append("\(ByteText.string(waiting)) when apps quit")
+            case .compact: parts.append("\(ByteText.string(waiting)) in open apps")
+            case .short: parts.append("\(ByteText.string(waiting)) in apps")
+            }
+        }
         return parts.joined(separator: " · ")
     }
 }
@@ -221,7 +250,7 @@ public enum SplitBar {
     /// Places the parts across `width`. Each part is at least `minWidth` wide, so that it can be seen and chosen.
     /// The widths and the gaps add up to `width`.
     public static func layout(_ segments: [SplitSegment], width: CGFloat, gap: CGFloat = 1.5,
-                              minWidth: CGFloat = 4) -> [SplitSlot] {
+                              minWidth: CGFloat = 6) -> [SplitSlot] {
         guard !segments.isEmpty else { return [] }
         let available = max(0, width - gap * CGFloat(segments.count - 1))
         let count = CGFloat(segments.count)

@@ -167,7 +167,8 @@ public struct MenuModel: Equatable, Sendable {
 
         var rows: [Row] = [Row(kind: .header), .separator]
         if cleaning {
-            rows.append(.note(input.cleaningTitle ?? "Cleaning…"))
+            // The progress text is in the header, under the title. The row says only what happens.
+            rows.append(.note("Cleaning…"))
             rows.append(Row(title: input.stopRequested ? "Stopping after this item…" : "Stop after this item",
                             enabled: !input.stopRequested, action: .stopClean))
         } else if input.hasResult {

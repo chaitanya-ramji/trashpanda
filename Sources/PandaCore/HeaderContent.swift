@@ -15,7 +15,8 @@ public struct HeaderContent: Equatable, Sendable {
     public let bar: Bar
     /// The text of the line under the title. nil means the summary of the totals ("You can free 1.5 GB now ...").
     public let detail: String?
-    /// How strong the bar and the legend dot are drawn. It is lower while the data is old and is being checked again.
+    /// How strong the fills of the bar are drawn (the legend dots stay as they are). It is lower while the data is old and is being
+    /// checked again. Dark mode uses `HeaderStyle.refreshingAlpha` instead, because 0.6 is muddy on a dark menu.
     public let barAlpha: CGFloat
     /// True while the app scans or cleans. The header shows its spinner then.
     public let busy: Bool
@@ -28,6 +29,32 @@ public struct HeaderContent: Equatable, Sendable {
     public static let pillWidths: [CGFloat] = [58, 74, 46]
 
     public var showsSkeleton: Bool { bar == .skeleton }
+
+    /// The old data is on screen while the app checks it again or cleans.
+    public var isRefreshing: Bool { barAlpha < 1 }
+
+    /// A finished scan with nothing to clean: the header shows a calm "done" look.
+    public var isDone: Bool { bar == .emptyTrack && !busy }
+
+    /// What the header does when the state changes while the menu is open.
+    public enum LiveUpdate: Equatable, Sendable {
+        /// Only the detail line, the spinner and the strength of the bar change. The parts, the numbers and the colors stay,
+        /// like the group rows below them.
+        case detailOnly(HeaderContent)
+        /// The menu still shows the skeleton and "Scanning…" rows, and the first result is here: build the whole menu.
+        case rebuildMenu
+    }
+
+    /// `built` is what the open menu shows. `now` is what the model says now.
+    public static func liveUpdate(built: HeaderContent, now: HeaderContent) -> LiveUpdate {
+        if built.showsSkeleton && !now.showsSkeleton { return .rebuildMenu }
+        return .detailOnly(now.keepingBar(of: built))
+    }
+
+    /// The same content with the kind of bar of `other`.
+    public func keepingBar(of other: HeaderContent) -> HeaderContent {
+        showsSkeleton || other.showsSkeleton ? self : HeaderContent(bar: other.bar, detail: detail, barAlpha: barAlpha, busy: busy, isInteractive: isInteractive)
+    }
 
     /// - Parameters:
     ///   - activity: what the app does now.

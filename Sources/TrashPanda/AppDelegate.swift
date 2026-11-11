@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private(set) var header = StorageHeaderView(frame: .zero)
     /// True while `menuWillOpen` runs. It builds the menu once, so a change in it does not build a second time.
     private var isOpening = false
+    /// What the header of the last build shows. The live path compares with it.
+    private var builtContent = HeaderContent.make(activity: .scanning, hasResult: false, hasParts: false)
     private let scanner = DiskScanner()
     private lazy var builder = MenuBuilder { [weak self] action in self?.handle(action) }
     private lazy var cleaner: CleanCoordinator = {
@@ -106,11 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isOpening = false
         rebuildMenu()
         refreshGate.opened()
+        header.isMenuOpen = true
         refreshRunning()
     }
 
     func menuDidClose(_ menu: NSMenu) {
         guard menu === self.menu else { return }
+        header.isMenuOpen = false   // the timer of the header stops
         if refreshGate.closed() { rebuildMenu() }
     }
 
@@ -193,10 +197,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rebuildMenu()
         case .updateLiveRows:
             let model = MenuModel.make(menuInput())
-            header.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content,
-                          segments: model.header.segments)
-            builder.updateLiveRows(model: model)
-            builder.invalidate()   // the open menu no longer shows the last build
+            // The group rows keep their numbers while the menu is open, so the header keeps its parts too. The exception is a menu
+            // that still shows the skeleton: the first result builds the whole menu.
+            switch HeaderContent.liveUpdate(built: builtContent, now: model.header.content) {
+            case .rebuildMenu:
+                rebuildMenu()
+            case .detailOnly(let content):
+                header.updateLive(content: content)
+                builder.updateLiveRows(model: model)
+                builder.invalidate()   // the open menu no longer shows the last build
+            }
         }
     }
 
@@ -205,6 +215,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A new header view for each build. An equal model builds nothing.
         guard let fresh = builder.rebuild(menu, model: model, onSelect: { [weak self] segment in self?.showGroup(segment) }) else { return }
         header = fresh
+        header.isMenuOpen = refreshGate.isOpen
+        builtContent = model.header.content
         if let index = model.rows.firstIndex(where: { $0.title == "Settings" && $0.submenu != nil }),
            menu.items.indices.contains(index) {
             menu.items[index].submenu?.delegate = self

@@ -134,7 +134,7 @@ final class HeaderRenderTests: XCTestCase {
         let solid = try pixel(widths.safe / 2)
         let pale = try pixel(widths.safe + widths.review / 2)
         XCTAssertGreaterThan(brightness(pale), brightness(solid) + 0.15, "the review share is lighter than the solid share")
-        XCTAssertGreaterThan(pale.alphaComponent, 0.95, "in dark mode the pale color is made with white, not with a lower alpha")
+        XCTAssertEqual(pale.alphaComponent, 0.70, accuracy: 0.05, "in dark mode the pale color is white mixed in, at 0.7 alpha: paler, not brighter than the solid fill")
     }
 
     /// Dark mode with a line pattern: the pale fill is lighter than the solid color too, and the lines keep the full color.
@@ -438,6 +438,7 @@ final class HeaderRenderTests: XCTestCase {
         window.contentView = host
         let view = StorageHeaderView(frame: .zero)
         view.settingsOverride = HeaderSettings()
+        view.isMenuOpen = true
         func feed(_ activity: MenuModel.Activity, hasResult: Bool) {
             view.update(disk: DiskUsage(total: 245_000_000_000, free: 137_000_000_000), totals: SplitTotals(free: 0, review: 0, waiting: 0),
                         content: HeaderContent.make(activity: activity, hasResult: hasResult, hasParts: false), segments: [])
@@ -453,6 +454,10 @@ final class HeaderRenderTests: XCTestCase {
         view.isHidden = true
         XCTAssertFalse(view.isAnimating, "hidden")
         view.isHidden = false
+        XCTAssertTrue(view.isAnimating)
+        view.isMenuOpen = false
+        XCTAssertFalse(view.isAnimating, "the menu is closed: the timer never runs")
+        view.isMenuOpen = true
         XCTAssertTrue(view.isAnimating)
         view.removeFromSuperview()
         XCTAssertFalse(view.isAnimating, "not in a window")

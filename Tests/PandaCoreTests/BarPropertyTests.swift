@@ -218,7 +218,7 @@ final class BarPropertyTests: XCTestCase {
                 }
                 XCTAssertEqual(slots.first?.x, 0)
                 for (i, s) in slots.enumerated() {
-                    XCTAssertGreaterThanOrEqual(s.width, 4 - 0.001, "seed \(seed) width \(width): part \(i) is too thin to see or choose")
+                    XCTAssertGreaterThanOrEqual(s.width, 6 - 0.001, "seed \(seed) width \(width): part \(i) is too thin to see or choose")
                     // The middle of a part chooses that part.
                     XCTAssertEqual(SplitBar.hit(slots, x: s.x + s.width / 2), i, "seed \(seed)")
                 }

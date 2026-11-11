@@ -19,7 +19,7 @@ final class BarDefectTests: XCTestCase {
             let slots = SplitBar.layout(parts, width: width)
             let end = slots.last.map { $0.x + $0.width } ?? 0
             XCTAssertEqual(end, width, accuracy: 0.001)
-            for s in slots { XCTAssertGreaterThanOrEqual(s.width, 4 - 0.001, "width \(width): \(slots)") }
+            for s in slots { XCTAssertGreaterThanOrEqual(s.width, 6 - 0.001, "width \(width): \(slots)") }
         }
     }
 

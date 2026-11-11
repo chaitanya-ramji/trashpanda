@@ -24,10 +24,10 @@ public struct HeaderStyle: Equatable, Sendable {
     public let stripeFillAlpha: CGFloat
     /// Alpha of the stripe lines.
     public let stripeLineAlpha: CGFloat
-    /// Alpha of the review share of a part. In light mode it is lower than 1, so the review share is paler than the safe share.
+    /// Alpha of the review share of a part. It is lower than 1 in both modes, so the review share is paler than the safe share.
     public let reviewFillAlpha: CGFloat
-    /// How much white is mixed into the color of the review share (0 to 1). In dark mode a lower alpha only makes a darker color,
-    /// so the review share is lighter by mixing in white.
+    /// How much white is mixed into the color of the review share (0 to 1). In dark mode a lower alpha alone only makes a darker
+    /// color. With white mixed in, the review share is less saturated and see-through: paler, not darker.
     public let reviewWhiteMix: CGFloat
     /// A 1 point line between two parts.
     public let separatorsBetweenParts: Bool
@@ -41,19 +41,24 @@ public struct HeaderStyle: Equatable, Sendable {
     public let showSpinner: Bool
 
     /// The skeleton: the alpha of the grey track and pills (of the label color), and of the white shimmer band.
+    /// How strong the bar is drawn while the old data is checked again. Dark mode needs more than light mode.
+    public let refreshingAlpha: CGFloat
     public let skeletonAlpha: CGFloat
     public let shimmerAlpha: CGFloat
     /// The shimmer moves only when motion is allowed. With "Reduce motion" the skeleton is still.
     public let animateSkeleton: Bool
+    public let darkMode: Bool
 
     public init(_ settings: HeaderSettings) {
+        refreshingAlpha = settings.darkMode ? 0.75 : HeaderContent.refreshingAlpha
         skeletonAlpha = settings.increaseContrast ? 0.20 : (settings.darkMode ? 0.14 : 0.09)
         shimmerAlpha = settings.darkMode ? 0.10 : 0.65
         animateSkeleton = !settings.reduceMotion
+        darkMode = settings.darkMode
         // "Increase contrast" gives 0.6. In dark mode the light fill needs a little more to be seen.
         stripeFillAlpha = settings.increaseContrast ? 0.6 : (settings.darkMode ? 0.40 : 0.30)
         stripeLineAlpha = settings.increaseContrast ? 1 : 0.85
-        reviewFillAlpha = settings.darkMode ? 1 : 0.50
+        reviewFillAlpha = settings.darkMode ? 0.70 : 0.50
         reviewWhiteMix = settings.darkMode ? 0.45 : 0
         separatorsBetweenParts = settings.increaseContrast
         // "Increase contrast" asks for a clearer difference, so the review share gets the line pattern too.

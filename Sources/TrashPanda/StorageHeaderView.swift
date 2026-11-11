@@ -148,7 +148,8 @@ final class StorageHeaderView: NSView {
 
     /// Starts or stops the timer. It runs only while something moves, and only while the view is in a window.
     private func applyActivity() {
-        let interval = (window != nil && !isHidden) ? timerInterval : nil
+        // The timer runs only while the menu is open, the view is in a window, and nothing hides it.
+        let interval = (isMenuOpen && window != nil && !isHiddenOrHasHiddenAncestor) ? timerInterval : nil
         if animationTimer?.timeInterval != interval {
             animationTimer?.invalidate()
             animationTimer = nil
@@ -165,6 +166,11 @@ final class StorageHeaderView: NSView {
     private func tick() {
         if shimmers { setNeedsDisplay(splitBarRect.insetBy(dx: -1, dy: -1)) }
         if showsSpinner { setNeedsDisplay(spinnerRect.insetBy(dx: -1, dy: -1)) }
+    }
+
+    /// True while the menu that holds this header is open. The owner of the menu sets it. The timer never runs when it is false.
+    var isMenuOpen = false {
+        didSet { if isMenuOpen != oldValue { applyActivity() } }
     }
 
     /// True while the timer runs. Internal, so that a test can check that it stops.
@@ -223,6 +229,15 @@ final class StorageHeaderView: NSView {
         applyActivity()
     }
 
+    /// The state changed while the menu is open. Only what the model gives for a live change is taken: the detail line, the spinner
+    /// and the strength of the bar. The parts, the numbers and the colors stay, like the group rows below them.
+    func updateLive(content: HeaderContent) {
+        self.content = content
+        hovered = hovered.flatMap { segments.indices.contains($0) ? $0 : nil }
+        needsDisplay = true
+        applyActivity()
+    }
+
     /// Called when the width changes: the bar, the hit areas, and the spinner follow the menu width.
     private func relayout() {
         slots = SplitBar.layout(segments, width: barWidth)
@@ -247,7 +262,15 @@ final class StorageHeaderView: NSView {
         if let i = hovered, segments.indices.contains(i) {
             return fit(segments[i].hoverText, segments[i].hoverText(shortName: true))
         }
-        return content.detail ?? fit(totals.summary(), totals.summary(compact: true))
+        if let text = content.detail { return text }
+        // Three lengths of the same line. The longest one that fits is used. The short one keeps all three numbers.
+        let tiers = SplitTotals.Wording.allCases.map { totals.summary($0) }
+        return tiers.first { $0.size(withAttributes: [.font: Self.detailFont]).width <= room } ?? tiers[tiers.count - 1]
+    }
+
+    /// Where the detail line is drawn. Internal, so that a test can look at the pixels in it.
+    var detailRowRect: NSRect {
+        NSRect(x: Self.inset, y: rows.detailY, width: bounds.width - Self.inset - Self.rightInset, height: Self.lineHeight(Self.detailFont))
     }
 
     private func color(_ index: Int) -> NSColor {
@@ -334,7 +357,7 @@ final class StorageHeaderView: NSView {
             ])
         let truncate = NSMutableParagraphStyle()
         truncate.lineBreakMode = .byTruncatingTail
-        detail.draw(in: NSRect(x: inset, y: layout.detailY, width: bounds.width - inset - Self.rightInset, height: Self.lineHeight(Self.detailFont)), withAttributes: [
+        detail.draw(in: detailRowRect, withAttributes: [
             .paragraphStyle: truncate,
             .font: Self.detailFont,
             .foregroundColor: hovered == nil ? NSColor.secondaryLabelColor : NSColor.labelColor,
@@ -360,9 +383,13 @@ final class StorageHeaderView: NSView {
     private var skeletonColor: NSColor { NSColor.labelColor.withAlphaComponent(style.skeletonAlpha) }
 
     /// A quiet track in the shape of the bar.
+    /// A finished scan with nothing to clean has a calm "done" look: the track is tinted green, and the legend row says so.
     private func drawTrack() {
-        skeletonColor.setFill()
+        (content.isDone ? NSColor.systemGreen.withAlphaComponent(style.darkMode ? 0.30 : 0.22) : skeletonColor).setFill()
         NSBezierPath(roundedRect: splitBarRect, xRadius: Self.barRadius, yRadius: Self.barRadius).fill()
+        guard content.isDone else { return }
+        let attributes: [NSAttributedString.Key: Any] = [.font: Self.legendFont, .foregroundColor: NSColor.secondaryLabelColor]
+        "Nothing to clean".draw(at: NSPoint(x: Self.inset, y: legendY), withAttributes: attributes)
     }
 
     /// The structure of the header before the first result: a track where the bar will be, a shimmer that moves over it,
@@ -408,8 +435,10 @@ final class StorageHeaderView: NSView {
             // A part that is not under the mouse gets lighter. The floor is on the final alpha of each fill,
             // so a pale part (a review share, or stripes) stays visible.
             let dimmed = style.dimOtherParts && hovered != nil && hovered != i
-            let refresh = content.barAlpha
+            // While the old data is checked again, the fills are lighter. The lines of a pattern keep their alpha, so they stay sharp.
+            let refresh = content.isRefreshing ? style.refreshingAlpha : 1
             let fade: (CGFloat) -> CGFloat = dimmed ? { SplitBar.dimmedAlpha($0 * SplitBar.hoverDimFactor * refresh) } : { $0 * refresh }
+            let lineFade: (CGFloat) -> CGFloat = dimmed ? { SplitBar.dimmedAlpha($0 * SplitBar.hoverDimFactor) } : { $0 }
             let rect = NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height)
             let widths = SplitBar.partWidths(s, width: rect.width)
             // `divided` returns the slice first and the remainder second.
@@ -419,13 +448,13 @@ final class StorageHeaderView: NSView {
             solid.fill()
             if widths.review > 0 {
                 if style.patternForReview {
-                    drawLines(in: review, index: i, fade: fade, style: style)
+                    drawLines(in: review, index: i, fade: fade, lineFade: lineFade, style: style)
                 } else {
                     reviewColor(i, style: style).withAlphaComponent(fade(style.reviewFillAlpha)).setFill()
                     review.fill()
                 }
             }
-            if widths.blocked > 0 { drawStripes(in: open, color: color(i), fade: fade, style: style) }
+            if widths.blocked > 0 { drawStripes(in: open, color: color(i), fade: fade, lineFade: lineFade, style: style) }
             // With "Increase contrast", a thin line sets two parts apart.
             if style.separatorsBetweenParts, i > 0 {
                 NSColor.separatorColor.setFill()
@@ -444,7 +473,7 @@ final class StorageHeaderView: NSView {
     }
 
     /// A light fill with diagonal stripes. It marks data that waits for an app to quit.
-    private func drawStripes(in rect: NSRect, color: NSColor, fade: (CGFloat) -> CGFloat, style: HeaderStyle) {
+    private func drawStripes(in rect: NSRect, color: NSColor, fade: (CGFloat) -> CGFloat, lineFade: (CGFloat) -> CGFloat, style: HeaderStyle) {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: rect).addClip()
         color.withAlphaComponent(fade(style.stripeFillAlpha)).setFill()
@@ -457,14 +486,14 @@ final class StorageHeaderView: NSView {
             path.line(to: NSPoint(x: x + rect.height, y: rect.maxY))
             x += 4
         }
-        color.withAlphaComponent(fade(style.stripeLineAlpha)).setStroke()
+        color.withAlphaComponent(lineFade(style.stripeLineAlpha)).setStroke()
         path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
 
     /// A light fill with horizontal lines. It marks data that you should look at first, without a change of color.
     /// The lines are not the stripes of data that waits for an app.
-    private func drawLines(in rect: NSRect, index: Int, fade: (CGFloat) -> CGFloat, style: HeaderStyle) {
+    private func drawLines(in rect: NSRect, index: Int, fade: (CGFloat) -> CGFloat, lineFade: (CGFloat) -> CGFloat, style: HeaderStyle) {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: rect).addClip()
         // The same pale fill as the review share without a pattern (white mixed in dark mode), with lines in the full color.
@@ -478,7 +507,7 @@ final class StorageHeaderView: NSView {
             path.line(to: NSPoint(x: rect.maxX, y: y))
             y += 3
         }
-        color(index).withAlphaComponent(fade(style.stripeLineAlpha)).setStroke()
+        color(index).withAlphaComponent(lineFade(style.stripeLineAlpha)).setStroke()
         path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }

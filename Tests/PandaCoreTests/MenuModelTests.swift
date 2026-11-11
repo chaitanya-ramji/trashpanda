@@ -96,7 +96,8 @@ final class MenuModelTests: XCTestCase {
         var i = input(fixture(), cleaning: true)
         i.cleaningTitle = "Cleaning 3 of 38 · Xcode build data"
         var model = MenuModel.make(i)
-        XCTAssertEqual(model.rows[2].title, "Cleaning 3 of 38 · Xcode build data")
+        XCTAssertEqual(model.rows[2].title, "Cleaning…", "The progress text is in the header, not in the row")
+        XCTAssertEqual(model.header.content.detail, "Cleaning 3 of 38 · Xcode build data")
         XCTAssertEqual(model.rows[3].title, "Stop after this item")
         XCTAssertEqual(model.rows[3].action, .stopClean)
         XCTAssertTrue(model.rows[3].enabled)
