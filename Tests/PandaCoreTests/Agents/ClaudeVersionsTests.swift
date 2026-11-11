@@ -229,7 +229,8 @@ final class ClaudeVersionsTests: XCTestCase {
         let item = try XCTUnwrap(s.scanClaudeVersions().first)
         let report = cleaner(box).clean([item])
         XCTAssertEqual(report.removed, 1)
-        XCTAssertEqual(report.freed, item.bytes)
+        // The clean measures the space on disk (whole blocks) right before the delete. The scan counted the size of the files.
+        XCTAssertTrue(report.freed >= item.bytes && report.freed < item.bytes + 100_000, "\(report.freed) vs \(item.bytes)")
         XCTAssertFalse(exists(box, "\(dir)/2.1.314") || exists(box, "\(dir)/2.1.319"))
         XCTAssertTrue(exists(box, "\(dir)/2.1.321"))
         XCTAssertTrue(exists(box, ".local/share/claude/settings.json"))
