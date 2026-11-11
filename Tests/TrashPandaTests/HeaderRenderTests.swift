@@ -13,7 +13,7 @@ final class HeaderRenderTests: XCTestCase {
 
     /// Draws the header and returns the bitmap and the view.
     private func render(_ findings: [Finding], blocked: Set<Ecosystem>, width: CGFloat = 372, settings: HeaderSettings = HeaderSettings(),
-                        name: String? = nil)
+                        name: String? = nil, hover: Int? = nil)
         -> (NSBitmapImageRep, StorageHeaderView, [SplitSegment]) {
         let segments = SplitBar.segments(from: findings, blockers: { blocked.contains($0.ecosystem) ? ["Some App"] : [] })
         let totals = SplitBar.totals(from: findings, blockers: { blocked.contains($0.ecosystem) ? ["Some App"] : [] })
@@ -23,11 +23,10 @@ final class HeaderRenderTests: XCTestCase {
         view.appearance = NSAppearance(named: settings.darkMode ? .darkAqua : .aqua)
         view.update(disk: DiskUsage(total: 245_000_000_000, free: 137_000_000_000), totals: totals, activity: .idle, segments: segments)
         view.setFrameSize(NSSize(width: width, height: view.preferredHeight))
+        view.setHovered(hover)
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
         view.cacheDisplay(in: view.bounds, to: rep)
-        if let dir = ProcessInfo.processInfo.environment["HEADER_PNG_DIR"], let name, let png = rep.representation(using: .png, properties: [:]) {
-            try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + ".png"))
-        }
+        RenderSupport.writePNG(rep, name: name, dark: settings.darkMode)
         return (rep, view, segments)
     }
 
@@ -104,25 +103,6 @@ final class HeaderRenderTests: XCTestCase {
         XCTAssertGreaterThan(reviewAlpha, 0.3, "and it can still be seen")
     }
 
-    /// The same case in dark mode: the review parts are lighter than a solid part of the same color, not darker.
-    func testInDarkModeTheReviewShareIsLighterThanTheSafeShare() throws {
-        let (rep, view, segments) = render([finding("a", .docker, 500, .safe), finding("b", .javascript, 500, .review)], blocked: [],
-                                           settings: HeaderSettings(darkMode: true), name: "mixed-dark")
-        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
-        let bar = SplitBar.layout(segments, width: view.splitBarRect.width)
-        let row = barRow(rep, view: view)
-        let safeIndex = try XCTUnwrap(segments.firstIndex { $0.safeBytes > 0 })
-        let reviewIndex = try XCTUnwrap(segments.firstIndex { $0.safeBytes == 0 })
-        func brightness(_ index: Int) throws -> CGFloat {
-            let x = Int((view.splitBarRect.minX + bar[index].x + bar[index].width / 2) * scale)
-            let c = try XCTUnwrap(rep.colorAt(x: x, y: row)?.usingColorSpace(.sRGB))
-            return (c.redComponent + c.greenComponent + c.blueComponent) / 3
-        }
-        XCTAssertGreaterThan(try brightness(reviewIndex), try brightness(safeIndex) - 0.01, "the review part is not darker than the solid color")
-        let reviewColor = try XCTUnwrap(rep.colorAt(x: Int((view.splitBarRect.minX + bar[reviewIndex].x + bar[reviewIndex].width / 2) * scale), y: row))
-        XCTAssertGreaterThan(reviewColor.alphaComponent, 0.95, "in dark mode the pale color is made with white, not with a lower alpha")
-    }
-
     /// With "Increase contrast" or "Differentiate without color", the review share has a line pattern: its pixels change along the part.
     func testTheReviewShareHasALinePatternWhenTheSettingsAskForIt() throws {
         for settings in [HeaderSettings(increaseContrast: true), HeaderSettings(differentiateWithoutColor: true)] {
@@ -137,9 +117,124 @@ final class HeaderRenderTests: XCTestCase {
         }
     }
 
+    /// In dark mode the review share is lighter than the solid share of the SAME color, not darker.
+    /// One group has both: 500 MB safe (solid) and 300 MB to look through (pale).
+    func testInDarkModeTheReviewShareIsLighterThanTheSolidShareOfTheSameColor() throws {
+        let (rep, view, segments) = render([finding("a", .docker, 500, .safe), finding("b", .docker, 300, .review)], blocked: [],
+                                           settings: HeaderSettings(darkMode: true), name: "same-hue-dark")
+        XCTAssertEqual(segments.count, 1)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let widths = SplitBar.partWidths(segments[0], width: view.splitBarRect.width)
+        XCTAssertGreaterThan(widths.safe, 20)
+        XCTAssertGreaterThan(widths.review, 20)
+        let row = barRow(rep, view: view)
+        func pixel(_ x: CGFloat) throws -> NSColor { try XCTUnwrap(rep.colorAt(x: Int((view.splitBarRect.minX + x) * scale), y: row)?.usingColorSpace(.sRGB)) }
+        func brightness(_ c: NSColor) -> CGFloat { (c.redComponent + c.greenComponent + c.blueComponent) / 3 }
+        let solid = try pixel(widths.safe / 2)
+        let pale = try pixel(widths.safe + widths.review / 2)
+        XCTAssertGreaterThan(brightness(pale), brightness(solid) + 0.15, "the review share is lighter than the solid share")
+        XCTAssertGreaterThan(pale.alphaComponent, 0.95, "in dark mode the pale color is made with white, not with a lower alpha")
+    }
+
+    /// Dark mode with a line pattern: the pale fill is lighter than the solid color too, and the lines keep the full color.
+    func testInDarkModeWithAPatternTheReviewFillIsLighterThanTheSolidShare() throws {
+        let (rep, view, segments) = render([finding("a", .docker, 500, .safe), finding("b", .docker, 300, .review)], blocked: [],
+                                           settings: HeaderSettings(increaseContrast: true, darkMode: true), name: "pattern-dark")
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let widths = SplitBar.partWidths(segments[0], width: view.splitBarRect.width)
+        let row = barRow(rep, view: view)
+        func brightness(_ x: CGFloat, _ y: Int) throws -> CGFloat {
+            let c = try XCTUnwrap(rep.colorAt(x: Int((view.splitBarRect.minX + x) * scale), y: y)?.usingColorSpace(.sRGB))
+            return (c.redComponent + c.greenComponent + c.blueComponent) / 3
+        }
+        let solid = try brightness(widths.safe / 2, row)
+        // The brightest pixel in a column of the pale share is the fill between two lines.
+        let x = widths.safe + widths.review / 2
+        let top = Int((view.bounds.height - view.splitBarRect.maxY + 2) * scale), bottom = Int((view.bounds.height - view.splitBarRect.minY - 2) * scale)
+        let brightest = try (top..<bottom).map { try brightness(x, $0) }.max() ?? 0
+        XCTAssertGreaterThan(brightest, solid + 0.15, "the fill between the lines is lighter than the solid color")
+    }
+
+    /// While the mouse is on one part, the pale part and the solid part that are not under it stay visible.
+    func testPartsThatAreNotHoveredStayVisible() throws {
+        // Part 0 is the largest (solid, safe). Another is review only. Another has blocked data (stripes).
+        let findings = [finding("a", .docker, 600, .safe), finding("b", .javascript, 300, .review), finding("c", .browsers, 200, .safe)]
+        for dark in [false, true] {
+            let (rep, view, segments) = render(findings, blocked: [.browsers], settings: HeaderSettings(darkMode: dark),
+                                               name: "hover-\(dark ? "dark" : "light")", hover: 0)
+            let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+            let bar = SplitBar.layout(segments, width: view.splitBarRect.width)
+            let row = barRow(rep, view: view)
+            func a(_ i: Int) -> CGFloat { alpha(rep, Int((view.splitBarRect.minX + bar[i].x + bar[i].width / 2) * scale), row) }
+            let review = try XCTUnwrap(segments.firstIndex { $0.safeBytes == 0 && $0.blockedBytes == 0 })
+            XCTAssertGreaterThanOrEqual(a(review), 0.21, "a pale part under another hover is visible (dark \(dark))")
+            XCTAssertGreaterThanOrEqual(a(0), 0.95, "the hovered part is solid")
+            let blocked = try XCTUnwrap(segments.firstIndex { $0.blockedBytes > 0 })
+            var most: CGFloat = 0
+            let from = Int((view.splitBarRect.minX + bar[blocked].x + 2) * scale)
+            let to = Int((view.splitBarRect.minX + bar[blocked].x + bar[blocked].width - 2) * scale)
+            for x in from..<to { most = max(most, alpha(rep, x, row)) }
+            XCTAssertGreaterThanOrEqual(most, 0.22, "the stripes of a part under another hover are visible")
+        }
+        // A solid part that is not hovered is clearly visible too.
+        let (rep, view, segments) = render(findings, blocked: [], name: "hover-solid", hover: 1)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let bar = SplitBar.layout(segments, width: view.splitBarRect.width)
+        let solid = try XCTUnwrap(segments.firstIndex { $0.safeBytes > 0 })
+        XCTAssertGreaterThanOrEqual(alpha(rep, Int((view.splitBarRect.minX + bar[solid].x + bar[solid].width / 2) * scale), barRow(rep, view: view)), 0.29)
+    }
+
+    /// With "Reduce transparency" the hovered part has an outline. At the round end of the bar, nothing sticks out.
+    func testTheHoverOutlineStaysInsideTheRoundedEnds() throws {
+        let (rep, view, _) = render(ownerCase, blocked: [], settings: HeaderSettings(reduceTransparency: true), name: "outline-first", hover: 0)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let bar = view.splitBarRect
+        // The very corner of the bar, outside the 5 point radius: nothing is drawn there.
+        for (cx, cy) in [(bar.minX + 0.6, bar.maxY - 0.6), (bar.minX + 0.6, bar.minY + 0.6)] {
+            XCTAssertLessThan(alpha(rep, Int(cx * scale), Int((view.bounds.height - cy) * scale)), 0.05, "the outline sticks out at the corner")
+        }
+        XCTAssertGreaterThan(alpha(rep, Int((bar.minX + 40) * scale), Int((view.bounds.height - bar.maxY + 0.5) * scale)), 0.5, "the outline is drawn along the top")
+    }
+
     /// The legend ends with "+N more" when parts are not named: the pixels right of the last entry are not empty.
-    func testTheLegendSaysHowManyPartsAreNotNamed() {
-        let (_, _, segments) = render(ownerCase, blocked: [.aiAgents, .browsers], name: "owner-legend")
+    func testTheLegendSaysHowManyPartsAreNotNamed() throws {
+        let (rep, view, segments) = render(ownerCase, blocked: [.aiAgents, .browsers], name: "owner-legend")
         XCTAssertEqual(segments.count, 5)
+        let plan = view.legendPlan
+        XCTAssertGreaterThan(plan.left, 0)
+        XCTAssertLessThan(plan.shown, 5)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let y = Int((view.bounds.height - view.legendY - 6) * scale)
+        var found = false
+        for x in Int(plan.endX * scale)..<Int((plan.endX + 40) * scale) {
+            for dy in -3...3 where alpha(rep, x, y + dy) > 0.2 { found = true }
+        }
+        XCTAssertTrue(found, "the text +\(plan.left) more is drawn right of the last entry")
+    }
+
+    /// The dot of a part that has only review data is pale in the middle and has a full ring.
+    /// The dot of a part that has only data of open apps is a ring with an empty middle.
+    func testLegendDotsOfReviewOnlyAndBlockedOnlyParts() throws {
+        let (rep, view, segments) = render([finding("a", .docker, 600, .safe), finding("b", .javascript, 300, .review),
+                                            finding("c", .browsers, 200, .safe)], blocked: [.browsers], name: "legend-dots")
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        XCTAssertEqual(view.legendPlan.shown, 3)
+        func sample(_ i: Int) -> (center: CGFloat, ring: CGFloat) {
+            let r = view.legendDotRect(i)
+            let y = Int((view.bounds.height - r.midY) * scale)
+            let center = alpha(rep, Int(r.midX * scale), y)
+            var ring: CGFloat = 0
+            for dx in -2...2 { ring = max(ring, alpha(rep, Int(r.minX * scale) + dx, y)) }
+            return (center, ring)
+        }
+        let review = try XCTUnwrap(segments.firstIndex { $0.safeBytes == 0 && $0.blockedBytes == 0 })
+        let blocked = try XCTUnwrap(segments.firstIndex { $0.isBlockedOnly })
+        let solid = try XCTUnwrap(segments.firstIndex { $0.safeBytes > 0 && $0.blockedBytes == 0 })
+        let r = sample(review), b = sample(blocked), s = sample(solid)
+        XCTAssertEqual(r.center, 0.5, accuracy: 0.12, "the middle of a review dot is pale")
+        XCTAssertGreaterThan(r.ring, 0.8, "a review dot has a full ring")
+        XCTAssertLessThan(b.center, 0.05, "a blocked dot is empty in the middle")
+        XCTAssertGreaterThan(b.ring, 0.8, "a blocked dot has a ring")
+        XCTAssertGreaterThan(s.center, 0.95, "a solid dot is full")
     }
 }

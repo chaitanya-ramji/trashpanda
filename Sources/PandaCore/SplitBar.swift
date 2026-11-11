@@ -19,6 +19,9 @@ public struct SplitSegment: Equatable, Sendable {
     /// The open apps that block `blockedBytes`, sorted by name.
     public var blockingApps: [String] = []
 
+    /// The part of `bytes` that you should look at first, and that can be cleaned now.
+    public var reviewBytes: Int64 { max(0, bytes - blockedBytes - safeBytes) }
+
     /// True when every item of the part belongs to an open app. The bar draws it lighter, with stripes.
     public var isBlockedOnly: Bool { bytes > 0 && blockedBytes >= bytes }
 
@@ -48,6 +51,8 @@ public struct SplitSegment: Equatable, Sendable {
     public func hoverText(shortName short: Bool) -> String {
         var text = "\(short ? shortName : name) · \(ByteText.string(bytes)) · \(percentText)"
         if safeBytes > 0 && safeBytes < bytes { text += " · \(ByteText.string(safeBytes)) safe" }
+        // The pale share of the bar: say what it is.
+        if reviewBytes > 0 { text += reviewBytes == bytes ? " · look through first" : " · \(ByteText.string(reviewBytes)) to look through" }
         if let blocked = blockedText { text += " · \(blocked)" }
         return text
     }
@@ -56,6 +61,7 @@ public struct SplitSegment: Equatable, Sendable {
     public var accessibilityLabel: String {
         let pct = share < 0.01 ? "less than 1 percent" : "\(Int((share * 100).rounded())) percent"
         var text = "\(name), \(ByteText.string(bytes)), \(pct) of what you can clean"
+        if reviewBytes > 0 { text += reviewBytes == bytes ? ", look through first" : ", \(ByteText.string(reviewBytes)) to look through" }
         if let blocked = blockedText { text += ", \(blocked)" }
         return text
     }

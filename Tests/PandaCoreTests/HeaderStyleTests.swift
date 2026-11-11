@@ -142,6 +142,8 @@ final class HeaderStyleTests: XCTestCase {
 
     func testADimmedPartStaysVisible() {
         XCTAssertGreaterThanOrEqual(SplitBar.dimmedAlpha(0.30 * 0.5), 0.22)
+        XCTAssertEqual(SplitBar.dimmedAlpha(0.15), 0.22, "the floor applies to the final alpha, not to the factor")
+        XCTAssertEqual(SplitBar.hoverDimFactor, 0.30)
         XCTAssertEqual(SplitBar.dimmedAlpha(0.8), 0.8)
     }
 

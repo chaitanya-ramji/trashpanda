@@ -57,7 +57,7 @@ final class StorageHeaderView: NSView {
     // MARK: Layout
 
     private static let width: CGFloat = 300
-    private static let inset: CGFloat = 16
+    static let inset: CGFloat = 16
     /// The chevrons of the rows below end about 20 points from the right edge of the menu. The bar ends there too.
     private static let rightInset: CGFloat = 20
     private static let splitBarHeight: CGFloat = 14
@@ -272,48 +272,53 @@ final class StorageHeaderView: NSView {
         guard !segments.isEmpty else { return }
         let bar = splitBarRect
         let style = self.style
+        let rounded = NSBezierPath(roundedRect: bar, xRadius: 5, yRadius: 5)
         NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(roundedRect: bar, xRadius: 5, yRadius: 5).addClip()
+        rounded.addClip()
         for (i, slot) in slots.enumerated() {
             let s = segments[i]
-            let alpha: CGFloat = style.dimOtherParts && hovered != nil && hovered != i ? SplitBar.dimmedAlpha(0.30) : 1
+            // A part that is not under the mouse gets lighter. The floor is on the final alpha of each fill,
+            // so a pale part (a review share, or stripes) stays visible.
+            let dimmed = style.dimOtherParts && hovered != nil && hovered != i
+            let fade: (CGFloat) -> CGFloat = dimmed ? { SplitBar.dimmedAlpha($0 * SplitBar.hoverDimFactor) } : { $0 }
             let rect = NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height)
             let widths = SplitBar.partWidths(s, width: rect.width)
             // `divided` returns the slice first and the remainder second.
             let (open, rest) = rect.divided(atDistance: widths.blocked, from: .maxXEdge)
             let (review, solid) = rest.divided(atDistance: widths.review, from: .maxXEdge)
-            color(i).withAlphaComponent(alpha).setFill()
+            color(i).withAlphaComponent(fade(1)).setFill()
             solid.fill()
             if widths.review > 0 {
                 if style.patternForReview {
-                    drawLines(in: review, color: color(i), alpha: alpha, style: style)
+                    drawLines(in: review, index: i, fade: fade, style: style)
                 } else {
-                    reviewColor(i, style: style).withAlphaComponent(style.reviewFillAlpha * alpha).setFill()
+                    reviewColor(i, style: style).withAlphaComponent(fade(style.reviewFillAlpha)).setFill()
                     review.fill()
                 }
             }
-            if widths.blocked > 0 { drawStripes(in: open, color: color(i), alpha: alpha, style: style) }
+            if widths.blocked > 0 { drawStripes(in: open, color: color(i), fade: fade, style: style) }
             // With "Increase contrast", a thin line sets two parts apart.
             if style.separatorsBetweenParts, i > 0 {
                 NSColor.separatorColor.setFill()
                 NSRect(x: rect.minX - 0.5, y: rect.minY, width: 1, height: rect.height).fill()
             }
         }
-        NSGraphicsContext.restoreGraphicsState()
+        // The outline is drawn inside the rounded bar, so its corners do not stick out of the round ends.
         if style.outlineHoveredPart, let i = hovered, slots.indices.contains(i) {
-            let rect = NSRect(x: bar.minX + slots[i].x, y: bar.minY, width: slots[i].width, height: bar.height).insetBy(dx: 0.5, dy: 0.5)
+            let rect = NSRect(x: bar.minX + slots[i].x, y: bar.minY, width: slots[i].width, height: bar.height)
             NSColor.labelColor.setStroke()
             let outline = NSBezierPath(rect: rect)
-            outline.lineWidth = 1
+            outline.lineWidth = 2
             outline.stroke()
         }
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// A light fill with diagonal stripes. It marks data that waits for an app to quit.
-    private func drawStripes(in rect: NSRect, color: NSColor, alpha: CGFloat, style: HeaderStyle) {
+    private func drawStripes(in rect: NSRect, color: NSColor, fade: (CGFloat) -> CGFloat, style: HeaderStyle) {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: rect).addClip()
-        color.withAlphaComponent(style.stripeFillAlpha * alpha).setFill()
+        color.withAlphaComponent(fade(style.stripeFillAlpha)).setFill()
         rect.fill()
         let path = NSBezierPath()
         path.lineWidth = 1.5
@@ -323,17 +328,18 @@ final class StorageHeaderView: NSView {
             path.line(to: NSPoint(x: x + rect.height, y: rect.maxY))
             x += 4
         }
-        color.withAlphaComponent(style.stripeLineAlpha * alpha).setStroke()
+        color.withAlphaComponent(fade(style.stripeLineAlpha)).setStroke()
         path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
 
     /// A light fill with horizontal lines. It marks data that you should look at first, without a change of color.
     /// The lines are not the stripes of data that waits for an app.
-    private func drawLines(in rect: NSRect, color: NSColor, alpha: CGFloat, style: HeaderStyle) {
+    private func drawLines(in rect: NSRect, index: Int, fade: (CGFloat) -> CGFloat, style: HeaderStyle) {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: rect).addClip()
-        color.withAlphaComponent(style.stripeFillAlpha * alpha).setFill()
+        // The same pale fill as the review share without a pattern (white mixed in dark mode), with lines in the full color.
+        reviewColor(index, style: style).withAlphaComponent(fade(style.reviewFillAlpha)).setFill()
         rect.fill()
         let path = NSBezierPath()
         path.lineWidth = 1
@@ -343,31 +349,61 @@ final class StorageHeaderView: NSView {
             path.line(to: NSPoint(x: rect.maxX, y: y))
             y += 3
         }
-        color.withAlphaComponent(style.stripeLineAlpha * alpha).setStroke()
+        color(index).withAlphaComponent(fade(style.stripeLineAlpha)).setStroke()
         path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
+
+    /// What the legend shows: the text and width of each entry, how many fit, and where the last shown entry ends.
+    /// Internal, so that a test can look at the pixels around the entries.
+    struct LegendPlan {
+        var texts: [String]
+        var widths: [CGFloat]
+        var shown: Int
+        /// The x where the "+N more" text starts, or the end of the last entry when no part is left out.
+        var endX: CGFloat
+        var left: Int
+        func dotRect(_ i: Int, y: CGFloat, lineHeight: CGFloat) -> NSRect {
+            let x = StorageHeaderView.inset + widths[..<i].reduce(0, +)
+            return NSRect(x: x + 0.5, y: y + (lineHeight - GroupColors.dotSize) / 2, width: GroupColors.dotSize, height: GroupColors.dotSize)
+        }
+    }
+
+    private var moreAttributes: [NSAttributedString.Key: Any] { [.font: Self.legendFont, .foregroundColor: NSColor.tertiaryLabelColor] }
+
+    var legendPlan: LegendPlan {
+        let font = Self.legendFont
+        let room = bounds.width - Self.inset - Self.rightInset
+        let dotSize = GroupColors.dotSize
+        let texts = segments.map { "\($0.shortName) \(Format.bytes($0.bytes))" }
+        let widths = texts.map { dotSize + 5 + $0.size(withAttributes: [.font: font]).width + 8 }
+        let more = moreAttributes
+        let shown = SplitBar.legendCount(entryWidths: widths, separator: 8, moreWidth: { "+\($0) more".size(withAttributes: more).width }, room: room)
+        return LegendPlan(texts: texts, widths: widths, shown: shown, endX: Self.inset + widths[..<shown].reduce(0, +),
+                          left: segments.count - shown)
+    }
+
+    /// The square of the dot of legend entry `i`. Internal for the tests.
+    func legendDotRect(_ i: Int) -> NSRect { legendPlan.dotRect(i, y: legendY, lineHeight: Self.lineHeight(Self.legendFont)) }
+
+    /// The bottom of the legend row. Internal for the tests.
+    var legendY: CGFloat { rows.legendY ?? 10 }
 
     /// The largest groups that fit, with a dot of the color of each part. The color is never the only clue.
     /// A group that does not fit is left out, and the "more" count tells how many parts are not named.
     private func drawLegend() {
         guard !segments.isEmpty else { return }
         let font = Self.legendFont
-        let y = rows.legendY ?? 10
-        let room = bounds.width - Self.inset - Self.rightInset
-        let dotSize = GroupColors.dotSize
+        let y = legendY
+        let plan = legendPlan
         func attributes(_ i: Int) -> [NSAttributedString.Key: Any] {
             [.font: font, .foregroundColor: hovered == i ? NSColor.labelColor : NSColor.secondaryLabelColor]
         }
-        let texts = segments.map { "\($0.shortName) \(Format.bytes($0.bytes))" }
-        let widths = texts.enumerated().map { i, text in dotSize + 5 + text.size(withAttributes: attributes(i)).width + 8 }
-        let moreAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]
-        let shown = SplitBar.legendCount(entryWidths: widths, separator: 8, moreWidth: { "+\($0) more".size(withAttributes: moreAttributes).width }, room: room)
         var x = Self.inset
-        for i in 0..<shown {
+        for i in 0..<plan.shown {
             let s = segments[i]
             // A part that waits for an app to quit has a ring, not a dot, like its light part in the bar.
-            let dot = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: y + (Self.lineHeight(font) - dotSize) / 2, width: dotSize, height: dotSize))
+            let dot = NSBezierPath(ovalIn: plan.dotRect(i, y: y, lineHeight: Self.lineHeight(font)))
             if s.isBlockedOnly {
                 color(i).setStroke()
                 dot.lineWidth = 1
@@ -383,12 +419,11 @@ final class StorageHeaderView: NSView {
                 color(i).setFill()
                 dot.fill()
             }
-            texts[i].draw(at: NSPoint(x: x + dotSize + 5, y: y), withAttributes: attributes(i))
-            x += widths[i]
+            plan.texts[i].draw(at: NSPoint(x: x + GroupColors.dotSize + 5, y: y), withAttributes: attributes(i))
+            x += plan.widths[i]
         }
-        let left = segments.count - shown
-        if left > 0, x + "+\(left) more".size(withAttributes: moreAttributes).width <= bounds.width - Self.rightInset {
-            "+\(left) more".draw(at: NSPoint(x: x, y: y), withAttributes: moreAttributes)
+        if plan.left > 0, x + "+\(plan.left) more".size(withAttributes: moreAttributes).width <= bounds.width - Self.rightInset {
+            "+\(plan.left) more".draw(at: NSPoint(x: x, y: y), withAttributes: moreAttributes)
         }
     }
 }

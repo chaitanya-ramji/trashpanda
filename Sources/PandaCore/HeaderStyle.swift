@@ -119,6 +119,10 @@ extension SplitBar {
         return best
     }
 
-    /// The alpha of a part that is not under the mouse while another part is. It never goes below a floor, so a pale part stays visible.
-    public static func dimmedAlpha(_ base: CGFloat) -> CGFloat { max(0.22, base) }
+    /// How much of its alpha a part keeps while the mouse is on another part.
+    public static let hoverDimFactor: CGFloat = 0.30
+
+    /// The final alpha of a fill of a part that is not under the mouse. It never goes below a floor, so a pale part stays visible.
+    /// Give the alpha that the fill would have after the hover factor, not before.
+    public static func dimmedAlpha(_ final: CGFloat) -> CGFloat { max(0.22, final) }
 }
