@@ -676,6 +676,8 @@ final class DockerDesktopDiskTests: DockerTestCase {
         XCTAssertTrue(item.note?.contains("can stay large after a clean") == true)
         XCTAssertTrue(item.location.contains("Finder may show 8.0 GB"), item.location)
         XCTAssertEqual(item.helpURL?.host, "docs.docker.com")
+        XCTAssertEqual(item.insideBytes, 3_032_700_000,"The data inside, as a number, for the Good to know row")
+        XCTAssertTrue(StorageFacts.rows(from: [item]).isEmpty, "A file that is not 5 GB larger than its data has no row")
     }
 
     func testOnlyForDockerDesktop() throws {

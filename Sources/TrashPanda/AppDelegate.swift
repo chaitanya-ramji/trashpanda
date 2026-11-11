@@ -125,8 +125,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async {
             let r = scanner.scan()
             DispatchQueue.main.async {
-                // Nothing in the menu is read only. A line that has no action (a note) is not shown. Everything shown can be removed.
-                self.result = ScanResult(findings: r.findings.filter(\.isActionable), disk: r.disk)
+                // Every item in a list can be removed. A line that has no action is not an item: it goes to "Good to know".
+                self.result = ScanResult(findings: r.findings.filter(\.isActionable), disk: r.disk,
+                                         infoRows: StorageFacts.rows(from: r.findings))
                 self.disk = r.disk
                 self.scanning = false
                 self.busyChanged()
