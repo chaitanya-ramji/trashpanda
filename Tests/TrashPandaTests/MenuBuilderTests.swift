@@ -30,6 +30,7 @@ final class MenuBuilderTests: XCTestCase {
         ])
         XCTAssertTrue(menu.items[4].submenu?.items.last?.isAlternate ?? false)
         XCTAssertFalse(menu.items.contains { $0.isAlternate })
+        XCTAssertEqual(menu.items[4].image?.size, NSSize(width: 16, height: 16), "The group row has its color dot")
     }
     func testALiveUpdateChangesTwoRowsAndKeepsTheRowList() {
         let disk = DiskUsage(total: 500_000_000_000, free: 120_000_000_000)

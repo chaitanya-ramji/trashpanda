@@ -128,6 +128,36 @@ public enum SplitBar {
         return (main, folded)
     }
 
+    /// The color slot of each group in one bar, in the order of `groups`. A group first wants the slot of its place in
+    /// `Ecosystem.allCases`, modulo `slots`, so it keeps its color when the other groups change. When two groups want
+    /// the same slot, the larger one keeps it and the smaller one takes the next free slot. The order of `groups` does
+    /// not change any slot. With more groups than slots, the slots repeat.
+    public static func colorSlots(for groups: [(ecosystem: Ecosystem, bytes: Int64)], slots: Int = 8) -> [Int] {
+        guard slots > 0 else { return groups.map { _ in 0 } }
+        let order = Ecosystem.allCases
+        func wanted(_ e: Ecosystem) -> Int { (order.firstIndex(of: e) ?? 0) % slots }
+        var result = Array(repeating: 0, count: groups.count)
+        var taken = Set<Int>()
+        let ranked = groups.indices.sorted {
+            let a = groups[$0], b = groups[$1]
+            return a.bytes != b.bytes ? a.bytes > b.bytes : a.ecosystem.name < b.ecosystem.name
+        }
+        for i in ranked {
+            var slot = wanted(groups[i].ecosystem)
+            if taken.count < slots { while taken.contains(slot) { slot = (slot + 1) % slots } }
+            taken.insert(slot)
+            result[i] = slot
+        }
+        return result
+    }
+
+    /// The slots for the named parts of a bar. "Other" has no slot: it is grey.
+    public static func colorSlots(for segments: [SplitSegment], slots: Int = 8) -> [Int?] {
+        let named = segments.filter { !$0.isOther }.map { (ecosystem: $0.ecosystems[0], bytes: $0.bytes) }
+        var next = colorSlots(for: named, slots: slots).makeIterator()
+        return segments.map { $0.isOther ? nil : next.next() }
+    }
+
     /// One part for each group row that shows a size. The size of a part is the number on its row.
     /// An item of an open app is in its part, and `blockers` gives the names of the apps that block it.
     /// A row that only says "info" has no part.

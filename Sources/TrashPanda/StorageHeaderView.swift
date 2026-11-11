@@ -6,6 +6,29 @@ enum Format {
     static func bytes(_ value: Int64) -> String { ByteText.string(value) }
 }
 
+/// The colors of the groups. The bar and the group rows of the menu use the same slots.
+enum GroupColors {
+    /// The palette has no yellow. The disk bar uses it for "review". Orange and brown are far from it.
+    static let palette: [NSColor] = [.systemBlue, .systemPurple, .systemGreen, .systemPink, .systemTeal, .systemIndigo,
+                                     .systemOrange, .systemBrown]
+    static let dotSize: CGFloat = 8
+
+    static func color(slot: Int) -> NSColor { palette[((slot % palette.count) + palette.count) % palette.count] }
+
+    /// A round dot for a menu row, in a square of `side` points so that it lines up with the other icons.
+    static func dot(slot: Int, side: CGFloat = 16) -> NSImage {
+        let color = color(slot: slot)
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            let d = dotSize
+            color.setFill()
+            NSBezierPath(ovalIn: NSRect(x: rect.midX - d / 2, y: rect.midY - d / 2, width: d, height: d)).fill()
+            return true
+        }
+        image.accessibilityDescription = nil
+        return image
+    }
+}
+
 /// One part of the split bar, for VoiceOver. It can be pressed like a button.
 final class SegmentElement: NSAccessibilityElement {
     var onPress: (() -> Void)?
@@ -22,6 +45,8 @@ final class StorageHeaderView: NSView {
     private var activity = MenuModel.Activity.scanning
     private var segments: [SplitSegment] = []
     private var slots: [SplitSlot] = []
+    /// The color slot of each part. "Other" has none.
+    private var colorSlots: [Int?] = []
     private var hovered: Int?
     private var elements: [SegmentElement] = []
     private let spinner = NSProgressIndicator()
@@ -41,9 +66,6 @@ final class StorageHeaderView: NSView {
 
     /// The menu is wider than the first size of this view, so the bar follows the real width.
     private var barWidth: CGFloat { max(40, bounds.width - Self.inset - Self.rightInset) }
-
-    /// The palette has no yellow and no orange. The disk bar uses those two for "review" and "safe".
-    private static let palette: [NSColor] = [.systemBlue, .systemPurple, .systemGreen, .systemPink, .systemTeal, .systemIndigo]
 
     var preferredHeight: CGFloat { segments.isEmpty ? Self.plainHeight : Self.splitHeight }
 
@@ -68,6 +90,7 @@ final class StorageHeaderView: NSView {
         self.totals = totals
         self.activity = activity
         self.segments = segments
+        self.colorSlots = SplitBar.colorSlots(for: segments)
         self.hovered = nil
         setFrameSize(NSSize(width: max(bounds.width, Self.width), height: preferredHeight))
         relayout()
@@ -111,7 +134,8 @@ final class StorageHeaderView: NSView {
     private func color(_ index: Int) -> NSColor {
         guard segments.indices.contains(index) else { return .clear }
         // "Other" is a neutral grey that works in light and dark mode.
-        return segments[index].isOther ? NSColor.systemGray : Self.palette[index % Self.palette.count]
+        guard colorSlots.indices.contains(index), let slot = colorSlots[index] else { return NSColor.systemGray }
+        return GroupColors.color(slot: slot)
     }
 
     // MARK: Mouse
@@ -246,9 +270,10 @@ final class StorageHeaderView: NSView {
                 .foregroundColor: hovered == i ? NSColor.labelColor : NSColor.secondaryLabelColor,
             ]
             let size = text.size(withAttributes: attributes)
-            guard x + 10 + size.width <= bounds.width - Self.rightInset else { break }
+            let dotSize = GroupColors.dotSize
+            guard x + dotSize + 5 + size.width <= bounds.width - Self.rightInset else { break }
             // A part that waits for an app to quit has a ring, not a dot, like its light part in the bar.
-            let dot = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: y + 3, width: 5.5, height: 5.5))
+            let dot = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: y + 2, width: dotSize, height: dotSize))
             if s.isBlockedOnly {
                 color(i).setStroke()
                 dot.lineWidth = 1
@@ -257,8 +282,8 @@ final class StorageHeaderView: NSView {
                 color(i).setFill()
                 dot.fill()
             }
-            text.draw(at: NSPoint(x: x + 10, y: y), withAttributes: attributes)
-            x += 10 + size.width + 8
+            text.draw(at: NSPoint(x: x + dotSize + 5, y: y), withAttributes: attributes)
+            x += dotSize + 5 + size.width + 8
             shown += 1
         }
         let left = segments.count - shown
