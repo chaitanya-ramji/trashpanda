@@ -19,13 +19,14 @@ A version has three numbers. A beta has a word and a number after them.
 
 ### Why the form is fixed
 
-The update check of the app reads the tags of the releases. It accepts only three numbers with an optional part after a dash (`ClaudeVersions.isVersionName`). A tag in another form is not a version, so the app never offers it. A beta user sees newer betas and newer stable versions. A stable user sees stable versions only.
+The update check of the app reads the tags of the releases. It accepts only three numbers with an optional part after a dash (`ClaudeVersions.isVersionName`). A tag in another form is not a version, so the app never offers it. A beta user sees newer betas and newer stable versions. A stable user sees stable versions only, so a stable release reaches every user of an older stable version (for example `0.1.0`).
 
 ## What the numbers mean
 
 Until 1.0, the roadmap milestones decide the numbers.
 
-- **MINOR** is the milestone that the build works toward. It is the lowest milestone that still has an open issue when you cut the release. Milestone `v0.8` ships as `0.8.0-beta.1`, `0.8.0-beta.2`, and so on.
+- **MINOR** is the milestone that the build works toward. For a beta, it is the lowest milestone that still has an open issue when you cut the release. Milestone `v0.8` ships as `0.8.0-beta.1`, `0.8.0-beta.2`, and so on.
+- **Stable (`X.Y.0`)** is cut when every issue of milestone `vX.Y` is closed or moved, and the owner asks for a stable release. It is the release of that milestone without `-beta.N`. The next beta then starts the next milestone (`X.(Y+1).0-beta.1`). Until the app is notarized (#30), a stable release is still unsigned, and the notes say so at the top.
 - **N** counts the betas of one MINOR. It starts at 1 and goes up by 1. It never goes back, and a number is never used two times.
 - **PATCH** is for a fix of a version that is already out, with no new feature. The first fix of `0.8.0` is `0.8.1`. Before 1.0 a fix is mostly a new beta, so PATCH stays 0.
 - **MAJOR** is 0 until the app is notarized and the milestone `v1.0` is finished. Then it is `1.0.0`, and it is stable.
@@ -37,7 +38,7 @@ A milestone is finished when each of its issues is closed or moved to a later mi
 A beta is not made for each merge. Cut one only when all of these are true:
 
 1. The owner asks for it. A release is outward-facing, so nobody cuts one alone.
-2. At least one roadmap issue closed since the last release, and the release notes say which ones.
+2. At least one roadmap issue closed since the last release, and the release notes say which ones. For a stable release, the milestone is finished (see above).
 3. `main` has a passing CI run, and `swift build` and the full `swift test` pass on your Mac.
 4. The README roadmap and the roadmap issue match (`python3 scripts/sync-roadmap.py --check`).
 
@@ -54,7 +55,7 @@ A beta is not made for each merge. Cut one only when all of these are true:
 2. Update the milestone: each issue closed or moved. Close the milestone if it is finished.
 3. Build: `VERSION=<version> scripts/release.sh <version> --unsigned` (until the app is notarized, see #30). Check the DMG: open it, check that the app starts, and check `CFBundleShortVersionString`.
 4. Write the notes from the template below.
-5. Create the tag and the release (pre-release for a beta). Upload the DMG and the `.sha256` file.
+5. Create the tag and the release (pre-release for a beta, not for a stable version). Upload the DMG and the `.sha256` file.
 6. Update the download text in the README, and the cask (`scripts/make-cask.sh`) when there is one.
 7. Run the update check against the new release: an older beta must show "Update available".
 
