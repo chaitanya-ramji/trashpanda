@@ -968,7 +968,8 @@ public final class DiskScanner {
         if uv != nil {
             out.append(Finding(id: "uv.prune", ecosystem: .aiAgents, title: "uv · unused cache entries", location: dir.path,
                                bytes: bytes, tier: .safe, rebuild: .download, action: .owner(.uvCachePrune),
-                               note: "Up to this size. uv removes only what nothing uses. Agents such as Claude Code and Codex start uv."))
+                               note: "Up to this size. uv removes only what nothing uses. Agents such as Claude Code and Codex start uv.",
+                               sizeIsUpperLimit: true))
         }
         return out
     }

@@ -58,7 +58,7 @@ final class UvCacheTests: XCTestCase {
         XCTAssertEqual(all.tier, .review, "Removing everything is a deliberate choice")
         XCTAssertEqual(all.ecosystem, .python)
         let result = ScanResult(findings: found, disk: DiskUsage(total: 1, free: 1))
-        XCTAssertEqual(result.reclaimable, prune.bytes, "The cache is not counted twice")
+        XCTAssertEqual(result.reclaimable, 0, "The cache is not counted twice")
         XCTAssertEqual(result.reviewable, all.bytes)
     }
 
@@ -68,6 +68,55 @@ final class UvCacheTests: XCTestCase {
         let found = scanner(box).scanUv()
         XCTAssertEqual(found.map(\.id), ["uv.cache"])
         if case .removeContents = found[0].action {} else { XCTFail("Without uv the folder is cleared") }
+    }
+
+    // MARK: The totals
+
+    func testThePruneSizeIsAnUpperLimitAndIsNotInAnyTotal() throws {
+        let box = try Sandbox()
+        let cache = try makeCache(box)
+        _ = try installFakeUV(box, cache: cache)
+        let found = scanner(box).scanUv()
+        let prune = try XCTUnwrap(found.first { $0.id == "uv.prune" })
+        let all = try XCTUnwrap(found.first { $0.id == "uv.cache" })
+        XCTAssertTrue(prune.sizeIsUpperLimit)
+        XCTAssertFalse(all.sizeIsUpperLimit)
+        XCTAssertTrue(prune.bytes > 0)
+
+        let result = ScanResult(findings: found, disk: DiskUsage(total: 100, free: 50))
+        XCTAssertEqual(result.reclaimable, 0, "The safe total does not include uv.prune")
+        XCTAssertEqual(result.reviewable, all.bytes)
+        XCTAssertEqual(SplitBar.rowBytes([prune]), 0)
+        XCTAssertEqual(SplitBar.rowBytes([all, prune]), all.bytes)
+        let totals = SplitBar.totals(from: found)
+        XCTAssertEqual(totals.free, 0)
+        XCTAssertEqual(totals.review, all.bytes)
+        let segments = SplitBar.segments(from: found)
+        XCTAssertEqual(segments.reduce(Int64(0)) { $0 + $1.bytes }, all.bytes)
+        XCTAssertEqual(segments.reduce(Int64(0)) { $0 + $1.safeBytes }, 0)
+        XCTAssertEqual(AgentMenu.groups([prune]).first?.bytes, 0)
+    }
+
+    func testThePruneRowTextStartsWithUpTo() throws {
+        let box = try Sandbox()
+        let cache = try makeCache(box)
+        _ = try installFakeUV(box, cache: cache)
+        let found = scanner(box).scanUv()
+        let prune = try XCTUnwrap(found.first { $0.id == "uv.prune" })
+        let all = try XCTUnwrap(found.first { $0.id == "uv.cache" })
+        XCTAssertEqual(prune.sizeText, "up to " + ByteText.string(prune.bytes))
+        XCTAssertEqual(all.sizeText, ByteText.string(all.bytes))
+    }
+
+    func testThePruneStaysInTheCleanEvenThoughItIsNotInTheTotal() throws {
+        let box = try Sandbox()
+        let cache = try makeCache(box)
+        let fake = try installFakeUV(box, cache: cache)
+        let prune = try XCTUnwrap(scanner(box).scanUv().first { $0.id == "uv.prune" })
+        let before = fake.calls().count
+        let report = cleaner(box).clean([prune])
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertEqual(Array(fake.calls().dropFirst(before)), ["cache prune"])
     }
 
     func testNothingWhenThereIsNoCache() throws {

@@ -99,7 +99,7 @@ public enum SplitBar {
     /// The size that a group row of the menu shows: all the items that have an action.
     /// An item of an open app is in it. An information line is not. Zero means that the row says "info".
     public static func rowBytes(_ items: [Finding]) -> Int64 {
-        items.filter(\.isActionable).reduce(Int64(0)) { $0 + $1.bytes }
+        items.filter(\.isActionable).reduce(Int64(0)) { $0 + $1.countedBytes }
     }
 
     /// The totals of the line under the title.
@@ -108,7 +108,7 @@ public enum SplitBar {
     public static func totals(from findings: [Finding], blockers: (Finding) -> [String] = { _ in [] }) -> SplitTotals {
         var free: Int64 = 0, review: Int64 = 0, waiting: Int64 = 0
         for f in findings where f.isActionable {
-            if !blockers(f).isEmpty { waiting += f.bytes } else if f.tier == .safe { free += f.bytes } else { review += f.bytes }
+            if !blockers(f).isEmpty { waiting += f.countedBytes } else if f.tier == .safe { free += f.countedBytes } else { review += f.countedBytes }
         }
         return SplitTotals(free: free, review: review, waiting: waiting)
     }
@@ -121,14 +121,14 @@ public enum SplitBar {
                                 maxNamed: Int = 5) -> [SplitSegment] {
         var bytes: [Ecosystem: Int64] = [:], safe: [Ecosystem: Int64] = [:], blocked: [Ecosystem: Int64] = [:]
         var apps: [Ecosystem: Set<String>] = [:]
-        for f in findings where f.isActionable && f.bytes > 0 {
-            bytes[f.ecosystem, default: 0] += f.bytes
+        for f in findings where f.isActionable && f.countedBytes > 0 {
+            bytes[f.ecosystem, default: 0] += f.countedBytes
             let open = blockers(f)
             if !open.isEmpty {
-                blocked[f.ecosystem, default: 0] += f.bytes
+                blocked[f.ecosystem, default: 0] += f.countedBytes
                 apps[f.ecosystem, default: []].formUnion(open)
             } else if f.tier == .safe {
-                safe[f.ecosystem, default: 0] += f.bytes
+                safe[f.ecosystem, default: 0] += f.countedBytes
             }
         }
         let total = bytes.values.reduce(0, +)
