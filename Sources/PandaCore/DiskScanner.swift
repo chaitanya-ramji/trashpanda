@@ -160,7 +160,7 @@ public final class DiskScanner {
 
         // Tiny items add noise to the menu and free almost nothing.
         // Information lines are not part of any total, so they are always shown.
-        let sorted = Self.removeOverlap(findings, home: home).filter { $0.bytes >= Self.minimumBytes || !$0.isActionable }.sorted { $0.bytes > $1.bytes }
+        let sorted = Self.removeOverlap(findings, home: home, now: now()).filter { $0.bytes >= Self.minimumBytes || !$0.isActionable }.sorted { $0.bytes > $1.bytes }
         let result = ScanResult(findings: sorted, disk: DiskUsage.current(for: home))
         for f in sorted {
             Log.info("found [\(f.tier == .safe ? "safe" : "review")] \(f.id) \(f.bytes) bytes — \(f.location)")
@@ -999,30 +999,85 @@ public final class DiskScanner {
         }
     }
 
-    /// The part of a cache folder that another item already counts, for example the old update downloads of Arc inside its cache folder.
-    /// We take it off the size of the explorer item, so that the same bytes are not in two totals.
-    static func removeOverlap(_ findings: [Finding], home: URL) -> [Finding] {
-        let caches = home.appendingPathComponent("Library/Caches", isDirectory: true).standardizedFileURL.path + "/"
-        func url(of f: Finding) -> URL? {
-            switch f.action {
-            case .removeContents(let u), .removeArtifact(let u), .removeUpdateDownloads(let u), .removeArchive(let u), .removeDeviceSupport(let u): return u
-            default: return nil
-            }
+    /// The folders that one finding covers, now. An action with a URL covers that URL. An action with an ID asks the rule that owns the ID.
+    /// An action that is not about folders in the home folder (a tool, a package, a simulator) covers none.
+    static func coveredURLs(of finding: Finding, home: URL, now: Date) -> [URL] {
+        switch finding.action {
+        case .removeContents(let u), .removeArtifact(let u), .removeUpdateDownloads(let u), .removeArchive(let u), .removeDeviceSupport(let u),
+             .removeInstaller(let u):
+            return [u]
+        case .removeBrowserCaches(let id):
+            return BrowserCaches.browser(id: id).map { BrowserCaches.targets(of: $0, home: home) } ?? []
+        case .removeServiceWorkerStorage(let id):
+            return BrowserCaches.browser(id: id).map { BrowserCaches.serviceWorkerTargets(of: $0, home: home) } ?? []
+        case .removeServiceWorkerSite(let id, let profile, let folder):
+            return BrowserCaches.browser(id: id).flatMap { ServiceWorkerSites.site(browser: $0, profile: profile, folder: folder, home: home) }.map { [$0.url] } ?? []
+        case .removeOldTestBrowsers(let id):
+            return TestBrowsers.tool(id: id).map { [home.appendingPathComponent($0.root, isDirectory: true)] } ?? []
+        case .agent(.removeAgentCaches(let id)):
+            return AgentCaches.electronApp(id: id).map { AgentCaches.targets(of: $0, home: home) } ?? []
+        case .agent(.removeEditorCaches(let id)):
+            return EditorCaches.app(id: id).map { EditorCaches.targets(of: $0, home: home, now: now) } ?? []
+        case .agent(.removeFixedFolders(let id)):
+            return FixedFolders.app(id: id).map { FixedFolders.targets(of: $0, home: home) } ?? []
+        case .agent(.removeCodexRuntime(let u)):
+            return [u]
+        default:
+            return []
         }
-        return findings.map { f in
+    }
+
+    /// The folders that one finding covers, now.
+    func coveredURLs(of finding: Finding) -> [URL] {
+        Self.coveredURLs(of: finding, home: home, now: now())
+    }
+
+    /// A folder that another item covers. A row of the cache explorer is dropped when a different item covers the same folder (or a folder above it).
+    /// When a different item covers a part inside the folder, that part is taken off the size of the explorer row, so that the same bytes
+    /// are not in two totals, for example the old update downloads of Arc inside its cache folder.
+    static func removeOverlap(_ findings: [Finding], home: URL, now: Date = Date()) -> [Finding] {
+        let caches = home.appendingPathComponent("Library/Caches", isDirectory: true).standardizedFileURL.path + "/"
+        let others: [(finding: Finding, urls: [URL])] = findings.compactMap { other in
+            if case .removeCacheFolderContents = other.action { return nil }
+            guard other.isActionable else { return nil }
+            let urls = coveredURLs(of: other, home: home, now: now)
+            return urls.isEmpty ? nil : (other, urls)
+        }
+        return findings.compactMap { f in
             guard case .removeCacheFolderContents(let name) = f.action else { return f }
-            let prefix = caches + name + "/"
-            let inside = findings.filter { other in
-                if case .removeCacheFolderContents = other.action { return false }
-                guard other.isActionable, let u = url(of: other) else { return false }
-                return u.standardizedFileURL.path.hasPrefix(prefix)
+            let folder = caches + name
+            let prefix = folder + "/"
+            var overlap: Int64 = 0
+            var names: [String] = []
+            for (other, urls) in others {
+                var covered = false
+                var inside: [URL] = []
+                for u in urls {
+                    let path = u.standardizedFileURL.path
+                    if path == folder || prefix.hasPrefix(path + "/") { covered = true; break }
+                    if path.hasPrefix(prefix) { inside.append(u) }
+                }
+                if covered { return nil }
+                guard !inside.isEmpty else { continue }
+                // An item with a URL has its own size (for example only the old files). An item with an ID is sized by its folders.
+                let isURLAction = urls.count == 1 && inside.count == 1 && other.bytes > 0 && coveredByURL(other.action)
+                overlap += isURLAction ? other.bytes : inside.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+                names.append(other.title)
             }
-            let overlap = inside.reduce(Int64(0)) { $0 + $1.bytes }
             guard overlap > 0 else { return f }
-            let names = inside.map(\.title).joined(separator: ", ")
-            return Finding(id: f.id, ecosystem: f.ecosystem, title: f.title, location: f.location, bytes: max(0, f.bytes - overlap), tier: f.tier,
+            // Nothing is left that only this row counts.
+            if overlap >= f.bytes { return nil }
+            return Finding(id: f.id, ecosystem: f.ecosystem, title: f.title, location: f.location, bytes: f.bytes - overlap, tier: f.tier,
                            rebuild: f.rebuild, action: f.action, lastActivity: f.lastActivity,
-                           note: "\(f.note ?? "") Not counted here: \(ByteText.string(overlap)) of \(names).", helpURL: f.helpURL, owner: f.owner)
+                           note: "\(f.note ?? "") Not counted here: \(ByteText.string(overlap)) of \(names.joined(separator: ", ")).", helpURL: f.helpURL, owner: f.owner)
+        }
+    }
+
+    /// True for an action that holds the URL itself, so the size of the finding is the size of that URL (or of the part of it that we clean).
+    private static func coveredByURL(_ action: Action) -> Bool {
+        switch action {
+        case .removeContents, .removeArtifact, .removeUpdateDownloads, .removeArchive, .removeDeviceSupport, .removeInstaller: return true
+        default: return false
         }
     }
 

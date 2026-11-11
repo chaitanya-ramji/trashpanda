@@ -92,7 +92,27 @@ public enum CacheExplorer {
 
     /// The folders that have an item of their own: the catalog, the browsers, the test browsers, and the tools that clean themselves.
     public static func catalogNames() -> Set<String> {
-        cleanableNames(paths: Catalog.caches.flatMap(\.paths) + BrowserCaches.browsers.flatMap(\.roots) + TestBrowsers.tools.map(\.root) + selfCleaningTools)
+        var paths: [String] = Catalog.caches.flatMap(\.paths)
+        paths += BrowserCaches.browsers.flatMap(\.roots)
+        paths += TestBrowsers.tools.map(\.root)
+        paths += selfCleaningTools
+        paths += agentCachePaths
+        return cleanableNames(paths: paths)
+    }
+
+    /// The paths of the AI agent rules (Electron apps, editors, fixed folders). A rule can name a folder in `Library/Caches`.
+    static var agentCachePaths: [String] {
+        var paths: [String] = []
+        for app in AgentCaches.electronApps {
+            paths.append(app.supportRoot)
+            if let root = app.cachesRoot {
+                paths.append(root)
+                for name in app.cachesNames { paths.append("\(root)/\(name)") }
+            }
+        }
+        for app in EditorCaches.apps { paths.append(app.supportRoot) }
+        for app in FixedFolders.apps { paths.append(contentsOf: app.folders) }
+        return paths
     }
 
     /// A name that can be one folder directly in `Library/Caches`: one path part, and not hidden.
