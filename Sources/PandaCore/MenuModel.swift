@@ -254,7 +254,7 @@ public struct MenuModel: Equatable, Sendable {
     /// The short section at the bottom: facts that cannot be cleaned here. At most 3 rows. Each one is off and has no action.
     private static func goodToKnowRows(_ info: [InfoRow]) -> [Row] {
         guard !info.isEmpty else { return [] }
-        return [.separator, .section("Good to know")] + info.prefix(StorageFacts.maxRows).map {
+        return [.separator, .section("Good to know · can't be cleaned here")] + info.prefix(StorageFacts.maxRows).map {
             Row(title: $0.title, enabled: false, tooltip: $0.tooltip, subtitle: $0.detail)
         }
     }
@@ -315,10 +315,6 @@ public struct MenuModel: Equatable, Sendable {
     private static func submenu(for ecosystem: Ecosystem, items: [Finding], _ input: MenuInput, nest: Bool = true) -> Submenu {
         if nest, ecosystem == .aiAgents, AgentMenu.shouldNest(items) { return nestedAgentSubmenu(items, input) }
         var rows: [Row] = []
-        if ecosystem == .docker, let engine = items.first.flatMap({ MenuText.dockerPlace($0.location).engine }) {
-            // The engine is said once, here. A row does not repeat it.
-            rows.append(.section(MenuText.capped("Docker · \(engine) (local)")))
-        }
         let actionable = items.filter(\.isActionable)
         // The bulk "Free up" line takes only items that need no quit. It never quits an app.
         let safeAll = actionable.filter { $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
@@ -335,27 +331,39 @@ public struct MenuModel: Equatable, Sendable {
         if !safeAll.isEmpty {
             if !safe.isEmpty { rows.append(.separator) }
             let notes = MenuText.rebuildNotes(safeAll.map(\.rebuild))
-            rows.append(.section(header("Safe to clean", notes)))
-            rows += listRows(safeAll, input, groupBytes: groupBytes, labels: notes.rowLabels)
+            let title = header("Safe to clean", notes)
+            rows.append(.section(title))
+            rows += listRows(safeAll, input, groupBytes: groupBytes, labels: notes.rowLabels, header: title)
         }
         if !review.isEmpty {
             if !safeAll.isEmpty { rows.append(.separator) }
             let notes = MenuText.rebuildNotes(review.map(\.rebuild))
-            rows.append(.section(header("Review first", notes)))
-            rows += listRows(review, input, groupBytes: groupBytes, labels: notes.rowLabels)
+            let title = header("Review first", notes)
+            rows.append(.section(title))
+            rows += listRows(review, input, groupBytes: groupBytes, labels: notes.rowLabels, header: title)
         }
-        return Submenu(rows: rows, widthTitles: items.map { MenuText.capped(MenuText.friendlyTitle($0.title)) }, alignIcons: true)
+        return Submenu(rows: rows, widthTitles: items.map { MenuText.capped(MenuText.rowTitle($0.title, ecosystem: $0.ecosystem)) },
+                       alignIcons: true)
     }
 
-    /// "Review first · they download again when needed"
+    /// "Review first · re-download when needed"
     private static func header(_ name: String, _ notes: MenuText.RebuildNotes) -> String {
         notes.sectionSuffix.map { "\(name) · \($0)" } ?? name
     }
 
     /// The first rows of a list, and then the rest in a "N more… · size" submenu, so that no row is hidden.
     /// The first list has at most 12 rows. It stops earlier at the first row that is below 50 MB and below 1 percent of the group.
-    private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64, labels: [String?]) -> [Row] {
-        let titles = MenuText.distinct(titles: list.map { MenuText.friendlyTitle($0.title) }, locations: list.map(\.location))
+    private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64, labels: [String?],
+                                 header: String) -> [Row] {
+        var friendly = list.map { MenuText.rowTitle($0.title, ecosystem: $0.ecosystem) }
+        // Two anonymous volumes would look the same. Then each one shows the start of its id.
+        let anonymous = "Unused anonymous volume · "
+        for indexes in Dictionary(grouping: friendly.indices, by: { friendly[$0] }).values where indexes.count > 1 {
+            for i in indexes where list[i].title.hasPrefix(anonymous) {
+                friendly[i] += " · " + list[i].title.dropFirst(anonymous.count).prefix(8)
+            }
+        }
+        let titles = MenuText.distinct(titles: friendly, locations: list.map(\.location))
         func row(_ i: Int) -> [Row] { findingRows(list[i], input, title: titles[i], label: labels[i]) }
         var shown = 0
         while shown < min(12, list.count) {
@@ -368,7 +376,7 @@ public struct MenuModel: Equatable, Sendable {
             let rest = Array(shown..<list.count)
             let size = rest.reduce(Int64(0)) { $0 + list[$1].countedBytes }
             rows.append(Row(title: "\(rest.count) more… · \(ByteText.string(size))",
-                            submenu: Submenu(rows: rest.flatMap(row), alignIcons: true)))
+                            submenu: Submenu(rows: [.section(header)] + rest.flatMap(row), alignIcons: true)))
         }
         return rows
     }
@@ -385,11 +393,12 @@ public struct MenuModel: Equatable, Sendable {
         var subtitle = label
         var place = f.location
         if f.ecosystem == .docker, f.location.hasPrefix("Docker engine: ") {
-            // The engine is in the header. The row says only what is new: its state, and that a running one is stopped first.
+            // The engine is in the tooltip. The row says what is new: its state, and that a running one is stopped first.
+            // Its own rebuild label stays when it differs from the header, and "Cannot be recovered" always stays.
             let docker = MenuText.dockerPlace(f.location)
             place = docker.tooltip
-            let joined = [docker.subtitle, f.rebuild == .never ? f.rebuild.label : nil].compactMap { $0 }.joined(separator: " · ")
-            subtitle = joined.isEmpty ? label : joined
+            let joined = [docker.subtitle, label].compactMap { $0 }.joined(separator: " · ")
+            subtitle = joined.isEmpty ? nil : joined
         }
         var row = Row(kind: .columns, title: title, size: f.sizeText, subtitle: subtitle,
                       icon: .item(owner: f.owner, agentTitle: f.ecosystem == .aiAgents ? f.title : nil))

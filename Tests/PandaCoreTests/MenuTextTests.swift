@@ -41,13 +41,13 @@ final class MenuTextTests: XCTestCase {
 
     func testRebuildNotesAllSame() {
         let n = MenuText.rebuildNotes([.download, .download, .download])
-        XCTAssertEqual(n.sectionSuffix, "they download again when needed")
+        XCTAssertEqual(n.sectionSuffix, "re-download when needed")
         XCTAssertEqual(n.rowLabels, [nil, nil, nil])
     }
 
     func testRebuildNotesMixedKeepsTheOddRow() {
         let n = MenuText.rebuildNotes([.download, .download, .download, .recreate])
-        XCTAssertEqual(n.sectionSuffix, "they download again when needed")
+        XCTAssertEqual(n.sectionSuffix, "re-download when needed")
         XCTAssertEqual(n.rowLabels, [nil, nil, nil, "You would need to recreate it"])
     }
 
@@ -90,10 +90,34 @@ final class MenuTextTests: XCTestCase {
         }
     }
 
-    func testFriendlyTitleChangesOnlyTheFirstPart() {
-        XCTAssertEqual(MenuText.friendlyTitle("com.apple.helpd · system cache"), "helpd (macOS) · system cache")
-        XCTAssertEqual(MenuText.friendlyTitle("bun · cache folder"), "bun · cache folder")
-        XCTAssertEqual(MenuText.friendlyTitle("Unused anonymous volume · 5f0999b7b512…"), "Unused anonymous volume")
+    func testFriendlyNameKeepsTheOriginalWhenTheShortNameMisleads() {
+        for name in ["com.spotify.client", "com.example.chat", "com.example.agent", "com.example.2024", "com.example.230313mzl4w4u92",
+                     "com.example.z", "com.apple.WebKit.Networking", "com.example.a.b.c.tool", "com.example.helper", "com.example.desktop"] {
+            XCTAssertEqual(MenuText.friendlyName(name), name)
+        }
+    }
+
+    func testFriendlyNameKeepsTheGoodCases() {
+        XCTAssertEqual(MenuText.friendlyName("org.mozilla.firefox"), "firefox")
+        XCTAssertEqual(MenuText.friendlyName("com.google.Chrome"), "Chrome")
+        XCTAssertEqual(MenuText.friendlyName("com.google.Chrome.helper"), "Chrome")
+        XCTAssertEqual(MenuText.friendlyName("com.hnc.Discord.ShipIt"), "Discord")
+        XCTAssertEqual(MenuText.friendlyName("com.apple.helpd"), "helpd (macOS)")
+    }
+
+    func testRowTitle() {
+        XCTAssertEqual(MenuText.rowTitle("com.apple.helpd · system cache", ecosystem: .cacheExplorer), "helpd (macOS)")
+        XCTAssertEqual(MenuText.rowTitle("bun · cache folder", ecosystem: .cacheExplorer), "bun")
+        XCTAssertEqual(MenuText.rowTitle("GeoServices · system cache", ecosystem: .cacheExplorer), "GeoServices (system)")
+        XCTAssertEqual(MenuText.rowTitle("com.apple.helpd · system cache", ecosystem: .python), "helpd (macOS) · system cache")
+        XCTAssertEqual(MenuText.rowTitle("Unused anonymous volume · 5f0999b7b512…", ecosystem: .docker), "Unused anonymous volume")
+    }
+
+    func testSecondLineBeforeMacOS144GoesOnTopOfTheTooltip() {
+        XCTAssertEqual(MenuText.tooltip(withSecondLine: "Line", tooltip: "Tip"), "Line\nTip")
+        XCTAssertEqual(MenuText.tooltip(withSecondLine: "Line", tooltip: nil), "Line")
+        XCTAssertEqual(MenuText.tooltip(withSecondLine: nil, tooltip: "Tip"), "Tip")
+        XCTAssertNil(MenuText.tooltip(withSecondLine: nil, tooltip: nil))
     }
 
     // MARK: Width
@@ -111,8 +135,11 @@ final class MenuTextTests: XCTestCase {
     func testDockerPlaceDropsEngineImageAndVolumeId() {
         let p = MenuText.dockerPlace("Docker engine: Test · image app:1 · Up 22 hours · volumes: abc123abc123… · will be stopped first")
         XCTAssertEqual(p.engine, "Test")
-        XCTAssertEqual(p.subtitle, "Up 22 hours · will be stopped first")
-        XCTAssertEqual(p.tooltip, "image app:1 · Up 22 hours · will be stopped first")
+        XCTAssertEqual(p.subtitle, "Stopped first")
+        XCTAssertEqual(p.tooltip, "Test · image app:1 · Up 22 hours · will be stopped first")
         XCTAssertNil(MenuText.dockerPlace("Docker engine: Test").subtitle)
+        let named = MenuText.dockerPlace("Docker engine: Test · image a:1 · Exited (0) 3 days ago · volumes: pgdata-prod, abc123abc123…")
+        XCTAssertEqual(named.subtitle, "Exited (0) 3 days ago")
+        XCTAssertEqual(named.tooltip, "Test · image a:1 · Exited (0) 3 days ago · volumes: pgdata-prod")
     }
 }

@@ -114,19 +114,40 @@ public enum MenuText {
 
     /// A short name for a folder that is named like a reverse domain: the last part that says something.
     /// `com.apple.<x>` is a macOS name, so it gets "(macOS)". Any other name is not changed. No product name is made up.
+    /// When the short name could mislead, the original name stays: a long name, a part that says nothing,
+    /// a part that is a number or an id, or a part that is a common word.
     public static func friendlyName(_ name: String) -> String {
-        guard let parts = domainParts(name) else { return name }
-        let meaningful = parts.dropFirst(2).last { !emptyParts.contains($0.lowercased()) } ?? parts[parts.count - 1]
+        guard let parts = domainParts(name), parts.count <= 4 else { return name }
+        guard let meaningful = parts.dropFirst(2).last(where: { !emptyParts.contains($0.lowercased()) }) else { return name }
+        let letters = meaningful.filter(\.isLetter).count, digits = meaningful.filter(\.isNumber).count
+        guard meaningful.count >= 3, letters > digits, !genericParts.contains(meaningful.lowercased()) else { return name }
         return parts[1] == "apple" ? "\(meaningful) (macOS)" : meaningful
     }
 
-    /// The title of an item as a row shows it. The first part (before " · ") gets a friendly name, and the id of an
-    /// anonymous Docker volume is hidden. The full title stays in the tooltip.
-    public static func friendlyTitle(_ title: String) -> String {
+    /// Common words. A name that ends with one of them says nothing about its owner.
+    private static let genericParts: Set<String> = ["client", "chat", "app", "desktop", "mac", "main", "agent", "helper", "service",
+                                                    "services", "networking", "daemon", "xpc", "cache", "caches", "web", "core",
+                                                    "common", "mobile", "macos", "osx", "electron", "browser", "ui", "shared", "default"]
+
+    /// The title of an item as a row shows it. The first part (before " · ") gets a friendly name. In the cache folders list the
+    /// kind ("system cache", "cache folder") is dropped, because the list says it; a system cache that is not named
+    /// `com.apple.` gets "(system)", because it can be iCloud. The full title stays in the tooltip.
+    public static func rowTitle(_ title: String, ecosystem: Ecosystem) -> String {
         if title.hasPrefix("Unused anonymous volume · ") { return "Unused anonymous volume" }
-        let parts = title.components(separatedBy: " · ")
+        var parts = title.components(separatedBy: " · ")
         let friendly = friendlyName(parts[0])
-        return friendly == parts[0] ? title : ([friendly] + parts.dropFirst()).joined(separator: " · ")
+        if ecosystem == .cacheExplorer, parts.count == 2, ["system cache", "cache folder"].contains(parts[1]) {
+            let system = parts[1] == "system cache"
+            return friendly + (system && !friendly.hasSuffix("(macOS)") && !friendly.contains("(") ? " (system)" : "")
+        }
+        parts[0] = friendly
+        return parts.joined(separator: " · ")
+    }
+
+    /// The text for a row's second line on a system that has none (before macOS 14.4): it joins the tooltip, on top.
+    public static func tooltip(withSecondLine subtitle: String?, tooltip: String?) -> String? {
+        let text = [subtitle, tooltip].compactMap { $0 }.joined(separator: "\n")
+        return text.isEmpty ? nil : text
     }
 
     /// What the rebuild labels of one section say. `sectionSuffix` goes once into the section header.
@@ -146,17 +167,18 @@ public enum MenuText {
         guard let top = counts.max(by: { $0.value < $1.value }), top.value * 2 > list.count else { return alone }
         let suffix: String
         switch top.key {
-        case .seconds: suffix = "they come back in seconds"
-        case .minutes: suffix = "they rebuild in a few minutes"
-        case .download: suffix = "they download again when needed"
-        case .recreate: suffix = "you would need to recreate them"
+        case .seconds: suffix = "back in seconds"
+        case .minutes: suffix = "rebuild in minutes"
+        case .download: suffix = "re-download when needed"
+        case .recreate: suffix = "must be recreated"
         case .never: return alone
         }
         return RebuildNotes(sectionSuffix: suffix, rowLabels: list.map { $0 == top.key ? nil : $0.label })
     }
 
-    /// The parts of the place line of a Docker item. The engine goes into the header, so it is not repeated on a row.
-    /// An image name stays in the tooltip only. A volume id never shows: the title says "1 volume".
+    /// The parts of the place line of a Docker item. The row shows a short second line. The tooltip has the engine first,
+    /// then the image and the state, then the volumes that a person named. An id of an anonymous volume (it ends with "…") never shows:
+    /// the title says "1 volume". A running container says "Stopped first"; "Up 22 hours" is in the tooltip.
     public static func dockerPlace(_ location: String) -> (engine: String?, tooltip: String, subtitle: String?) {
         var parts = location.components(separatedBy: " · ")
         var engine: String?
@@ -164,9 +186,16 @@ public enum MenuText {
             engine = String(first.dropFirst("Docker engine: ".count))
             parts.removeFirst()
         }
-        parts.removeAll { $0.hasPrefix("volumes: ") }
-        let sub = parts.filter { !$0.hasPrefix("image ") }.joined(separator: " · ")
-        return (engine, parts.joined(separator: " · "), sub.isEmpty ? nil : sub)
+        var tip = parts.compactMap { part -> String? in
+            guard part.hasPrefix("volumes: ") else { return part }
+            let named = part.dropFirst("volumes: ".count).components(separatedBy: ", ").filter { !$0.hasSuffix("…") }
+            return named.isEmpty ? nil : "volumes: " + named.joined(separator: ", ")
+        }
+        if let engine { tip.insert(engine, at: 0) }
+        let shown = parts.filter { !$0.hasPrefix("image ") && !$0.hasPrefix("volumes: ") }
+        let stopped = shown.contains("will be stopped first")
+        let sub = stopped ? "Stopped first" : shown.joined(separator: " · ")
+        return (engine, tip.joined(separator: " · "), sub.isEmpty ? nil : sub.prefix(1).uppercased() + sub.dropFirst())
     }
 
     public static let helpURL = URL(string: "https://github.com/chaitanya-ramji/trashpanda#readme")!
