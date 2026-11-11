@@ -28,21 +28,24 @@ public enum StorageFacts {
     public static func dockerDisk(onDisk: Int64, inside: Int64, note: String?) -> InfoRow? {
         guard onDisk - inside >= dockerGap else { return nil }
         return InfoRow(title: "Docker disk file: \(ByteText.string(onDisk)) on disk, \(ByteText.string(inside)) in use",
-                       detail: "Cannot be cleaned here. The file stays large after a clean.", tooltip: note)
+                       detail: "Stays large after a clean",
+                       tooltip: ["Cannot be cleaned here. Docker keeps its disk file large after you clean inside it.", note]
+                           .compactMap { $0 }.joined(separator: "\n"))
     }
 
-    /// "macOS can free by itself: about 18 GB". nil at 1 GB or less. The number is free space with purgeable space,
-    /// minus free space without it. It is an estimate, so the row says so.
+    /// "About 18 GB of the free space is purgeable". nil at 1 GB or less. The number is free space with purgeable space,
+    /// minus free space without it, so it is already part of the free number at the top. It is an estimate, so the row says so.
     public static func purgeable(_ bytes: Int64) -> InfoRow? {
         guard bytes > purgeableMinimum else { return nil }
-        return InfoRow(title: "macOS can free by itself: about \(ByteText.string(bytes))",
-                       detail: "An estimate. It may include snapshots and system files. Cannot be cleaned here.",
-                       tooltip: "macOS keeps this space as free space. It takes it back when an app needs it.")
+        return InfoRow(title: "About \(ByteText.string(bytes)) of the free space is purgeable", detail: "An estimate",
+                       tooltip: "Cannot be cleaned here. This is an estimate, taken when the scan ran. macOS counts this space as free "
+                           + "and takes it back when an app needs it. It may include snapshots and system files.")
     }
 
     /// "Time Machine · 3 local snapshots". The text comes from the scan, which read the snapshots with a read-only command.
     public static func snapshots(_ f: Finding) -> InfoRow {
-        InfoRow(title: f.title, detail: "Cannot be cleaned here. macOS removes them when the disk needs space.", tooltip: f.note)
+        InfoRow(title: f.title, detail: "macOS removes them when it needs space",
+                tooltip: ["Cannot be cleaned here.", f.note].compactMap { $0 }.joined(separator: " "))
     }
 
     /// The rows for a scan, at most `maxRows`. The order is fixed: Docker, snapshots, space that macOS frees.

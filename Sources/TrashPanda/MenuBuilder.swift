@@ -134,7 +134,8 @@ final class MenuBuilder: NSObject {
         if !row.enabled { item.isEnabled = false }
         if let tip = row.tooltip { item.toolTip = tip }
         if let subtitle = row.subtitle {
-            if #available(macOS 14.4, *) { item.subtitle = subtitle } else if item.toolTip == nil { item.toolTip = subtitle }
+            // Before macOS 14.4 there is no second line. It goes on top of the tooltip, so that no text is lost.
+            if #available(macOS 14.4, *) { item.subtitle = subtitle } else { item.toolTip = MenuText.tooltip(withSecondLine: subtitle, tooltip: item.toolTip) }
         }
         if let icon = row.icon { item.image = image(for: icon) }
         if let sub = row.submenu {
