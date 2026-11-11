@@ -297,7 +297,6 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
 - [x] More languages (phase 2b): Scala, Haskell, R, Julia, Nim, OCaml, Crystal, Clojure, Perl, Lua ([#29](https://github.com/chaitanya-ramji/trashpanda/issues/29))
 - [ ] Project scan: match generic folder names (lib, local) only when the marker file is present ([#88](https://github.com/chaitanya-ramji/trashpanda/issues/88))
-- [ ] Git worktrees: find the ones that tools and you left behind, and remove them safely ([#118](https://github.com/chaitanya-ramji/trashpanda/issues/118))
 
 ### Now: v0.7 Correct numbers and safe tools
 - [x] Do not count the uv cache two times in the totals ([#124](https://github.com/chaitanya-ramji/trashpanda/issues/124))
@@ -334,6 +333,20 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] "Always keep this item" in the dialog ([#162](https://github.com/chaitanya-ramji/trashpanda/issues/162))
 - [ ] Remove dead code and code that is written two times ([#163](https://github.com/chaitanya-ramji/trashpanda/issues/163))
 - [x] Own version type, and a failed update check is not a check ([#164](https://github.com/chaitanya-ramji/trashpanda/issues/164))
+- [ ] Stop a tool that ignores the time limit (own child process only) ([#186](https://github.com/chaitanya-ramji/trashpanda/issues/186))
+- [ ] Show the Docker disk file in a "Good to know" section ([#187](https://github.com/chaitanya-ramji/trashpanda/issues/187))
+- [ ] Row "Other space on this Mac" in "Good to know" ([#188](https://github.com/chaitanya-ramji/trashpanda/issues/188))
+
+### Next: v0.9 More coverage
+- [ ] Git worktrees: find the ones that tools and you left behind, and remove them safely ([#118](https://github.com/chaitanya-ramji/trashpanda/issues/118))
+- [ ] Android emulator images and virtual devices (review items) ([#189](https://github.com/chaitanya-ramji/trashpanda/issues/189))
+- [ ] Caches of conda, Deno, and Terraform ([#190](https://github.com/chaitanya-ramji/trashpanda/issues/190))
+- [ ] The two Xcode folders of G-06 ([#191](https://github.com/chaitanya-ramji/trashpanda/issues/191))
+- [ ] Trim the build folder of an active Rust project ([#192](https://github.com/chaitanya-ramji/trashpanda/issues/192))
+- [ ] Show what grew since the last week (size history with an off setting) ([#193](https://github.com/chaitanya-ramji/trashpanda/issues/193))
+- [ ] One dependency value for the scanner and the cleaner ([#194](https://github.com/chaitanya-ramji/trashpanda/issues/194))
+- [ ] Quality gates in CI ([#195](https://github.com/chaitanya-ramji/trashpanda/issues/195))
+- [ ] Split the two largest core files ([#196](https://github.com/chaitanya-ramji/trashpanda/issues/196))
 
 ### Later: v1.0 Signed and stable
 - [ ] Notarize the app and publish signed releases ([#30](https://github.com/chaitanya-ramji/trashpanda/issues/30))
@@ -345,6 +358,15 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Scheduled clean (opt in) ([#35](https://github.com/chaitanya-ramji/trashpanda/issues/35))
 - [ ] Test on Intel Macs and older macOS versions ([#36](https://github.com/chaitanya-ramji/trashpanda/issues/36))
 - [ ] Decide: cloud-synced project folders ([#37](https://github.com/chaitanya-ramji/trashpanda/issues/37))
+- [ ] Commands for scripts: JSON, dry run, and a clean of safe items ([#197](https://github.com/chaitanya-ramji/trashpanda/issues/197))
+- [ ] A note at the first start ([#198](https://github.com/chaitanya-ramji/trashpanda/issues/198))
+- [ ] Swift 6 language mode ([#199](https://github.com/chaitanya-ramji/trashpanda/issues/199))
+
+### Later: ideas (no milestone yet)
+- [ ] "Make room": a plan that frees a size that you choose ([#200](https://github.com/chaitanya-ramji/trashpanda/issues/200))
+- [ ] Group the items by project ([#201](https://github.com/chaitanya-ramji/trashpanda/issues/201))
+- [ ] A note when a cache grows back ([#202](https://github.com/chaitanya-ramji/trashpanda/issues/202))
+- [ ] More facts for the menu: device backups and a second Xcode ([#203](https://github.com/chaitanya-ramji/trashpanda/issues/203))
 
 ## Licence
 
