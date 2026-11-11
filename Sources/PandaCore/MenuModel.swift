@@ -328,22 +328,30 @@ public struct MenuModel: Equatable, Sendable {
                 findings: safe, title: "Free up \(ByteText.string(total)) of \(ecosystem.name) files?",
                 body: "Trash Panda will clear old build files and caches."))))
         }
-        if !safeAll.isEmpty {
-            if !safe.isEmpty { rows.append(.separator) }
-            let notes = MenuText.rebuildNotes(safeAll.map(\.rebuild))
-            let title = header("Safe to clean", notes)
+        var widths: [String] = []
+        func section(_ list: [Finding], _ name: String, _ first: Bool) {
+            if !first { rows.append(.separator) }
+            let notes = MenuText.rebuildNotes(list.map(\.rebuild))
+            let title = header(name, notes)
             rows.append(.section(title))
-            rows += listRows(safeAll, input, groupBytes: groupBytes, labels: notes.rowLabels, header: title)
+            rows += listRows(list, input, groupBytes: groupBytes, labels: notes.rowLabels, header: title, widths: &widths)
         }
-        if !review.isEmpty {
-            if !safeAll.isEmpty { rows.append(.separator) }
-            let notes = MenuText.rebuildNotes(review.map(\.rebuild))
-            let title = header("Review first", notes)
-            rows.append(.section(title))
-            rows += listRows(review, input, groupBytes: groupBytes, labels: notes.rowLabels, header: title)
+        if !safeAll.isEmpty { section(safeAll, "Safe to clean", safe.isEmpty) }
+        if ecosystem == .cacheExplorer {
+            // The system caches of macOS have their own section. The header says what they are, so a row does not repeat it.
+            let system = review.filter { $0.title.hasSuffix(" · system cache") }
+            let other = review.filter { !$0.title.hasSuffix(" · system cache") }
+            if !other.isEmpty { section(other, "Review first", safeAll.isEmpty) }
+            if !system.isEmpty {
+                if !safeAll.isEmpty || !other.isEmpty { rows.append(.separator) }
+                rows.append(.section("macOS caches · empty with care"))
+                rows += listRows(system, input, groupBytes: groupBytes, labels: system.map { _ in nil },
+                                 header: "macOS caches · empty with care", widths: &widths)
+            }
+        } else if !review.isEmpty {
+            section(review, "Review first", safeAll.isEmpty)
         }
-        return Submenu(rows: rows, widthTitles: items.map { MenuText.capped(MenuText.rowTitle($0.title, ecosystem: $0.ecosystem)) },
-                       alignIcons: true)
+        return Submenu(rows: rows, widthTitles: widths, alignIcons: true)
     }
 
     /// "Review first · re-download when needed"
@@ -354,7 +362,7 @@ public struct MenuModel: Equatable, Sendable {
     /// The first rows of a list, and then the rest in a "N more… · size" submenu, so that no row is hidden.
     /// The first list has at most 12 rows. It stops earlier at the first row that is below 50 MB and below 1 percent of the group.
     private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64, labels: [String?],
-                                 header: String) -> [Row] {
+                                 header: String, widths: inout [String]) -> [Row] {
         var friendly = list.map { MenuText.rowTitle($0.title, ecosystem: $0.ecosystem) }
         // Two anonymous volumes would look the same. Then each one shows the start of its id.
         let anonymous = "Unused anonymous volume · "
@@ -364,6 +372,8 @@ public struct MenuModel: Equatable, Sendable {
             }
         }
         let titles = MenuText.distinct(titles: friendly, locations: list.map(\.location))
+        // The width of the submenu comes from the titles as they are drawn, with the id or the folder that was added.
+        widths += list.indices.map { MenuText.capTitle(titles[$0], ecosystem: list[$0].ecosystem) }
         func row(_ i: Int) -> [Row] { findingRows(list[i], input, title: titles[i], label: labels[i]) }
         var shown = 0
         while shown < min(12, list.count) {
@@ -389,7 +399,7 @@ public struct MenuModel: Equatable, Sendable {
     }
 
     private static func findingRow(_ f: Finding, _ input: MenuInput, title fullTitle: String, label: String?) -> Row {
-        let title = MenuText.capped(fullTitle)
+        let title = MenuText.capTitle(fullTitle, ecosystem: f.ecosystem)
         var subtitle = label
         var place = f.location
         if f.ecosystem == .docker, f.location.hasPrefix("Docker engine: ") {
@@ -418,7 +428,11 @@ public struct MenuModel: Equatable, Sendable {
                 cancelIsDefault: true, cancelTitle: "Not now", revealURL: f.revealURL))
         }
         // The tooltip keeps the full name and the rebuild label, even when the row shows less.
-        var tip = (title == f.title ? "" : "\(f.title)\n") + "\(place)\n\(f.rebuild.label)"
+        // A system cache does not say that it comes back: its dialog warns that data that is not synced yet can be lost.
+        let system = f.ecosystem == .cacheExplorer && f.title.hasSuffix(" · system cache")
+        let rebuild = system ? "Empty with care. Data that is not synced yet can be lost." : f.rebuild.label
+        var tip = (title == f.title ? "" : "\(f.title)\n") + "\(place)\n\(rebuild)"
+        // (the full title above is the original one; the dialogs use it too)
         if isProject(f), let days = f.lastActivity.map({ max(0, Int(input.now.timeIntervalSince($0) / 86_400)) }) {
             tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")"
         }

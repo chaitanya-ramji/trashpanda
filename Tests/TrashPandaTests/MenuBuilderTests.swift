@@ -32,6 +32,19 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertFalse(menu.items.contains { $0.isAlternate })
         XCTAssertEqual(menu.items[4].image?.size, NSSize(width: 16, height: 16), "The group row has its color dot")
     }
+    func testTheSecondLineIsNeverLost() {
+        let row = MenuModel.Row(title: "Item", enabled: false, tooltip: "Tip", subtitle: "Second line")
+        let menu = NSMenu()
+        MenuBuilder { _ in }.populate(menu, submenu: MenuModel.Submenu(rows: [row]))
+        let item = menu.items[0]
+        if #available(macOS 14.4, *) {
+            XCTAssertEqual(item.subtitle, "Second line")
+            XCTAssertEqual(item.toolTip, "Tip")
+        } else {
+            XCTAssertEqual(item.toolTip, "Second line\nTip")
+        }
+    }
+
     func testALiveUpdateChangesTwoRowsAndKeepsTheRowList() {
         let disk = DiskUsage(total: 500_000_000_000, free: 120_000_000_000)
         func finding(_ id: String, _ bytes: Int64) -> Finding {

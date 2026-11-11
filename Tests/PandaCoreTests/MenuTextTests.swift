@@ -48,7 +48,7 @@ final class MenuTextTests: XCTestCase {
     func testRebuildNotesMixedKeepsTheOddRow() {
         let n = MenuText.rebuildNotes([.download, .download, .download, .recreate])
         XCTAssertEqual(n.sectionSuffix, "re-download when needed")
-        XCTAssertEqual(n.rowLabels, [nil, nil, nil, "You would need to recreate it"])
+        XCTAssertEqual(n.rowLabels, [nil, nil, nil, "Must be recreated"])
     }
 
     func testRebuildNotesNoMajorityKeepsEveryLabel() {
@@ -67,7 +67,8 @@ final class MenuTextTests: XCTestCase {
         XCTAssertNil(n.sectionSuffix)
         XCTAssertEqual(n.rowLabels, ["Cannot be recovered", "Cannot be recovered", "Cannot be recovered"])
         let m = MenuText.rebuildNotes([.minutes, .minutes, .never])
-        XCTAssertEqual(m.rowLabels, [nil, nil, "Cannot be recovered"])
+        XCTAssertNil(m.sectionSuffix, "A plain header when one item cannot be recovered")
+        XCTAssertEqual(m.rowLabels, ["Rebuilds in a few minutes", "Rebuilds in a few minutes", "Cannot be recovered"])
     }
 
     // MARK: Friendly names
@@ -106,9 +107,9 @@ final class MenuTextTests: XCTestCase {
     }
 
     func testRowTitle() {
-        XCTAssertEqual(MenuText.rowTitle("com.apple.helpd · system cache", ecosystem: .cacheExplorer), "helpd (macOS)")
+        XCTAssertEqual(MenuText.rowTitle("com.apple.helpd · system cache", ecosystem: .cacheExplorer), "helpd")
         XCTAssertEqual(MenuText.rowTitle("bun · cache folder", ecosystem: .cacheExplorer), "bun")
-        XCTAssertEqual(MenuText.rowTitle("GeoServices · system cache", ecosystem: .cacheExplorer), "GeoServices (system)")
+        XCTAssertEqual(MenuText.rowTitle("GeoServices · system cache", ecosystem: .cacheExplorer), "GeoServices")
         XCTAssertEqual(MenuText.rowTitle("com.apple.helpd · system cache", ecosystem: .python), "helpd (macOS) · system cache")
         XCTAssertEqual(MenuText.rowTitle("Unused anonymous volume · 5f0999b7b512…", ecosystem: .docker), "Unused anonymous volume")
     }
@@ -134,12 +135,39 @@ final class MenuTextTests: XCTestCase {
 
     func testDockerPlaceDropsEngineImageAndVolumeId() {
         let p = MenuText.dockerPlace("Docker engine: Test · image app:1 · Up 22 hours · volumes: abc123abc123… · will be stopped first")
-        XCTAssertEqual(p.engine, "Test")
-        XCTAssertEqual(p.subtitle, "Stopped first")
+        XCTAssertEqual(p.subtitle, "Will be stopped first")
         XCTAssertEqual(p.tooltip, "Test · image app:1 · Up 22 hours · will be stopped first")
         XCTAssertNil(MenuText.dockerPlace("Docker engine: Test").subtitle)
         let named = MenuText.dockerPlace("Docker engine: Test · image a:1 · Exited (0) 3 days ago · volumes: pgdata-prod, abc123abc123…")
-        XCTAssertEqual(named.subtitle, "Exited (0) 3 days ago")
+        XCTAssertEqual(named.subtitle, "Exited 3 days ago", "The exit code is not shown")
         XCTAssertEqual(named.tooltip, "Test · image a:1 · Exited (0) 3 days ago · volumes: pgdata-prod")
+    }
+
+    func testDockerTitlesAreShort() {
+        XCTAssertEqual(MenuText.rowTitle("Running container · postgres-dev and 1 volume", ecosystem: .docker), "Running · postgres-dev + 1 volume")
+        XCTAssertEqual(MenuText.rowTitle("Running container · web and 3 volumes", ecosystem: .docker), "Running · web + 3 volumes")
+        XCTAssertEqual(MenuText.rowTitle("Stopped container · db", ecosystem: .docker), "Stopped · db")
+        XCTAssertEqual(MenuText.rowTitle("Stopped container · db and 2 volumes", ecosystem: .docker), "Stopped · db + 2 volumes")
+        XCTAssertEqual(MenuText.rowTitle("Image · app:1", ecosystem: .docker), "Image · app:1")
+    }
+
+    func testTheCapNeverCutsAContainerNameWhenAShorterFormFits() {
+        // This title is 45 characters long. The short form fits, so nothing is cut.
+        let long = "Running container · postgres-dev and 1 volume"
+        let short = MenuText.rowTitle(long, ecosystem: .docker)
+        XCTAssertEqual(MenuText.capTitle(short, ecosystem: .docker), "Running · postgres-dev + 1 volume")
+        // An image reference is cut, and the kind stays.
+        let image = "Image · " + String(repeating: "registry.example/", count: 4) + "app:1"
+        let cut = MenuText.capTitle(image, ecosystem: .docker)
+        XCTAssertTrue(cut.hasPrefix("Image · ") && cut.contains("…") && cut.count <= MenuText.maxTitle)
+        // A very long container name is cut inside, and "+ 1 volume" stays.
+        let name = MenuText.capTitle("Running · " + String(repeating: "n", count: 60) + " + 1 volume", ecosystem: .docker)
+        XCTAssertTrue(name.hasPrefix("Running · ") && name.hasSuffix(" + 1 volume") && name.count <= MenuText.maxTitle, name)
+    }
+
+    func testRunningContainerWithImagesGetsAPlainHeader() {
+        let n = MenuText.rebuildNotes([.never, .download, .download, .download])
+        XCTAssertNil(n.sectionSuffix)
+        XCTAssertEqual(n.rowLabels, ["Cannot be recovered", "Downloads again when needed", "Downloads again when needed", "Downloads again when needed"])
     }
 }
