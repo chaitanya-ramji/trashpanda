@@ -321,7 +321,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Fold small groups into one row ([#150](https://github.com/chaitanya-ramji/trashpanda/issues/150))
 - [x] Say what the main action removes ([#151](https://github.com/chaitanya-ramji/trashpanda/issues/151))
 - [x] Show the time of the last scan ([#152](https://github.com/chaitanya-ramji/trashpanda/issues/152))
-- [ ] "Show in Finder" for an item, and the rebuild label as a subtitle ([#153](https://github.com/chaitanya-ramji/trashpanda/issues/153))
+- [x] "Show in Finder" for an item, and the rebuild label as a subtitle ([#153](https://github.com/chaitanya-ramji/trashpanda/issues/153))
 - [x] Section headers in a group submenu ([#154](https://github.com/chaitanya-ramji/trashpanda/issues/154))
 - [x] Do not build the menu again while it is open ([#155](https://github.com/chaitanya-ramji/trashpanda/issues/155))
 - [x] Progress and a stop during a clean ([#156](https://github.com/chaitanya-ramji/trashpanda/issues/156))

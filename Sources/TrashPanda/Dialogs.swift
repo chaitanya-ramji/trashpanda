@@ -14,8 +14,11 @@ final class FindingBox: NSObject {
     let cancelIsDefault: Bool
     /// Text of the button that keeps things as they are, when it is first. When nil, it says "Keep it".
     let cancelTitle: String?
+    /// The folder that a "Show in Finder" button shows. When nil, the dialog has no such button.
+    let revealURL: URL?
     init(_ findings: [Finding], title: String, body: String, footer: String? = nil, confirmTitle: String? = nil,
-         cancelIsDefault: Bool = false, cancelTitle: String? = nil) {
+         cancelIsDefault: Bool = false, cancelTitle: String? = nil, revealURL: URL? = nil) {
+        self.revealURL = revealURL
         self.cancelTitle = cancelTitle
         self.findings = findings
         self.title = title
@@ -28,12 +31,16 @@ final class FindingBox: NSObject {
     /// The box for the dialog that a menu row describes.
     convenience init(_ prompt: MenuModel.Prompt) {
         self.init(prompt.findings, title: prompt.title, body: prompt.body, footer: prompt.footer,
-                  confirmTitle: prompt.confirmTitle, cancelIsDefault: prompt.cancelIsDefault, cancelTitle: prompt.cancelTitle)
+                  confirmTitle: prompt.confirmTitle, cancelIsDefault: prompt.cancelIsDefault, cancelTitle: prompt.cancelTitle,
+                  revealURL: prompt.revealURL)
     }
 }
 
 /// The dialogs of the app. Each one blocks until the user answers.
 enum Dialogs {
+    /// The third button. It shows the folder in Finder and does not delete.
+    static let showInFinderTitle = "Show in Finder"
+
     /// One short dialog. It says what happens and that it cannot be undone. Nothing more.
     /// `confirmed` is the button response that means "yes, delete". It is not always the first button.
     static func makeAlert(for box: FindingBox) -> (alert: NSAlert, confirmed: NSApplication.ModalResponse) {
@@ -50,10 +57,12 @@ enum Dialogs {
             // "Keep it" is first, so it is the default button. The Return key keeps the item.
             alert.addButton(withTitle: box.cancelTitle ?? "Keep it")
             alert.addButton(withTitle: confirmTitle).hasDestructiveAction = true
+            if box.revealURL != nil { alert.addButton(withTitle: showInFinderTitle) }
             return (alert, .alertSecondButtonReturn)
         }
         alert.addButton(withTitle: confirmTitle).hasDestructiveAction = true
         alert.addButton(withTitle: "Not now")
+        if box.revealURL != nil { alert.addButton(withTitle: showInFinderTitle) }
         return (alert, .alertFirstButtonReturn)
     }
 
@@ -61,7 +70,16 @@ enum Dialogs {
     static func confirm(_ box: FindingBox) -> Bool {
         let (alert, confirmed) = makeAlert(for: box)
         NSApp.bringToFront()
-        return alert.runModal() == confirmed
+        while true {
+            let response = alert.runModal()
+            // "Show in Finder" shows the folder. The dialog stays, so the user can still choose.
+            if response == .alertThirdButtonReturn, let url = box.revealURL {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+                NSApp.bringToFront()
+                continue
+            }
+            return response == confirmed
+        }
     }
 
     /// The owner app did not quit. Nothing was removed.

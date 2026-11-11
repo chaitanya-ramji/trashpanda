@@ -135,6 +135,7 @@ final class MenuModelTests: XCTestCase {
             "  ---",
             "  # Review first",
             "  Device support · example | 3.8 GB",
+            "  Show in Finder",
             "Trash | 5.3 GB",
             "  # Review first",
             "  Trash | 5.3 GB",
@@ -143,7 +144,9 @@ final class MenuModelTests: XCTestCase {
             "  ---",
             "  # Safe to clean",
             "  node_modules · app-a | 1.3 GB",
+            "  Show in Finder",
             "  node_modules · app-b | 500 MB",
+            "  Show in Finder",
             "Smaller groups | 40 MB",
             "  Docker | 40 MB",
             "    Engine: Test Engine · no container uses it (local) [off]",
@@ -285,7 +288,7 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(describe(group.submenu?.rows ?? []), [
             "Free up 2.1 GB…", "---",
             "# Safe to clean", "Build data | 4.2 GB", "Unavailable simulators | 2.1 GB", "---",
-            "# Review first", "Device support · example | 3.8 GB",
+            "# Review first", "Device support · example | 3.8 GB", "Show in Finder",
         ])
         let blocked = try XCTUnwrap(group.submenu?.rows.first { $0.title == "Build data" })
         guard case .quitAndClean(let prompt)? = blocked.action else { return XCTFail("The click asks to quit first") }
@@ -470,5 +473,58 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(products.count, 2)
         XCTAssertTrue(products.allSatisfy { $0.icon != nil && $0.submenu != nil })
         XCTAssertNil(group.submenu?.widthTitles, "The product rows use the width of the menu around them")
+    }
+    // MARK: Show in Finder
+
+    func testRevealURLForEachAction() {
+        let url = URL(fileURLWithPath: "/tmp/none")
+        func reveal(_ action: Action) -> URL? { item("x", .swift, "x", mb, .safe, action: action).revealURL }
+        // One path: Finder can show it.
+        XCTAssertEqual(reveal(.removeContents(url)), url)
+        XCTAssertEqual(reveal(.removeArtifact(url)), url)
+        XCTAssertEqual(reveal(.removeInstaller(url)), url)
+        XCTAssertEqual(reveal(.removeArchive(url)), url)
+        XCTAssertEqual(reveal(.removeUpdateDownloads(url)), url)
+        XCTAssertEqual(reveal(.removeDeviceSupport(url)), url)
+        XCTAssertEqual(reveal(.removeCacheFolderContents(name: "com.example.app"))?.lastPathComponent, "com.example.app")
+        XCTAssertEqual(reveal(.removeCacheFolderContents(name: "com.example.app"))?.deletingLastPathComponent().lastPathComponent, "Caches")
+        XCTAssertNil(reveal(.removeCacheFolderContents(name: "../x")))
+        XCTAssertNil(reveal(.removeCacheFolderContents(name: "")))
+        // A tool action, or an item with more than one path: no folder.
+        XCTAssertNil(reveal(.inform))
+        XCTAssertNil(reveal(.emptyTrash))
+        XCTAssertNil(reveal(.owner(.brewCleanup)))
+        XCTAssertNil(reveal(.docker(.removeVolume(name: "data"))))
+        XCTAssertNil(reveal(.simulator(.deleteDevice(udid: "00000000-0000-0000-0000-000000000000"))))
+        XCTAssertNil(reveal(.globalPackage(manager: .npm, name: "x")))
+        XCTAssertNil(reveal(.removeOldLogs(.crashReports)))
+        XCTAssertNil(reveal(.removeBrowserCaches(browserID: "x")))
+    }
+
+    func testAnItemWithAFolderHasAnAlternateRowAndADockerItemHasNone() throws {
+        let model = MenuModel.make(input(fixture()))
+        let swiftRows = try XCTUnwrap(model.rows.first { $0.title == "Xcode & Swift" }?.submenu?.rows)
+        let device = try XCTUnwrap(swiftRows.firstIndex { $0.title == "Device support · example" })
+        let alternate = swiftRows[device + 1]
+        XCTAssertEqual(alternate.title, "Show in Finder")
+        XCTAssertTrue(alternate.isOptionAlternate)
+        XCTAssertEqual(alternate.action, .reveal(URL(fileURLWithPath: "/tmp/none")))
+        // The dialog has the same folder for its third button.
+        guard case .clean(let prompt)? = swiftRows[device].action else { return XCTFail("The row asks first") }
+        XCTAssertEqual(prompt.revealURL, URL(fileURLWithPath: "/tmp/none"))
+        // The Docker volume has no alternate row and no folder.
+        let docker = try XCTUnwrap(model.rows.first { $0.title == "Smaller groups" }?.submenu?.rows.first?.submenu?.rows)
+        XCTAssertFalse(docker.contains { $0.isOptionAlternate })
+        let volume = try XCTUnwrap(docker.first { $0.title == "Unused volume · data" })
+        guard case .clean(let volumePrompt)? = volume.action else { return XCTFail("The volume row asks first") }
+        XCTAssertNil(volumePrompt.revealURL)
+    }
+
+    func testEachItemRowHasTheRebuildLabelAsItsSubtitleAndKeepsThePathInTheTooltip() throws {
+        let model = MenuModel.make(input(fixture()))
+        let js = try XCTUnwrap(model.rows.first { $0.title == "JavaScript & TypeScript" }?.submenu?.rows)
+        let row = try XCTUnwrap(js.first { $0.title == "node_modules · app-a" })
+        XCTAssertEqual(row.subtitle, "Rebuilds in a few minutes")
+        XCTAssertEqual(row.tooltip?.hasPrefix("~/Projects"), true)
     }
 }

@@ -18,9 +18,12 @@ public struct MenuModel: Equatable, Sendable {
         public let cancelIsDefault: Bool
         /// Text of the button that keeps things as they are, when it is first. nil: "Keep it".
         public let cancelTitle: String?
+        /// The folder that the dialog can show in Finder. nil: the dialog has no such button.
+        public let revealURL: URL?
 
         public init(findings: [Finding], title: String, body: String, footer: String? = nil, confirmTitle: String? = nil,
-                    cancelIsDefault: Bool = false, cancelTitle: String? = nil) {
+                    cancelIsDefault: Bool = false, cancelTitle: String? = nil, revealURL: URL? = nil) {
+            self.revealURL = revealURL
             self.findings = findings
             self.title = title
             self.body = body
@@ -34,6 +37,7 @@ public struct MenuModel: Equatable, Sendable {
         public static func == (a: Prompt, b: Prompt) -> Bool {
             a.findings.map(\.id) == b.findings.map(\.id) && a.title == b.title && a.body == b.body && a.footer == b.footer
                 && a.confirmTitle == b.confirmTitle && a.cancelIsDefault == b.cancelIsDefault && a.cancelTitle == b.cancelTitle
+                && a.revealURL == b.revealURL
         }
     }
 
@@ -45,6 +49,8 @@ public struct MenuModel: Equatable, Sendable {
         case quitAndClean(Prompt)
         case openUpdate, rescan, stopClean, showLog, checkForUpdates, toggleUpdateCheck, toggleLogin, quit
         case openKeepList, openRootsList, openHelp, reportProblem, showAbout
+        /// Show one item in Finder. Nothing is deleted.
+        case reveal(URL)
     }
 
     /// The small icon of a row. The app finds the picture.
@@ -300,31 +306,39 @@ public struct MenuModel: Equatable, Sendable {
     /// The first list has at most 12 rows. It stops earlier at the first row that is below 50 MB and below 1 percent of the group.
     private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64) -> [Row] {
         let titles = MenuText.distinct(titles: list.map(\.title), locations: list.map(\.location))
-        func row(_ i: Int) -> Row { findingRow(list[i], input, title: titles[i]) }
+        func row(_ i: Int) -> [Row] { findingRows(list[i], input, title: titles[i]) }
         var shown = 0
         while shown < min(12, list.count) {
             let f = list[shown]
             if f.bytes < 50_000_000 && Double(f.bytes) < Double(groupBytes) / 100 { break }
             shown += 1
         }
-        var rows = (0..<shown).map(row)
+        var rows = (0..<shown).flatMap(row)
         if shown < list.count {
             let rest = Array(shown..<list.count)
             let size = rest.reduce(Int64(0)) { $0 + list[$1].countedBytes }
             rows.append(Row(title: "\(rest.count) more… · \(ByteText.string(size))",
-                            submenu: Submenu(rows: rest.map(row), alignIcons: true)))
+                            submenu: Submenu(rows: rest.flatMap(row), alignIcons: true)))
         }
         return rows
     }
 
+    /// The row of one item. When Finder can show it, an alternate row follows: "Show in Finder", while Option is held.
+    private static func findingRows(_ f: Finding, _ input: MenuInput, title: String) -> [Row] {
+        let row = findingRow(f, input, title: title)
+        guard let url = f.revealURL else { return [row] }
+        return [row, Row(title: "Show in Finder", action: .reveal(url), isOptionAlternate: true)]
+    }
+
     private static func findingRow(_ f: Finding, _ input: MenuInput, title: String) -> Row {
-        var row = Row(kind: .columns, title: title, size: f.sizeText,
+        var row = Row(kind: .columns, title: title, size: f.sizeText, subtitle: f.rebuild.label,
                       icon: .item(owner: f.owner, agentTitle: f.ecosystem == .aiAgents ? f.title : nil))
         let open = input.blockers(f)
         let c = Confirmation.forOne(f, staleDays: input.staleDays, now: input.now)
         if open.isEmpty {
             row.action = .clean(Prompt(findings: [f], title: c.title, body: c.body, footer: c.footer,
-                                       confirmTitle: c.confirmTitle, cancelIsDefault: c.cancelIsDefault))
+                                       confirmTitle: c.confirmTitle, cancelIsDefault: c.cancelIsDefault,
+                                       revealURL: f.revealURL))
         } else {
             // The app is open. The row looks like any other. The click asks, then quits the app politely, then cleans.
             let names = open.joined(separator: " and ")
@@ -332,7 +346,7 @@ public struct MenuModel: Equatable, Sendable {
                 findings: [f], title: c.title,
                 body: c.body + "\n\n\(names) is open. Trash Panda will ask it to quit first. If it asks to save your work, answer it.",
                 footer: c.footer, confirmTitle: "Quit \(names) and free \(ByteText.string(f.bytes))",
-                cancelIsDefault: true, cancelTitle: "Not now"))
+                cancelIsDefault: true, cancelTitle: "Not now", revealURL: f.revealURL))
         }
         var tip = "\(f.location)\n\(f.rebuild.label)"
         if isProject(f), let days = f.lastActivity.map({ max(0, Int(input.now.timeIntervalSince($0) / 86_400)) }) {
