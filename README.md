@@ -309,7 +309,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] One shared delete helper: measure first, check last ([#130](https://github.com/chaitanya-ramji/trashpanda/issues/130))
 - [ ] Make the guard independent of letter case and Unicode form ([#138](https://github.com/chaitanya-ramji/trashpanda/issues/138))
 - [ ] Close small gaps in delete handlers ([#139](https://github.com/chaitanya-ramji/trashpanda/issues/139))
-- [ ] Keep paths out of the system log, and protect the log file ([#140](https://github.com/chaitanya-ramji/trashpanda/issues/140))
+- [x] Keep paths out of the system log, and protect the log file ([#140](https://github.com/chaitanya-ramji/trashpanda/issues/140))
 - [x] Count a file with hard links one time ([#141](https://github.com/chaitanya-ramji/trashpanda/issues/141))
 - [x] Do not offer a Homebrew package that is younger than the stale limit ([#142](https://github.com/chaitanya-ramji/trashpanda/issues/142))
 - [ ] Harden the CI job and the release job ([#143](https://github.com/chaitanya-ramji/trashpanda/issues/143))
