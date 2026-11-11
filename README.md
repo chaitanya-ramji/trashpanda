@@ -307,7 +307,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Correct the network sentence in SECURITY.md ([#128](https://github.com/chaitanya-ramji/trashpanda/issues/128))
 - [x] Do not start a process on the main thread when the menu opens ([#129](https://github.com/chaitanya-ramji/trashpanda/issues/129))
 - [ ] One shared delete helper: measure first, check last ([#130](https://github.com/chaitanya-ramji/trashpanda/issues/130))
-- [ ] Make the guard independent of letter case and Unicode form ([#138](https://github.com/chaitanya-ramji/trashpanda/issues/138))
+- [x] Make the guard independent of letter case and Unicode form ([#138](https://github.com/chaitanya-ramji/trashpanda/issues/138))
 - [ ] Close small gaps in delete handlers ([#139](https://github.com/chaitanya-ramji/trashpanda/issues/139))
 - [x] Keep paths out of the system log, and protect the log file ([#140](https://github.com/chaitanya-ramji/trashpanda/issues/140))
 - [x] Count a file with hard links one time ([#141](https://github.com/chaitanya-ramji/trashpanda/issues/141))
