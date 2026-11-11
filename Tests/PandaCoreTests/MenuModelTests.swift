@@ -1,0 +1,298 @@
+import XCTest
+@testable import PandaCore
+
+/// Golden tests of the menu. The texts below are what the menu showed before the menu code moved into the model.
+/// If one of them changes, the menu changed for the user.
+final class MenuModelTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private let xcode = AppOwner(name: "Xcode", bundleIDs: ["com.example.xcode"])
+    private let xcodeRunning = RunningSnapshot(apps: [RunningApp(bundleID: "com.example.xcode", name: "Xcode")])
+    private let gb: Int64 = 1_000_000_000
+    private let mb: Int64 = 1_000_000
+    private let disk = DiskUsage(total: 500 * 1_000_000_000, free: 120 * 1_000_000_000)
+
+    private func item(_ id: String, _ eco: Ecosystem, _ title: String, _ bytes: Int64, _ tier: Tier,
+                      place: String = "~/Projects", action: Action = .owner(.brewCleanup),
+                      owner: AppOwner? = nil, last: Date? = nil, upper: Bool = false) -> Finding {
+        Finding(id: id, ecosystem: eco, title: title, location: place, bytes: bytes, tier: tier, rebuild: .minutes,
+                action: action, lastActivity: last, owner: owner, sizeIsUpperLimit: upper)
+    }
+
+    /// A made-up scan with generic names.
+    private func fixture() -> [Finding] {
+        let dir = URL(fileURLWithPath: "/tmp/none")
+        return [
+            item("1", .swift, "Build data", 4_200 * mb, .safe, owner: xcode),
+            item("2", .swift, "Unavailable simulators", 2_100 * mb, .safe),
+            item("3", .swift, "Device support · example", 3_800 * mb, .review, action: .removeDeviceSupport(dir), owner: xcode),
+            item("4", .javascript, "node_modules · app-a", 1_300 * mb, .safe, action: .removeArtifact(dir),
+                 last: now.addingTimeInterval(-3 * 86_400)),
+            item("5", .javascript, "node_modules · app-b", 500 * mb, .safe, action: .removeArtifact(dir), last: now),
+            item("6", .trash, "Trash", 5_300 * mb, .review, place: "~/.Trash", action: .emptyTrash),
+            item("7", .docker, "Unused volume · data", 40 * mb, .review, place: "Docker engine: Test Engine · no container uses it",
+                 action: .docker(.removeVolume(name: "data"))),
+            item("8", .python, "A note", 900 * mb, .review, action: .inform),
+        ]
+    }
+
+    private func input(_ findings: [Finding]?, scanning: Bool = false, cleaning: Bool = false,
+                       running: RunningSnapshot = RunningSnapshot(apps: []), update: String? = nil) -> MenuInput {
+        MenuInput(result: findings.map { ScanResult(findings: $0, disk: disk, date: now) }, disk: disk,
+                  scanning: scanning, cleaning: cleaning, running: running, staleDays: 90, now: now,
+                  updateVersion: update, updateCheckEnabled: true, loginEnabled: false)
+    }
+
+    /// One line for each row: "title | size", with "[off]" for a row that cannot be chosen. A submenu is indented.
+    private func describe(_ rows: [MenuModel.Row], depth: Int = 0) -> [String] {
+        let pad = String(repeating: "  ", count: depth)
+        return rows.flatMap { row -> [String] in
+            switch row.kind {
+            case .separator: return [pad + "---"]
+            case .header: return [pad + "<header>"]
+            case .text, .columns:
+                var line = pad + row.title + (row.size.map { " | \($0)" } ?? "")
+                if !row.enabled { line += " [off]" }
+                return [line] + (row.submenu.map { describe($0.rows, depth: depth + 1) } ?? [])
+            }
+        }
+    }
+
+    private func titles(_ model: MenuModel) -> [String] { describe(model.rows) }
+
+    private let tail = [
+        "---", "Scan again", "Show log in Finder", "Check for updates…", "Check for updates every day",
+        "Open at login", "Quit Trash Panda",
+    ]
+
+    // MARK: States
+
+    func testNoResultYetSaysScanning() {
+        let model = MenuModel.make(input(nil, scanning: true))
+        XCTAssertEqual(titles(model), ["<header>", "---", "Scanning… [off]", "---", "Scanning… [off]"] + Array(tail.dropFirst(2)))
+        XCTAssertEqual(model.header.activity, .scanning)
+        XCTAssertTrue(model.header.segments.isEmpty)
+    }
+
+    func testAResultWithNoItemsSaysNothingToClean() {
+        let model = MenuModel.make(input([]))
+        XCTAssertEqual(titles(model), ["<header>", "---", "Nothing to clean automatically [off]", "---"] + tail)
+        XCTAssertEqual(model.header.activity, .idle)
+    }
+
+    func testScanningWithAResultButNothingSafeSaysScanning() {
+        let model = MenuModel.make(input([item("a", .trash, "Trash", 1 * gb, .review, action: .emptyTrash)], scanning: true))
+        XCTAssertEqual(Array(titles(model).prefix(3)), ["<header>", "---", "Scanning… [off]"])
+        XCTAssertEqual(model.rows.first { $0.action == .rescan }?.title, "Scanning…")
+        XCTAssertEqual(model.rows.first { $0.action == .rescan }?.enabled, false)
+    }
+
+    func testCleaningShowsOneLineAndNoGroups() {
+        let model = MenuModel.make(input(fixture(), cleaning: true))
+        XCTAssertEqual(titles(model), ["<header>", "---", "Cleaning… [off]", "---", "Scan again [off]"] + Array(tail.dropFirst(2)))
+        XCTAssertEqual(model.header.activity, .cleaning)
+        XCTAssertTrue(model.header.segments.isEmpty, "The bar is empty while cleaning")
+    }
+
+    func testOnlyReviewItemsSayNothingToCleanAutomatically() {
+        let model = MenuModel.make(input([item("a", .trash, "Trash", 5_300 * mb, .review, action: .emptyTrash)]))
+        XCTAssertEqual(titles(model), ["<header>", "---", "Nothing to clean automatically [off]", "---",
+                                       "Trash | 5.3 GB", "  Take a look first [off]", "  Trash | 5.3 GB"] + tail)
+    }
+
+    // MARK: The full menu
+
+    func testTheFullMenu() {
+        let model = MenuModel.make(input(fixture(), update: "9.9.9"))
+        XCTAssertEqual(titles(model), [
+            "<header>", "---",
+            "Free up 8.1 GB…", "---",
+            "Xcode & Swift | 10 GB",
+            "  Free up 6.3 GB…",
+            "  ---",
+            "  Build data | 4.2 GB",
+            "  Unavailable simulators | 2.1 GB",
+            "  ---",
+            "  Take a look first [off]",
+            "  Device support · example | 3.8 GB",
+            "Trash | 5.3 GB",
+            "  Take a look first [off]",
+            "  Trash | 5.3 GB",
+            "JavaScript & TypeScript | 1.8 GB",
+            "  Free up 1.8 GB…",
+            "  ---",
+            "  node_modules · app-a | 1.3 GB",
+            "  node_modules · app-b | 500 MB",
+            "Docker | 40 MB",
+            "  Engine: Test Engine · no container uses it (local) [off]",
+            "  ---",
+            "  Take a look first [off]",
+            "  Unused volume · data | 40 MB",
+            "Python | info",
+            "---",
+            "Update available: 9.9.9…",
+            "Scan again", "Show log in Finder", "Check for updates…", "Check for updates every day",
+            "Open at login", "Quit Trash Panda",
+        ])
+    }
+
+    func testTheMainRowAndItsDialog() throws {
+        let model = MenuModel.make(input(fixture()))
+        guard case .clean(let prompt)? = model.rows[2].action else { return XCTFail("The main row cleans") }
+        XCTAssertEqual(model.rows[2].title, "Free up 8.1 GB…")
+        XCTAssertEqual(prompt.title, "Free up 8.1 GB?")
+        XCTAssertEqual(prompt.body, "Trash Panda will clear old build files and caches from Xcode & Swift and JavaScript & TypeScript.")
+        XCTAssertEqual(prompt.findings.map(\.id).sorted(), ["1", "2", "4", "5"])
+        XCTAssertNil(prompt.footer)
+        XCTAssertFalse(prompt.cancelIsDefault)
+    }
+
+    func testTheGroupRowDialog() throws {
+        let model = MenuModel.make(input(fixture()))
+        let xcodeGroup = try XCTUnwrap(model.rows.first { $0.title == "Xcode & Swift" })
+        let bulk = try XCTUnwrap(xcodeGroup.submenu?.rows.first)
+        guard case .clean(let prompt)? = bulk.action else { return XCTFail("The bulk row cleans") }
+        XCTAssertEqual(prompt.title, "Free up 6.3 GB of Xcode & Swift files?")
+        XCTAssertEqual(prompt.body, "Trash Panda will clear old build files and caches.")
+        XCTAssertEqual(prompt.findings.map(\.id), ["1", "2"])
+    }
+
+    func testTheOptionRowAndTheChecks() {
+        let model = MenuModel.make(input([]))
+        let log = model.rows.first { $0.title == "Show log in Finder" }
+        XCTAssertEqual(log?.isOptionAlternate, true)
+        XCTAssertEqual(log?.keyEquivalent, "r")
+        XCTAssertEqual(model.rows.first { $0.action == .rescan }?.keyEquivalent, "r")
+        XCTAssertEqual(model.rows.first { $0.action == .quit }?.keyEquivalent, "q")
+        XCTAssertEqual(model.rows.first { $0.action == .toggleUpdateCheck }?.checked, true)
+        XCTAssertEqual(model.rows.first { $0.action == .toggleLogin }?.checked, false)
+    }
+
+    // MARK: An open app
+
+    func testAnItemOfAnOpenAppStaysInTheListAndAsksToQuit() throws {
+        let model = MenuModel.make(input(fixture(), running: xcodeRunning))
+        // "Free up" does not take the open app's item: 8.1 GB minus 4.2 GB.
+        XCTAssertEqual(model.rows[2].title, "Free up 3.9 GB…")
+        let group = try XCTUnwrap(model.rows.first { $0.title == "Xcode & Swift" })
+        XCTAssertEqual(group.size, "10 GB", "The group still counts the item of the open app")
+        XCTAssertEqual(describe(group.submenu?.rows ?? []), [
+            "Free up 2.1 GB…", "---",
+            "Build data | 4.2 GB", "Unavailable simulators | 2.1 GB", "---",
+            "Take a look first [off]", "Device support · example | 3.8 GB",
+        ])
+        let blocked = try XCTUnwrap(group.submenu?.rows.first { $0.title == "Build data" })
+        guard case .quitAndClean(let prompt)? = blocked.action else { return XCTFail("The click asks to quit first") }
+        XCTAssertEqual(prompt.confirmTitle, "Quit Xcode and free 4.2 GB")
+        XCTAssertEqual(prompt.cancelTitle, "Not now")
+        XCTAssertTrue(prompt.cancelIsDefault)
+        XCTAssertTrue(prompt.body.hasSuffix("\n\nXcode is open. Trash Panda will ask it to quit first. If it asks to save your work, answer it."))
+        // The bar keeps the group, and the line under the title counts the item as "when apps quit".
+        XCTAssertEqual(model.header.totals.waiting, 8_000 * mb)
+        XCTAssertEqual(model.header.segments.first?.blockingApps, ["Xcode"])
+    }
+
+    func testOnlyOpenAppItemsLeaveNothingToCleanAutomatically() {
+        let only = [item("1", .swift, "Build data", 4_200 * mb, .safe, owner: xcode)]
+        let model = MenuModel.make(input(only, running: xcodeRunning))
+        XCTAssertEqual(Array(titles(model).prefix(3)), ["<header>", "---", "Nothing to clean automatically [off]"])
+    }
+
+    // MARK: Item rows
+
+    func testTooltipsAndSizeText() throws {
+        let model = MenuModel.make(input(fixture() + [item("9", .javascript, "node_modules · app-c", 700 * mb, .safe,
+                                                           action: .removeArtifact(URL(fileURLWithPath: "/tmp/none")), upper: true)]))
+        let js = try XCTUnwrap(model.rows.first { $0.title == "JavaScript & TypeScript" })
+        let rows = try XCTUnwrap(js.submenu?.rows)
+        XCTAssertEqual(rows.first { $0.title == "node_modules · app-a" }?.tooltip,
+                       "~/Projects\nRebuilds in a few minutes\nLast worked on 3 days ago")
+        XCTAssertEqual(rows.first { $0.title == "node_modules · app-b" }?.tooltip,
+                       "~/Projects\nRebuilds in a few minutes\nLast worked on today")
+        XCTAssertEqual(rows.first { $0.title == "node_modules · app-c" }?.size, "up to 700 MB")
+        XCTAssertEqual(js.size, "1.8 GB", "An upper limit is not added to the group")
+    }
+
+    func testMoreThanTwelveItemsOpenInAMoreSubmenu() throws {
+        let many = (1...40).map { item("m\($0)", .python, "Env \($0)", Int64(100 + $0) * mb, .safe) }
+        let model = MenuModel.make(input(many))
+        let group = try XCTUnwrap(model.rows.first { $0.title == "Python" })
+        let rows = try XCTUnwrap(group.submenu?.rows)
+        // Free up, a separator, 12 rows, and the "more" row.
+        XCTAssertEqual(rows.count, 15)
+        XCTAssertEqual(rows[2].title, "Env 40", "The largest first")
+        XCTAssertEqual(rows[13].title, "Env 29")
+        XCTAssertEqual(rows[14].title, "28 more…")
+        XCTAssertEqual(rows[14].submenu?.rows.count, 28)
+        XCTAssertEqual(rows[14].submenu?.rows.first?.title, "Env 28")
+        XCTAssertEqual(rows[14].submenu?.rows.last?.title, "Env 1")
+        XCTAssertNil(rows[14].action)
+    }
+
+    func testReviewItemsAlsoFoldAfterTwelve() throws {
+        let many = (1...13).map { item("r\($0)", .python, "Old \($0)", Int64(100 + $0) * mb, .review) }
+        let group = try XCTUnwrap(MenuModel.make(input(many)).rows.first { $0.title == "Python" })
+        let rows = try XCTUnwrap(group.submenu?.rows)
+        XCTAssertEqual(rows.count, 14)
+        XCTAssertEqual(rows[0].title, "Take a look first")
+        XCTAssertEqual(rows[13].title, "1 more…")
+    }
+
+    func testEveryGroupGetsARow() {
+        let findings = Ecosystem.allCases.enumerated().map { i, eco in
+            item("g\(i)", eco, "Item \(i)", Int64(i + 1) * mb, .review)
+        }
+        let model = MenuModel.make(input(findings))
+        let groups = model.rows.filter { $0.kind == .columns }
+        XCTAssertEqual(groups.count, Ecosystem.allCases.count)
+        XCTAssertEqual(Set(groups.map(\.title)).count, Ecosystem.allCases.count)
+        // The largest first.
+        XCTAssertEqual(groups.first?.title, Ecosystem.allCases.last?.name)
+    }
+
+    func testTheColumnOfSizesFollowsTheTitlesOfTheGroup() throws {
+        let model = MenuModel.make(input(fixture()))
+        let group = try XCTUnwrap(model.rows.first { $0.title == "Docker" })
+        XCTAssertEqual(group.submenu?.widthTitles, ["Unused volume · data"])
+        XCTAssertEqual(group.submenu?.alignIcons, true)
+        XCTAssertEqual(MenuModel.tab(forWidestTitle: 10), 268)
+        XCTAssertEqual(MenuModel.tab(forWidestTitle: 300), 390)
+        XCTAssertEqual(MenuModel.tab(forWidestTitle: 900), 520)
+    }
+
+    // MARK: Bar clicks and the AI agents group
+
+    func testAClickOnAPartOfTheBarOpensTheItemsOfThatGroup() throws {
+        let inp = input(fixture())
+        let model = MenuModel.make(inp)
+        let trashPart = try XCTUnwrap(model.header.segments.first { $0.name == "Trash" })
+        XCTAssertEqual(describe(MenuModel.popup(for: trashPart, inp).rows), ["Take a look first [off]", "Trash | 5.3 GB"])
+    }
+
+    func testAClickOnOtherOpensOneRowForEachGroup() throws {
+        let many = Ecosystem.allCases.prefix(8).enumerated().map { i, eco in
+            item("o\(i)", eco, "Item \(i)", Int64(i + 1) * 100 * mb, .review)
+        }
+        let inp = input(many)
+        let other = try XCTUnwrap(MenuModel.make(inp).header.segments.first { $0.isOther })
+        let popup = MenuModel.popup(for: other, inp)
+        XCTAssertEqual(popup.rows.count, other.ecosystems.count)
+        XCTAssertTrue(popup.rows.allSatisfy { $0.kind == .columns && $0.submenu != nil })
+    }
+
+    func testAManyItemAgentsGroupIsSplitByProduct() throws {
+        let agents = ["Claude · cache a", "Claude · cache b", "Claude · cache c", "Claude · cache d",
+                      "Codex · cache a", "Codex · cache b", "Codex · cache c"]
+            .enumerated().map { i, title in item("a\(i)", .aiAgents, title, Int64(i + 1) * 100 * mb, .safe) }
+        let model = MenuModel.make(input(agents))
+        let group = try XCTUnwrap(model.rows.first { $0.kind == .columns })
+        let rows = try XCTUnwrap(group.submenu?.rows)
+        XCTAssertTrue(rows[0].title.hasPrefix("Free up "))
+        guard case .clean(let prompt)? = rows[0].action else { return XCTFail("The bulk row cleans") }
+        XCTAssertTrue(prompt.title.hasSuffix(" of AI agents files?"))
+        XCTAssertEqual(rows[1], .separator)
+        let products = rows.dropFirst(2)
+        XCTAssertEqual(products.count, 2)
+        XCTAssertTrue(products.allSatisfy { $0.icon != nil && $0.submenu != nil })
+        XCTAssertNil(group.submenu?.widthTitles, "The product rows use the width of the menu around them")
+    }
+}

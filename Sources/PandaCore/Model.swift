@@ -346,7 +346,7 @@ public struct Finding: Identifiable, Sendable {
     }
 }
 
-public struct DiskUsage: Sendable {
+public struct DiskUsage: Sendable, Equatable {
     public let total: Int64
     public let free: Int64
     public var used: Int64 { max(0, total - free) }
