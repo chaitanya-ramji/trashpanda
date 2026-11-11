@@ -329,7 +329,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] One summary dialog after a clean, with the check of the real free space ([#157](https://github.com/chaitanya-ramji/trashpanda/issues/157))
 - [ ] A fixed color for each group ([#158](https://github.com/chaitanya-ramji/trashpanda/issues/158))
 - [ ] The header follows the accessibility settings ([#159](https://github.com/chaitanya-ramji/trashpanda/issues/159))
-- [ ] Label and tooltip for the menu bar item ([#160](https://github.com/chaitanya-ramji/trashpanda/issues/160))
+- [x] Label and tooltip for the menu bar item ([#160](https://github.com/chaitanya-ramji/trashpanda/issues/160))
 - [ ] Small text and list defects ([#161](https://github.com/chaitanya-ramji/trashpanda/issues/161))
 - [ ] "Always keep this item" in the dialog ([#162](https://github.com/chaitanya-ramji/trashpanda/issues/162))
 - [ ] Remove dead code and code that is written two times ([#163](https://github.com/chaitanya-ramji/trashpanda/issues/163))
