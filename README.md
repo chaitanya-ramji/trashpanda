@@ -323,7 +323,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Say what the main action removes ([#151](https://github.com/chaitanya-ramji/trashpanda/issues/151))
 - [x] Show the time of the last scan ([#152](https://github.com/chaitanya-ramji/trashpanda/issues/152))
 - [ ] "Show in Finder" for an item, and the rebuild label as a subtitle ([#153](https://github.com/chaitanya-ramji/trashpanda/issues/153))
-- [ ] Section headers in a group submenu ([#154](https://github.com/chaitanya-ramji/trashpanda/issues/154))
+- [x] Section headers in a group submenu ([#154](https://github.com/chaitanya-ramji/trashpanda/issues/154))
 - [ ] Do not build the menu again while it is open ([#155](https://github.com/chaitanya-ramji/trashpanda/issues/155))
 - [ ] Progress and a stop during a clean ([#156](https://github.com/chaitanya-ramji/trashpanda/issues/156))
 - [ ] One summary dialog after a clean, with the check of the real free space ([#157](https://github.com/chaitanya-ramji/trashpanda/issues/157))

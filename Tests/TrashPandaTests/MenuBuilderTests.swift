@@ -23,7 +23,7 @@ final class MenuBuilderTests: XCTestCase {
             "<header>", "---", "Free up 1.3 GB…", "---", "JavaScript & TypeScript\t1.3 GB", "---", "Scan again", "Show log in Finder",
             "Check for updates…", "Check for updates every day", "Open at login", "Quit Trash Panda",
         ])
-        XCTAssertEqual(menu.items[4].submenu?.items.map(text), ["Free up 1.3 GB…", "---", "node_modules · app-a\t1.3 GB"])
+        XCTAssertEqual(menu.items[4].submenu?.items.map(text), ["Free up 1.3 GB…", "---", "Safe to clean", "node_modules · app-a\t1.3 GB"])
         XCTAssertTrue(menu.items[7].isAlternate)
     }
 }

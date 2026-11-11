@@ -31,8 +31,13 @@ final class MenuBuilder: NSObject {
         // One column for the text: if any row has an app icon, the other rows get a blank one.
         if menu.items.contains(where: { $0.image != nil }) {
             let blank = NSImage(size: Self.iconSize)
-            for item in menu.items where item.image == nil && !item.isSeparatorItem { item.image = blank }
+            for item in menu.items where item.image == nil && !item.isSeparatorItem && !Self.isSectionHeader(item) { item.image = blank }
         }
+    }
+
+    private static func isSectionHeader(_ item: NSMenuItem) -> Bool {
+        if #available(macOS 14, *) { return item.isSectionHeader }
+        return false
     }
 
     /// Where the sizes end. A submenu with a long title widens it, so that the sizes stay in one column.
@@ -54,6 +59,11 @@ final class MenuBuilder: NSObject {
         case .header:
             let item = NSMenuItem()
             item.view = header
+            return item
+        case .sectionHeader:
+            if #available(macOS 14, *) { return NSMenuItem.sectionHeader(title: row.title) }
+            let item = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
+            item.isEnabled = false
             return item
         case .text, .columns:
             break

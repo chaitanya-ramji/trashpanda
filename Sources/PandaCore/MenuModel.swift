@@ -57,6 +57,8 @@ public struct MenuModel: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case header
         case separator
+        /// A label above a list of rows. A system before macOS 14 shows it as a grey row.
+        case sectionHeader
         /// A plain title.
         case text
         /// A title on the left and a size on the right, in one column of sizes.
@@ -114,6 +116,8 @@ public struct MenuModel: Equatable, Sendable {
 
         static let separator = Row(kind: .separator)
         static func note(_ title: String) -> Row { Row(title: title, enabled: false) }
+        /// A label above a list. It cannot be chosen.
+        static func section(_ title: String) -> Row { Row(kind: .sectionHeader, title: title, enabled: false) }
     }
 
     /// What the storage header at the top shows.
@@ -258,11 +262,12 @@ public struct MenuModel: Equatable, Sendable {
         }
         if !safeAll.isEmpty {
             if !safe.isEmpty { rows.append(.separator) }
+            rows.append(.section("Safe to clean"))
             rows += listRows(safeAll, input)
         }
         if !review.isEmpty {
             if !safeAll.isEmpty { rows.append(.separator) }
-            rows.append(.note("Take a look first"))
+            rows.append(.section("Review first"))
             rows += listRows(review, input)
         }
         return Submenu(rows: rows, widthTitles: items.map(\.title), alignIcons: true)
