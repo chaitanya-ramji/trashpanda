@@ -159,7 +159,8 @@ public enum OwnerCommand: String, Sendable, CaseIterable {
 }
 
 /// A Docker command for one object. The identifier is checked, and the command has a fixed shape.
-/// We never use -f (force) or -v (volumes), so Docker itself refuses to remove something that is in use.
+/// We never force the removal of a container, an image, or a volume. The prune commands use -f only to answer their question.
+/// We never use -v (volumes), so Docker itself refuses to remove something that is in use.
 public enum DockerAction: Sendable, Equatable {
     case removeContainer(id: String)
     /// Removes an image by all of its `repository:tag` names. Never forced.

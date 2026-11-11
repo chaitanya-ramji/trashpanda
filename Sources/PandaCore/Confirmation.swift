@@ -181,6 +181,12 @@ public struct Confirmation: Equatable, Sendable {
                 let days = max(0, Int(now.timeIntervalSince(d) / 86_400))
                 if days < staleDays { text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")." }
             }
+            if f.sizeIsUpperLimit, case .owner(let command) = f.action, command == .brewCleanup || command == .simctlDeleteUnavailable {
+                // The tool decides what it removes. Say so, and show the size as the estimate that it is.
+                if let note = f.note { text += " \(note)" }
+                return Confirmation(title: "Clean up, \(f.sizeText)?", body: text, footer: nil,
+                                    confirmTitle: "Clean up", cancelIsDefault: false)
+            }
             return Confirmation(title: "Free up \(ByteText.string(f.bytes))?", body: text, footer: nil,
                                 confirmTitle: nil, cancelIsDefault: false)
         }

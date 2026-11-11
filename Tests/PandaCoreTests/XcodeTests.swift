@@ -202,6 +202,27 @@ final class XcodeScanTests: SimctlTestCase {
         if case .owner(.simctlDeleteUnavailable) = item.action {} else { XCTFail("Apple's own command") }
     }
 
+    /// S-11 d. Apple's command can remove more than the shown size, so the row says "up to" and the dialog says what the tool removes.
+    func testUnavailableSimulatorsShowAnUpToSizeAndTheDialogSaysWhatTheToolRemoves() throws {
+        let box = try Sandbox()
+        let item = try XCTUnwrap(try full(box).1.scanSimulators().first { $0.id == "xcode.sim.unavailable" })
+        XCTAssertTrue(item.sizeIsUpperLimit)
+        XCTAssertTrue(item.sizeText.hasPrefix("up to "), item.sizeText)
+        let c = Confirmation.forOne(item, staleDays: 30)
+        XCTAssertTrue(c.title.contains("up to "), c.title)
+        XCTAssertTrue(c.body.contains("can remove more than this size"), c.body)
+    }
+
+    func testBrewCleanupShowsAnUpToSizeAndTheDialogSaysWhatTheToolRemoves() {
+        let item = Finding(id: "brew.cleanup", ecosystem: .homebrew, title: "Old downloads and versions", location: "x", bytes: 5_000_000,
+                           tier: .safe, rebuild: .download, action: .owner(.brewCleanup),
+                           note: "brew cleanup --prune=all removes all old downloads and old versions of packages. It can remove more than this size.",
+                           sizeIsUpperLimit: true)
+        let c = Confirmation.forOne(item, staleDays: 30)
+        XCTAssertTrue(c.title.contains("up to "), c.title)
+        XCTAssertTrue(c.body.contains("--prune=all"), c.body)
+    }
+
     func testNothingOnAMacWithNoXcodeOrWithNothingInstalled() throws {
         let box = try Sandbox()
         XCTAssertTrue(scanner(box, nil).scanSimulators().isEmpty, "No tool: nothing, and the real xcrun is never called")
