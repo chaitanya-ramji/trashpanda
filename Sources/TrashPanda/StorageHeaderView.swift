@@ -86,7 +86,11 @@ final class StorageHeaderView: NSView {
     }
 
     /// What the system settings say now. The core decides how to draw for them.
+    /// A test sets this, so that the picture does not depend on the settings of the machine.
+    var settingsOverride: HeaderSettings?
+
     private var style: HeaderStyle {
+        if let settings = settingsOverride { return HeaderStyle(settings) }
         let workspace = NSWorkspace.shared
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return HeaderStyle(HeaderSettings(
@@ -175,6 +179,13 @@ final class StorageHeaderView: NSView {
         return GroupColors.color(slot: slot)
     }
 
+    /// The color of the review share of part `index`: paler than the safe share. Dark mode mixes in white instead of lowering the alpha.
+    private func reviewColor(_ index: Int, style: HeaderStyle) -> NSColor {
+        let base = color(index)
+        let mixed = style.reviewWhiteMix > 0 ? (base.blended(withFraction: style.reviewWhiteMix, of: .white) ?? base) : base
+        return mixed.withAlphaComponent(style.reviewFillAlpha)
+    }
+
     // MARK: Mouse
 
     override func updateTrackingAreas() {
@@ -243,7 +254,10 @@ final class StorageHeaderView: NSView {
                 .font: Self.titleFont,
                 .foregroundColor: NSColor.labelColor,
             ])
-        detail.draw(at: NSPoint(x: inset, y: layout.detailY), withAttributes: [
+        let truncate = NSMutableParagraphStyle()
+        truncate.lineBreakMode = .byTruncatingTail
+        detail.draw(in: NSRect(x: inset, y: layout.detailY, width: bounds.width - inset - Self.rightInset, height: Self.lineHeight(Self.detailFont)), withAttributes: [
+            .paragraphStyle: truncate,
             .font: Self.detailFont,
             .foregroundColor: hovered == nil ? NSColor.secondaryLabelColor : NSColor.labelColor,
         ])
@@ -262,7 +276,7 @@ final class StorageHeaderView: NSView {
         NSBezierPath(roundedRect: bar, xRadius: 5, yRadius: 5).addClip()
         for (i, slot) in slots.enumerated() {
             let s = segments[i]
-            let alpha: CGFloat = style.dimOtherParts && hovered != nil && hovered != i ? 0.30 : 1
+            let alpha: CGFloat = style.dimOtherParts && hovered != nil && hovered != i ? SplitBar.dimmedAlpha(0.30) : 1
             let rect = NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height)
             let widths = SplitBar.partWidths(s, width: rect.width)
             // `divided` returns the slice first and the remainder second.
@@ -274,7 +288,7 @@ final class StorageHeaderView: NSView {
                 if style.patternForReview {
                     drawLines(in: review, color: color(i), alpha: alpha, style: style)
                 } else {
-                    color(i).withAlphaComponent(style.reviewFillAlpha * alpha).setFill()
+                    reviewColor(i, style: style).withAlphaComponent(style.reviewFillAlpha * alpha).setFill()
                     review.fill()
                 }
             }
@@ -348,13 +362,20 @@ final class StorageHeaderView: NSView {
         let texts = segments.map { "\($0.shortName) \(Format.bytes($0.bytes))" }
         let widths = texts.enumerated().map { i, text in dotSize + 5 + text.size(withAttributes: attributes(i)).width + 8 }
         let moreAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]
-        let shown = SplitBar.legendCount(entryWidths: widths, moreWidth: { "+\($0) more".size(withAttributes: moreAttributes).width }, room: room)
+        let shown = SplitBar.legendCount(entryWidths: widths, separator: 8, moreWidth: { "+\($0) more".size(withAttributes: moreAttributes).width }, room: room)
         var x = Self.inset
         for i in 0..<shown {
             let s = segments[i]
             // A part that waits for an app to quit has a ring, not a dot, like its light part in the bar.
             let dot = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: y + (Self.lineHeight(font) - dotSize) / 2, width: dotSize, height: dotSize))
             if s.isBlockedOnly {
+                color(i).setStroke()
+                dot.lineWidth = 1
+                dot.stroke()
+            } else if s.safeBytes == 0 {
+                // A part with only review data is pale in the bar, so its dot is pale too, with a ring in the full color.
+                reviewColor(i, style: style).setFill()
+                dot.fill()
                 color(i).setStroke()
                 dot.lineWidth = 1
                 dot.stroke()
@@ -366,6 +387,8 @@ final class StorageHeaderView: NSView {
             x += widths[i]
         }
         let left = segments.count - shown
-        if left > 0 { "+\(left) more".draw(at: NSPoint(x: x, y: y), withAttributes: moreAttributes) }
+        if left > 0, x + "+\(left) more".size(withAttributes: moreAttributes).width <= bounds.width - Self.rightInset {
+            "+\(left) more".draw(at: NSPoint(x: x, y: y), withAttributes: moreAttributes)
+        }
     }
 }

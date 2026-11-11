@@ -24,8 +24,11 @@ public struct HeaderStyle: Equatable, Sendable {
     public let stripeFillAlpha: CGFloat
     /// Alpha of the stripe lines.
     public let stripeLineAlpha: CGFloat
-    /// Alpha of the review share of a part. It is lighter than the safe share, so that "free now" and "to review" can be told apart.
+    /// Alpha of the review share of a part. In light mode it is lower than 1, so the review share is paler than the safe share.
     public let reviewFillAlpha: CGFloat
+    /// How much white is mixed into the color of the review share (0 to 1). In dark mode a lower alpha only makes a darker color,
+    /// so the review share is lighter by mixing in white.
+    public let reviewWhiteMix: CGFloat
     /// A 1 point line between two parts.
     public let separatorsBetweenParts: Bool
     /// The review share of a part has a line pattern, not only a lighter color.
@@ -41,9 +44,11 @@ public struct HeaderStyle: Equatable, Sendable {
         // "Increase contrast" gives 0.6. In dark mode the light fill needs a little more to be seen.
         stripeFillAlpha = settings.increaseContrast ? 0.6 : (settings.darkMode ? 0.40 : 0.30)
         stripeLineAlpha = settings.increaseContrast ? 1 : 0.85
-        reviewFillAlpha = settings.increaseContrast ? 0.75 : (settings.darkMode ? 0.60 : 0.50)
+        reviewFillAlpha = settings.darkMode ? 1 : 0.50
+        reviewWhiteMix = settings.darkMode ? 0.45 : 0
         separatorsBetweenParts = settings.increaseContrast
-        patternForReview = settings.differentiateWithoutColor
+        // "Increase contrast" asks for a clearer difference, so the review share gets the line pattern too.
+        patternForReview = settings.differentiateWithoutColor || settings.increaseContrast
         dimOtherParts = !settings.reduceTransparency
         outlineHoveredPart = settings.reduceTransparency
         showSpinner = !settings.reduceMotion
@@ -98,17 +103,22 @@ extension SplitBar {
         return PartWidths(safe: max(0, width - blocked - review), review: review, blocked: blocked)
     }
 
-    /// How many legend entries fit. `entryWidths` are the widths of the entries in order, and `moreWidth(k)` is the width of the
-    /// text "+k more". The entries that are shown, and the "+k more" text for the others, must fit in `room`. The result is never
-    /// below 1 when the first entry fits alone, and the text "+k more" is never left out when some entries are not shown.
-    public static func legendCount(entryWidths: [CGFloat], moreWidth: (Int) -> CGFloat, room: CGFloat) -> Int {
+    /// How many legend entries fit. `entryWidths` are the widths of the entries in order, each with the `separator` that follows it
+    /// (the last entry needs no separator). `moreWidth(k)` is the width of the text "+k more". The entries that are shown, and the
+    /// text "+k more" for the others, must fit in `room`. The text "+k more" is never left out when some entries are not shown.
+    /// The result can be 0 when the first entry does not fit together with the text "+k more".
+    public static func legendCount(entryWidths: [CGFloat], separator: CGFloat = 0, moreWidth: (Int) -> CGFloat, room: CGFloat) -> Int {
         var best = 0
         var used: CGFloat = 0
         for (i, w) in entryWidths.enumerated() {
             used += w
             let left = entryWidths.count - (i + 1)
-            if used + (left > 0 ? moreWidth(left) : 0) <= room { best = i + 1 }
+            let needed = left > 0 ? used + moreWidth(left) : used - separator
+            if needed <= room { best = i + 1 }
         }
         return best
     }
+
+    /// The alpha of a part that is not under the mouse while another part is. It never goes below a floor, so a pale part stays visible.
+    public static func dimmedAlpha(_ base: CGFloat) -> CGFloat { max(0.22, base) }
 }
