@@ -91,9 +91,24 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(model.rows.first { $0.action == .rescan }?.enabled, false)
     }
 
+    func testCleaningShowsProgressAndAStopRow() {
+        var i = input(fixture(), cleaning: true)
+        i.cleaningTitle = "Cleaning 3 of 38 · Xcode build data"
+        var model = MenuModel.make(i)
+        XCTAssertEqual(model.rows[2].title, "Cleaning 3 of 38 · Xcode build data")
+        XCTAssertEqual(model.rows[3].title, "Stop after this item")
+        XCTAssertEqual(model.rows[3].action, .stopClean)
+        XCTAssertTrue(model.rows[3].enabled)
+        i.stopRequested = true
+        model = MenuModel.make(i)
+        XCTAssertEqual(model.rows[3].title, "Stopping after this item…")
+        XCTAssertFalse(model.rows[3].enabled)
+        XCTAssertNil(MenuModel.make(input(fixture())).rows.first { $0.action == .stopClean }, "No stop row when no clean runs")
+    }
+
     func testCleaningShowsOneLineAndNoGroups() {
         let model = MenuModel.make(input(fixture(), cleaning: true))
-        XCTAssertEqual(titles(model), ["<header>", "---", "Cleaning… [off]", "---", "Scan again [off]"] + Array(tail.dropFirst(2)))
+        XCTAssertEqual(titles(model), ["<header>", "---", "Cleaning… [off]", "Stop after this item", "---", "Scan again [off]"] + Array(tail.dropFirst(2)))
         XCTAssertEqual(model.header.activity, .cleaning)
         XCTAssertTrue(model.header.segments.isEmpty, "The bar is empty while cleaning")
     }

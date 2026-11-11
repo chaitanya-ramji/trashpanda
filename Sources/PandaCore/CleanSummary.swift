@@ -32,9 +32,15 @@ public enum CleanSummary {
         let title = report.freed > 0 ? "Freed \(ByteText.string(report.freed))" : "Nothing freed"
         var lines: [String] = []
         lines.append(report.removed == 1 ? "1 item removed." : "\(report.removed) items removed.")
-        if !report.skipped.isEmpty {
-            let n = report.skipped.count
-            lines.append("\(n) \(n == 1 ? "item" : "items") left alone: \(reasons(report.skipped)).")
+        // Items that the user stopped have their own line, so that the reason cannot fall off the list.
+        let stopped = report.skipped.filter { reason(of: $0) == Cleaner.stoppedReason }
+        let alone = report.skipped.filter { reason(of: $0) != Cleaner.stoppedReason }
+        if !stopped.isEmpty {
+            lines.append("Stopped: \(stopped.count) \(stopped.count == 1 ? "item" : "items") not started.")
+        }
+        if !alone.isEmpty {
+            let n = alone.count
+            lines.append("\(n) \(n == 1 ? "item" : "items") left alone: \(reasons(alone)).")
         }
         if !report.failed.isEmpty {
             let n = report.failed.count

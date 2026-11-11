@@ -38,6 +38,11 @@ public final class Cleaner {
     var sizeOf: (URL) -> Int64 = { Sizer.size(of: $0) }
     /// The one call that removes a folder or a file. A test can replace it.
     var deleteItem: (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
+    /// Asked once before each item, never during one. When it says true, the clean ends and the items that are left
+    /// are reported as skipped with the reason `stoppedReason`. The item that runs always finishes.
+    public var shouldStop: @Sendable () -> Bool = { false }
+    /// The reason that the report gives for an item that the user stopped.
+    public static let stoppedReason = "Stopped by you"
     /// The working folders of the running programs. A test can replace it.
     var activeDirectories: () -> [String] = { Shell.activeDirectories() }
     /// The newest list of working folders, and when we read it (`systemUptime`). A build folder is checked again after the measuring.
@@ -86,7 +91,12 @@ public final class Cleaner {
         let active = activeDirectories()
         activeSnapshot = (active, -.infinity)
 
-        for finding in findings {
+        for (index, finding) in findings.enumerated() {
+            // The only place where a stop is checked: between two items. No item is cut in the middle.
+            if shouldStop() {
+                for left in findings[index...] { skip(left, Cleaner.stoppedReason, &report) }
+                break
+            }
             progress?(finding.title)
             // What this item freed. The Docker items are counted apart (#40). `defer` runs at the end of each turn, also after `continue`.
             let freedAtStart = report.freed

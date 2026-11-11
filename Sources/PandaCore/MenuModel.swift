@@ -43,7 +43,7 @@ public struct MenuModel: Equatable, Sendable {
         case clean(Prompt)
         /// Ask, then quit the open owner app politely, then clean the one item of the prompt.
         case quitAndClean(Prompt)
-        case openUpdate, rescan, showLog, checkForUpdates, toggleUpdateCheck, toggleLogin, quit
+        case openUpdate, rescan, stopClean, showLog, checkForUpdates, toggleUpdateCheck, toggleLogin, quit
         case openKeepList, openRootsList, openHelp, reportProblem, showAbout
     }
 
@@ -154,7 +154,9 @@ public struct MenuModel: Equatable, Sendable {
 
         var rows: [Row] = [Row(kind: .header), .separator]
         if cleaning {
-            rows.append(.note("Cleaning…"))
+            rows.append(.note(input.cleaningTitle ?? "Cleaning…"))
+            rows.append(Row(title: input.stopRequested ? "Stopping after this item…" : "Stop after this item",
+                            enabled: !input.stopRequested, action: .stopClean))
         } else if input.hasResult {
             if usableSafe.isEmpty && scanning {
                 rows.append(.note("Scanning…"))
@@ -376,6 +378,10 @@ public struct MenuInput: Sendable {
     public var updateVersion: String?
     public var updateCheckEnabled: Bool
     public var loginEnabled: Bool
+    /// The text of the first row during a clean. nil: "Cleaning…".
+    public var cleaningTitle: String?
+    /// True after the user chose to stop. The clean ends after the item that runs.
+    public var stopRequested = false
 
     public init(result: ScanResult?, disk: DiskUsage, scanning: Bool, cleaning: Bool, running: RunningSnapshot,
                 staleDays: Int, now: Date = Date(), updateVersion: String? = nil,
