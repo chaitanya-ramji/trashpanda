@@ -195,6 +195,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rebuildMenu() {
         let model = MenuModel.make(menuInput())
+        // The menu is closed. The header only grows, so a wide moment would keep the menu wide for the whole session:
+        // start again from the minimum width and let the rows decide.
+        header.setFrameSize(NSSize(width: StorageHeaderView.minimumWidth, height: header.frame.height))
         header.update(disk: model.header.disk, totals: model.header.totals, activity: model.header.activity,
                       segments: model.header.segments)
         header.onSelect = { [weak self] segment in self?.showGroup(segment) }
@@ -211,7 +214,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard result != nil else { return }
         let popup = NSMenu()
         popup.appearance = menu.appearance
-        builder.populate(popup, submenu: MenuModel.popup(for: segment, menuInput()))
+        let input = menuInput()
+        builder.populate(popup, submenu: MenuModel.popup(for: segment, input), tab: builder.mainTab(for: MenuModel.make(input)))
         Log.info("user: opened \(segment.name) from the split bar")
         menu.cancelTracking()
         DispatchQueue.main.async { [weak self] in
