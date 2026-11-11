@@ -179,7 +179,7 @@ enum Catalog {
         // Haskell
         CacheSpec(id: "haskell.cabal.packages", title: "Cabal package downloads", ecosystem: .haskell,
                   paths: [".cabal/packages"], tier: .safe, rebuild: .download),
-        CacheSpec(id: "haskell.cabal.xdg", title: "Cabal package downloads", ecosystem: .haskell,
+        CacheSpec(id: "haskell.cabal.xdg", title: "Cabal package downloads in .cache/cabal", ecosystem: .haskell,
                   paths: [".cache/cabal/packages"], tier: .safe, rebuild: .download),
         CacheSpec(id: "haskell.ghcup.cache", title: "GHCup downloads", ecosystem: .haskell,
                   paths: [".ghcup/cache"], tier: .safe, rebuild: .download),

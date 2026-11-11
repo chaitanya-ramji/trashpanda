@@ -74,8 +74,8 @@ public struct DockerEngine: Sendable, Equatable {
         for line in r.stdout.split(separator: "\n") {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   let type = obj["Type"] as? String else { continue }
-            out[type] = (DiskScanner.parseDockerSize(DockerInventory.string(obj["Size"])) ?? 0,
-                         DiskScanner.parseDockerSize(DockerInventory.string(obj["Reclaimable"])) ?? 0)
+            out[type] = (ByteText.parse(DockerInventory.string(obj["Size"])) ?? 0,
+                         ByteText.parse(DockerInventory.string(obj["Reclaimable"])) ?? 0)
         }
         return out
     }

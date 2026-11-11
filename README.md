@@ -331,7 +331,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Label and tooltip for the menu bar item ([#160](https://github.com/chaitanya-ramji/trashpanda/issues/160))
 - [x] Small text and list defects ([#161](https://github.com/chaitanya-ramji/trashpanda/issues/161))
 - [x] "Always keep this item" in the dialog ([#162](https://github.com/chaitanya-ramji/trashpanda/issues/162))
-- [ ] Remove dead code and code that is written two times ([#163](https://github.com/chaitanya-ramji/trashpanda/issues/163))
+- [x] Remove dead code and code that is written two times ([#163](https://github.com/chaitanya-ramji/trashpanda/issues/163))
 - [x] Own version type, and a failed update check is not a check ([#164](https://github.com/chaitanya-ramji/trashpanda/issues/164))
 - [ ] Stop a tool that ignores the time limit (own child process only) ([#186](https://github.com/chaitanya-ramji/trashpanda/issues/186))
 - [ ] Show the Docker disk file in a "Good to know" section ([#187](https://github.com/chaitanya-ramji/trashpanda/issues/187))

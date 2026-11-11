@@ -67,6 +67,12 @@ public struct Confirmation: Equatable, Sendable {
         }
     }
 
+    /// A cache folder of iCloud or macOS, which the dialog warns about.
+    private static func isSystemCache(_ f: Finding) -> Bool {
+        if case .removeCacheFolderContents(let name) = f.action { return CacheExplorer.keepReason(name) != nil }
+        return false
+    }
+
     public static func forOne(_ f: Finding, staleDays: Int, now: Date = Date()) -> Confirmation {
         let detail = "\(f.title)\n\(f.location)"
         switch kind(of: f) {
@@ -110,7 +116,7 @@ public struct Confirmation: Equatable, Sendable {
                 title: "Remove saved website data?", body: detail,
                 footer: "Websites that work offline keep their files here. After this, such a site may not open without a network until you visit it online again. This can't be undone.",
                 confirmTitle: "Remove data", cancelIsDefault: true)
-        case .cacheFolder where { if case .removeCacheFolderContents(let n) = f.action { return CacheExplorer.keepReason(n) != nil } else { return false } }():
+        case .cacheFolder where isSystemCache(f):
             return Confirmation(
                 title: "Empty this system cache?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))\n\(f.note ?? "")",
                 footer: "This folder belongs to iCloud or to macOS. They build the files again, and that can take a while. Data that is not synced yet can be lost, and a system service may need a restart. Trash Panda cannot check this for you. This can't be undone.",
@@ -143,7 +149,7 @@ public struct Confirmation: Equatable, Sendable {
         case .vmBundle:
             return Confirmation(
                 title: "Remove the Cowork VM?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes)) on your Mac",
-                footer: "Claude downloads about 10 GB again the next time it needs the Cowork VM. Files that Cowork saved inside the VM are lost. Try Settings, Storage in Claude first. This can't be undone.",
+                footer: "Claude downloads the VM again the next time it needs it. Files that Cowork saved inside the VM are lost. Try Settings, Storage in Claude first. This can't be undone.",
                 confirmTitle: "Remove VM", cancelIsDefault: true)
         case .agentRuntime:
             return Confirmation(
@@ -157,7 +163,7 @@ public struct Confirmation: Equatable, Sendable {
                 confirmTitle: "Uninstall", cancelIsDefault: true)
         case .oldLogs:
             return Confirmation(
-                title: "Delete \(f.title.lowercased())?", body: "\(f.title)\n\(f.location)",
+                title: "Delete these old log files?", body: "\(f.title)\n\(f.location)",
                 footer: "Only files older than \(OldLogs.minimumAgeDays) days are deleted. Newer files stay, and so does the log of Trash Panda. Keep crash reports if you are looking for a crash. This can't be undone.",
                 confirmTitle: "Delete files", cancelIsDefault: true)
         case .installer:

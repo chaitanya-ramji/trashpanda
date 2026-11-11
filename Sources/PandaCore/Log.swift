@@ -21,32 +21,70 @@ public enum Log {
     public static func warn(_ message: String) { write("WARN ", message) }
     public static func error(_ message: String) { write("ERROR", message) }
 
+    // These are used only on `queue`.
+    private static var handle: FileHandle?
+    private static var openedURL: URL?
+    private static var written = 0
+    private static var syncScheduled = false
+
     private static func write(_ level: String, _ message: String) {
         // The system log is read by other processes. The message can hold paths and command lines,
         // so only the level is public. The full text stays in the log file.
         system.log("\(level, privacy: .public) \(message, privacy: .private)")
-        let line = "\(stamp.string(from: Date())) \(level) \(message)\n"
-        queue.sync {
-            let fm = FileManager.default
-            let url = fileURL
-            let folder = url.deletingLastPathComponent()
-            try? fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
-            if let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int, size > maxBytes {
-                let old = url.appendingPathExtension("1")
-                try? fm.removeItem(at: old)
-                try? fm.moveItem(at: url, to: old)
-            }
-            if !fm.fileExists(atPath: url.path) {
-                fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
-            }
-            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            if let handle = try? FileHandle(forWritingTo: url) {
-                defer { try? handle.close() }
-                _ = try? handle.seekToEnd()
-                try? handle.write(contentsOf: Data(line.utf8))
-            }
+        let line = Data("\(stamp.string(from: Date())) \(level) \(message)\n".utf8)
+        let url = fileURL
+        queue.async {
+            guard let handle = openHandle(for: url) else { return }
+            try? handle.write(contentsOf: line)
+            written += line.count
+            scheduleSync()
         }
+    }
+
+    /// The one open file. It opens again when the file name changed, when the file is gone, or after a rotation.
+    private static func openHandle(for url: URL) -> FileHandle? {
+        let fm = FileManager.default
+        if let handle, openedURL == url, fm.fileExists(atPath: url.path), written <= maxBytes { return handle }
+        closeHandle()
+        let folder = url.deletingLastPathComponent()
+        try? fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        if let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int, size > maxBytes {
+            let old = url.appendingPathExtension("1")
+            try? fm.removeItem(at: old)
+            try? fm.moveItem(at: url, to: old)
+        }
+        if !fm.fileExists(atPath: url.path) {
+            fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        }
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        guard let opened = try? FileHandle(forWritingTo: url) else { return nil }
+        written = Int((try? opened.seekToEnd()) ?? 0)
+        handle = opened
+        openedURL = url
+        return opened
+    }
+
+    private static func closeHandle() {
+        try? handle?.close()
+        handle = nil
+        openedURL = nil
+        written = 0
+    }
+
+    /// Writes to the disk a moment after the last line, so that a clean that just ended is saved.
+    private static func scheduleSync() {
+        guard !syncScheduled else { return }
+        syncScheduled = true
+        queue.asyncAfter(deadline: .now() + 1) {
+            syncScheduled = false
+            try? handle?.synchronize()
+        }
+    }
+
+    /// Waits until every line is written, and saves the file to the disk. Call it before the app quits.
+    public static func flush() {
+        queue.sync { try? handle?.synchronize() }
     }
 
     // MARK: Privacy helpers
@@ -62,7 +100,8 @@ public enum Log {
     /// The last 200 lines of the log, for a person to read before sharing.
     /// Each path keeps its first two parts under the home folder. The rest becomes a count.
     public static func exportForReport() -> String {
-        exportForReport(from: fileURL, home: FileManager.default.homeDirectoryForCurrentUser.path)
+        flush()
+        return exportForReport(from: fileURL, home: FileManager.default.homeDirectoryForCurrentUser.path)
     }
 
     static func exportForReport(from url: URL, home: String, maxLines: Int = 200) -> String {

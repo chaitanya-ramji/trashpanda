@@ -202,7 +202,7 @@ final class OldLogsTests: XCTestCase {
         let f = try XCTUnwrap(item(box, .crashReports))
         XCTAssertEqual(Confirmation.kind(of: f), .oldLogs)
         let c = Confirmation.forOne(f, staleDays: 30)
-        XCTAssertEqual(c.title, "Delete old crash reports?")
+        XCTAssertEqual(c.title, "Delete these old log files?")
         XCTAssertTrue(c.cancelIsDefault)
         XCTAssertTrue(c.footer?.contains("30 days") == true && c.footer?.contains("log of Trash Panda") == true)
     }
