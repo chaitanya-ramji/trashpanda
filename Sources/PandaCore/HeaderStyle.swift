@@ -24,6 +24,8 @@ public struct HeaderStyle: Equatable, Sendable {
     public let stripeFillAlpha: CGFloat
     /// Alpha of the stripe lines.
     public let stripeLineAlpha: CGFloat
+    /// Alpha of the review share of a part. It is lighter than the safe share, so that "free now" and "to review" can be told apart.
+    public let reviewFillAlpha: CGFloat
     /// A 1 point line between two parts.
     public let separatorsBetweenParts: Bool
     /// The review share of a part has a line pattern, not only a lighter color.
@@ -39,6 +41,7 @@ public struct HeaderStyle: Equatable, Sendable {
         // "Increase contrast" gives 0.6. In dark mode the light fill needs a little more to be seen.
         stripeFillAlpha = settings.increaseContrast ? 0.6 : (settings.darkMode ? 0.40 : 0.30)
         stripeLineAlpha = settings.increaseContrast ? 1 : 0.85
+        reviewFillAlpha = settings.increaseContrast ? 0.75 : (settings.darkMode ? 0.60 : 0.50)
         separatorsBetweenParts = settings.increaseContrast
         patternForReview = settings.differentiateWithoutColor
         dimOtherParts = !settings.reduceTransparency
@@ -84,13 +87,28 @@ extension SplitBar {
         return HeaderLayout(height: titleY + titleHeight + topPadding, titleY: titleY, detailY: detailY, barY: barY, legendY: legendY)
     }
 
-    /// Splits the width of one part into safe, review and blocked. The blocked width is at the end. The three add up to `width`.
+    /// Splits the width of one part into safe, review and blocked. The blocked width is at the end. The three add up to `width`,
+    /// and none is below zero. The widths are not rounded: a part has a fractional width, and a rounded share could be wider than the part.
     public static func partWidths(_ segment: SplitSegment, width: CGFloat) -> PartWidths {
         guard segment.bytes > 0, width > 0 else { return PartWidths(safe: max(0, width), review: 0, blocked: 0) }
         let total = CGFloat(segment.bytes)
-        let blocked = (width * CGFloat(min(segment.blockedBytes, segment.bytes)) / total).rounded()
+        let blocked = min(width, width * CGFloat(min(segment.blockedBytes, segment.bytes)) / total)
         let reviewBytes = max(0, segment.bytes - segment.blockedBytes - segment.safeBytes)
-        let review = min(width - blocked, (width * CGFloat(reviewBytes) / total).rounded())
-        return PartWidths(safe: width - blocked - review, review: review, blocked: blocked)
+        let review = max(0, min(width - blocked, width * CGFloat(reviewBytes) / total))
+        return PartWidths(safe: max(0, width - blocked - review), review: review, blocked: blocked)
+    }
+
+    /// How many legend entries fit. `entryWidths` are the widths of the entries in order, and `moreWidth(k)` is the width of the
+    /// text "+k more". The entries that are shown, and the "+k more" text for the others, must fit in `room`. The result is never
+    /// below 1 when the first entry fits alone, and the text "+k more" is never left out when some entries are not shown.
+    public static func legendCount(entryWidths: [CGFloat], moreWidth: (Int) -> CGFloat, room: CGFloat) -> Int {
+        var best = 0
+        var used: CGFloat = 0
+        for (i, w) in entryWidths.enumerated() {
+            used += w
+            let left = entryWidths.count - (i + 1)
+            if used + (left > 0 ? moreWidth(left) : 0) <= room { best = i + 1 }
+        }
+        return best
     }
 }

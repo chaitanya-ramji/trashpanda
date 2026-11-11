@@ -274,7 +274,7 @@ final class StorageHeaderView: NSView {
                 if style.patternForReview {
                     drawLines(in: review, color: color(i), alpha: alpha, style: style)
                 } else {
-                    color(i).withAlphaComponent(alpha).setFill()
+                    color(i).withAlphaComponent(style.reviewFillAlpha * alpha).setFill()
                     review.fill()
                 }
             }
@@ -334,23 +334,24 @@ final class StorageHeaderView: NSView {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    /// The three largest groups, with a dot of the color of each part. The color is never the only clue.
+    /// The largest groups that fit, with a dot of the color of each part. The color is never the only clue.
     /// A group that does not fit is left out, and the "more" count tells how many parts are not named.
     private func drawLegend() {
         guard !segments.isEmpty else { return }
         let font = Self.legendFont
-        var x = Self.inset
         let y = rows.legendY ?? 10
-        var shown = 0
-        for (i, s) in segments.prefix(3).enumerated() {
-            let text = "\(s.shortName) \(Format.bytes(s.bytes))"
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: hovered == i ? NSColor.labelColor : NSColor.secondaryLabelColor,
-            ]
-            let size = text.size(withAttributes: attributes)
-            let dotSize = GroupColors.dotSize
-            guard x + dotSize + 5 + size.width <= bounds.width - Self.rightInset else { break }
+        let room = bounds.width - Self.inset - Self.rightInset
+        let dotSize = GroupColors.dotSize
+        func attributes(_ i: Int) -> [NSAttributedString.Key: Any] {
+            [.font: font, .foregroundColor: hovered == i ? NSColor.labelColor : NSColor.secondaryLabelColor]
+        }
+        let texts = segments.map { "\($0.shortName) \(Format.bytes($0.bytes))" }
+        let widths = texts.enumerated().map { i, text in dotSize + 5 + text.size(withAttributes: attributes(i)).width + 8 }
+        let moreAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]
+        let shown = SplitBar.legendCount(entryWidths: widths, moreWidth: { "+\($0) more".size(withAttributes: moreAttributes).width }, room: room)
+        var x = Self.inset
+        for i in 0..<shown {
+            let s = segments[i]
             // A part that waits for an app to quit has a ring, not a dot, like its light part in the bar.
             let dot = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: y + (Self.lineHeight(font) - dotSize) / 2, width: dotSize, height: dotSize))
             if s.isBlockedOnly {
@@ -361,17 +362,10 @@ final class StorageHeaderView: NSView {
                 color(i).setFill()
                 dot.fill()
             }
-            text.draw(at: NSPoint(x: x + dotSize + 5, y: y), withAttributes: attributes)
-            x += dotSize + 5 + size.width + 8
-            shown += 1
+            texts[i].draw(at: NSPoint(x: x + dotSize + 5, y: y), withAttributes: attributes(i))
+            x += widths[i]
         }
         let left = segments.count - shown
-        if left > 0 {
-            let more = "+\(left) more"
-            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.tertiaryLabelColor]
-            if x + more.size(withAttributes: attributes).width <= bounds.width - Self.rightInset {
-                more.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
-            }
-        }
+        if left > 0 { "+\(left) more".draw(at: NSPoint(x: x, y: y), withAttributes: moreAttributes) }
     }
 }

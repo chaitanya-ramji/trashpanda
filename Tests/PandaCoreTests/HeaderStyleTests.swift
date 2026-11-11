@@ -106,4 +106,41 @@ final class HeaderStyleTests: XCTestCase {
             XCTAssertEqual(w.safe + w.review + w.blocked, width, accuracy: 1e-9)
         }
     }
+
+    func testFractionalWidthsNeverMakeASliverOrANegativeShare() {
+        // Slot widths are fractional. A blocked part must be all blocked, and no share may be wider than the part.
+        for width in stride(from: CGFloat(100), through: 130, by: 0.3) {
+            let blocked = SplitBar.partWidths(part(bytes: 1_000, safe: 0, blocked: 1_000), width: width)
+            XCTAssertEqual(blocked, PartWidths(safe: 0, review: 0, blocked: width))
+            let review = SplitBar.partWidths(part(bytes: 1_000, safe: 0, blocked: 0), width: width)
+            XCTAssertEqual(review.review, width, accuracy: 1e-9)
+            XCTAssertEqual(review.safe, 0, accuracy: 1e-9)
+            let mixed = SplitBar.partWidths(part(bytes: 1_000, safe: 300, blocked: 200), width: width)
+            XCTAssertGreaterThanOrEqual(min(mixed.safe, mixed.review, mixed.blocked), 0)
+            XCTAssertEqual(mixed.safe + mixed.review + mixed.blocked, width, accuracy: 1e-9)
+        }
+    }
+
+    func testTheReviewShareIsLighterThanTheSafeShareInEveryStyle() {
+        for settings in [HeaderSettings(), HeaderSettings(increaseContrast: true), HeaderSettings(darkMode: true)] {
+            let style = HeaderStyle(settings)
+            XCTAssertLessThan(style.reviewFillAlpha, 1)
+            XCTAssertGreaterThan(style.reviewFillAlpha, 0.3, "still easy to see")
+        }
+    }
+
+    func testTheLegendAlwaysSaysHowManyPartsAreNotNamed() {
+        let more: (Int) -> CGFloat = { _ in 40 }
+        // Five entries of 100 points, room for 360: three entries (300) plus "+2 more" (40) fit, four (400) do not.
+        XCTAssertEqual(SplitBar.legendCount(entryWidths: Array(repeating: 100, count: 5), moreWidth: more, room: 360), 3)
+        // Everything fits: no "+k more" is needed.
+        XCTAssertEqual(SplitBar.legendCount(entryWidths: [100, 100], moreWidth: more, room: 200), 2)
+        // Three entries of 100 in 330 points: all three (300) fit, so all are named.
+        XCTAssertEqual(SplitBar.legendCount(entryWidths: [100, 100, 100], moreWidth: more, room: 330), 3)
+        // Three entries in 250 points: two (200) and "+1 more" (40) fit.
+        XCTAssertEqual(SplitBar.legendCount(entryWidths: [100, 100, 100], moreWidth: more, room: 250), 2)
+        // Nothing fits.
+        XCTAssertEqual(SplitBar.legendCount(entryWidths: [100, 100], moreWidth: more, room: 50), 0)
+        XCTAssertEqual(SplitBar.legendCount(entryWidths: [], moreWidth: more, room: 300), 0)
+    }
 }
