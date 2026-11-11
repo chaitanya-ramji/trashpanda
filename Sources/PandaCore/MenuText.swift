@@ -50,6 +50,15 @@ public enum MenuText {
                        subtitle: reviewBytes > 0 ? items + " Review items stay." : items, enabled: true)
     }
 
+    public static let helpURL = URL(string: "https://github.com/chaitanya-ramji/trashpanda#readme")!
+
+    /// The page for a new issue. The text holds only the two versions: no path, no log line.
+    public static func reportURL(appVersion: String, osVersion: String) -> URL {
+        var parts = URLComponents(string: "https://github.com/chaitanya-ramji/trashpanda/issues/new")!
+        parts.queryItems = [URLQueryItem(name: "body", value: "Trash Panda: \(appVersion)\nmacOS: \(osVersion)")]
+        return parts.url!
+    }
+
     /// "Last scan: 12 minutes ago". A scan less than one minute old is "Last scan: just now".
     public static func lastScan(_ date: Date, now: Date) -> String {
         guard now.timeIntervalSince(date) >= 60 else { return "Last scan: just now" }

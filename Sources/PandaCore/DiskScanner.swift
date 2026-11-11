@@ -31,6 +31,20 @@ public struct Config: Sendable {
         return Config(keep: lines("keep"), roots: lines("roots"), staleDays: parsed.staleDays)
     }
 
+    /// The settings file `name` ("keep" or "roots"). When it is absent, this makes it with two comment lines that tell the format.
+    @discardableResult
+    public static func ensureFile(_ name: String, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        let folder = home.appendingPathComponent(".config/trashpanda")
+        let file = folder.appendingPathComponent(name)
+        guard !FileManager.default.fileExists(atPath: file.path) else { return file }
+        let help = name == "keep"
+            ? "# One path on each line. Trash Panda never touches these paths.\n# A path can start with ~ for your home folder.\n"
+            : "# One folder on each line. Trash Panda also looks for projects in these folders.\n# A path can start with ~ for your home folder.\n"
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? help.write(to: file, atomically: true, encoding: .utf8)
+        return file
+    }
+
     /// Reads `key = value` lines. A bad value gives a warning and the default.
     static func parseSettings(_ text: String) -> (staleDays: Int, fromFile: Bool, warnings: [String]) {
         var staleDays = defaultStaleDays

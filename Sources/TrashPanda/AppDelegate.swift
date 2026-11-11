@@ -203,7 +203,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             toggleLogin()
         case .quit:
             NSApp.terminate(nil)
+        case .openKeepList:
+            openInTextEdit(Config.ensureFile("keep"))
+        case .openRootsList:
+            openInTextEdit(Config.ensureFile("roots"))
+        case .openHelp:
+            NSWorkspace.shared.open(MenuText.helpURL)
+        case .reportProblem:
+            let os = ProcessInfo.processInfo.operatingSystemVersion
+            NSWorkspace.shared.open(MenuText.reportURL(appVersion: UpdateController.currentVersion,
+                                                       osVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"))
+        case .showAbout:
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.orderFrontStandardAboutPanel(options: [
+                .applicationVersion: UpdateController.currentVersion,
+                .credits: NSAttributedString(string: "License: GNU GPL v3"),
+            ])
         }
+    }
+
+    private func openInTextEdit(_ file: URL) {
+        NSWorkspace.shared.open([file], withApplicationAt: URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
+                                configuration: NSWorkspace.OpenConfiguration())
     }
 
     /// The words of the dialog for one item. They come from the core, where tests check them. Only demo mode uses this.
@@ -222,7 +243,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } catch {
             Log.error("Open at login failed: \(error.localizedDescription)")
+            let alert = NSAlert()
+            alert.messageText = "Could not change Open at login"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
         }
+        rebuildMenu()
     }
 }
 

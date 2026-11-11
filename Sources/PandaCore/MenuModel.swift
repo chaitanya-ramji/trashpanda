@@ -44,6 +44,7 @@ public struct MenuModel: Equatable, Sendable {
         /// Ask, then quit the open owner app politely, then clean the one item of the prompt.
         case quitAndClean(Prompt)
         case openUpdate, rescan, showLog, checkForUpdates, toggleUpdateCheck, toggleLogin, quit
+        case openKeepList, openRootsList, openHelp, reportProblem, showAbout
     }
 
     /// The small icon of a row. The app finds the picture.
@@ -175,19 +176,32 @@ public struct MenuModel: Equatable, Sendable {
         }
 
         rows.append(.separator)
-        if let version = input.updateVersion {
-            rows.append(Row(title: "Update available: \(version)…", action: .openUpdate))
-        }
         rows.append(Row(title: scanning ? "Scanning…" : "Scan again", enabled: !scanning && !cleaning, action: .rescan,
                         subtitle: scanning ? nil : input.result.map { MenuText.lastScan($0.date, now: input.now) },
                         keyEquivalent: "r"))
-        // Hold Option to see the log item. It is for support, so it stays out of the way.
-        rows.append(Row(title: "Show log in Finder", action: .showLog, keyEquivalent: "r", isOptionAlternate: true))
-        rows.append(Row(title: "Check for updates…", action: .checkForUpdates))
-        rows.append(Row(title: "Check for updates every day", action: .toggleUpdateCheck, checked: input.updateCheckEnabled))
-        rows.append(Row(title: "Open at login", action: .toggleLogin, checked: input.loginEnabled))
+        if let version = input.updateVersion {
+            rows.append(Row(title: "Update available: \(version)…", action: .openUpdate))
+        }
+        rows.append(Row(title: "Settings", submenu: Submenu(rows: settingsRows(input))))
         rows.append(Row(title: "Quit Trash Panda", action: .quit, keyEquivalent: "q"))
         return MenuModel(header: header, rows: rows)
+    }
+
+    /// The rows of the Settings submenu.
+    private static func settingsRows(_ input: MenuInput) -> [Row] {
+        [
+            Row(title: "Check for updates…", action: .checkForUpdates),
+            Row(title: "Check for updates every day", action: .toggleUpdateCheck, checked: input.updateCheckEnabled),
+            Row(title: "Open at login", action: .toggleLogin, checked: input.loginEnabled),
+            .separator,
+            Row(title: "Open the keep list", action: .openKeepList),
+            Row(title: "Open the project folders list", action: .openRootsList),
+            .separator,
+            Row(title: "Show log in Finder", action: .showLog),
+            Row(title: "Help", action: .openHelp),
+            Row(title: "Report a problem", action: .reportProblem),
+            Row(title: "About Trash Panda", action: .showAbout),
+        ]
     }
 
     /// The menu that a click on a part of the split bar opens.
