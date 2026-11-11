@@ -305,7 +305,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Careful dialog for a container, and the critical style for a permanent delete ([#126](https://github.com/chaitanya-ramji/trashpanda/issues/126))
 - [x] Start system tools from fixed paths, and refuse a tool file that others can write to ([#127](https://github.com/chaitanya-ramji/trashpanda/issues/127))
 - [x] Correct the network sentence in SECURITY.md ([#128](https://github.com/chaitanya-ramji/trashpanda/issues/128))
-- [ ] Do not start a process on the main thread when the menu opens ([#129](https://github.com/chaitanya-ramji/trashpanda/issues/129))
+- [x] Do not start a process on the main thread when the menu opens ([#129](https://github.com/chaitanya-ramji/trashpanda/issues/129))
 - [ ] One shared delete helper: measure first, check last ([#130](https://github.com/chaitanya-ramji/trashpanda/issues/130))
 
 ### Later: v1.0 Signed and stable
