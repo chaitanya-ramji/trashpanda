@@ -74,31 +74,24 @@ enum Dialogs {
         alert.runModal()
     }
 
-    /// What the user needs to know after a clean: open apps, the Docker note, and failures.
+    /// The one dialog after a clean. It is not shown when nothing was left alone and nothing failed.
+    /// The words come from `CleanSummary`, where tests check them.
     static func showReport(_ report: CleanReport) {
-        if !report.blockedApps.isEmpty {
-            let alert = NSAlert()
-            let names = report.blockedApps.joined(separator: " and ")
-            alert.messageText = "Quit \(names) first"
-            alert.informativeText = "Some items belong to \(names), and it is open. Trash Panda left them alone. Quit it and clean again."
-            NSApp.bringToFront()
-            alert.runModal()
-        }
-        if let note = report.dockerNote {
-            let alert = NSAlert()
-            alert.messageText = note
-            alert.informativeText = "Docker keeps its data in one disk file, and the file can give the space back slowly."
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Read the steps")
-            NSApp.bringToFront()
-            if alert.runModal() == .alertSecondButtonReturn { NSWorkspace.shared.open(DockerDesktopDisk.helpURL) }
-        }
-        if !report.failed.isEmpty {
-            let alert = NSAlert()
-            alert.messageText = "A few things couldn't be cleaned"
-            alert.informativeText = "They may be in use. Close your editor or Docker and try again. Details are in the log."
-            NSApp.bringToFront()
-            alert.runModal()
+        let dockerNote = report.dockerNote != nil
+        guard CleanSummary.needsDialog(report, dockerDiskNote: dockerNote) else { return }
+        let summary = CleanSummary.make(report, dockerDiskNote: dockerNote)
+        let alert = NSAlert()
+        alert.messageText = summary.title
+        alert.informativeText = summary.lines.joined(separator: "\n\n")
+        for button in summary.buttons { alert.addButton(withTitle: button.title) }
+        NSApp.bringToFront()
+        let response = alert.runModal()
+        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        guard summary.buttons.indices.contains(index) else { return }
+        switch summary.buttons[index] {
+        case .ok: break
+        case .showLog: NSWorkspace.shared.activateFileViewerSelecting([Log.fileURL])
+        case .dockerDiskFile: NSWorkspace.shared.open(DockerDesktopDisk.helpURL)
         }
     }
 }
