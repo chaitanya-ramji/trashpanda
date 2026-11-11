@@ -25,11 +25,14 @@ public enum UpdateCheck {
     /// `v0.4.0-beta.5` and `0.4.0-beta.5` give `0.4.0-beta.5`. nil when the tag is not a version.
     public static func version(fromTag tag: String) -> String? {
         let text = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-        return ClaudeVersions.isVersionName(text) ? text : nil
+        return SemanticVersion(text) != nil ? text : nil
     }
 
     /// `0.4.0` is newer than `0.4.0-beta.5`, and `beta.10` is newer than `beta.9`.
-    public static func isNewer(_ a: String, than b: String) -> Bool { ClaudeVersions.isNewer(a, than: b) }
+    public static func isNewer(_ a: String, than b: String) -> Bool {
+        guard let x = SemanticVersion(a), let y = SemanticVersion(b) else { return false }
+        return x > y
+    }
 
     /// A beta user sees newer betas and newer stable versions. A user of a stable version sees stable versions only.
     public static func isPrerelease(version: String) -> Bool { version.contains("-") }
@@ -76,8 +79,8 @@ public enum UpdateCheck {
         return r
     }
 
-    /// A session that keeps nothing: no cookie, no cache, no stored credential.
-    public static func makeSession() -> URLSession {
+    /// The settings of the session: no cookie, no cache, no stored credential.
+    static func makeConfiguration() -> URLSessionConfiguration {
         let c = URLSessionConfiguration.ephemeral
         c.httpCookieStorage = nil
         c.httpShouldSetCookies = false
@@ -87,8 +90,14 @@ public enum UpdateCheck {
         c.timeoutIntervalForRequest = 15
         c.timeoutIntervalForResource = 30
         c.waitsForConnectivity = false
-        return URLSession(configuration: c)
+        return c
     }
+
+    /// A session that keeps nothing: no cookie, no cache, no stored credential.
+    public static func makeSession() -> URLSession { URLSession(configuration: makeConfiguration()) }
+
+    /// The status that `fetch` gives when the answer was larger than `maximumBytes`. The task was cancelled.
+    static let tooLargeStatus = -1
 
     public enum Outcome: Equatable, Sendable {
         case newer(Release)
@@ -101,6 +110,7 @@ public enum UpdateCheck {
     public static func check(current: String, fetch: (URLRequest) -> (Data?, Int) = fetchWithSession) -> Outcome {
         guard version(fromTag: current) != nil else { return .failed("this build has no release version (\(current))") }
         let (data, status) = fetch(request())
+        if status == tooLargeStatus { return .failed("the answer is larger than \(maximumBytes) bytes") }
         guard status == 200, let data else { return .failed("GitHub answered \(status)") }
         guard data.count <= maximumBytes, (try? JSONSerialization.jsonObject(with: data)) is [Any] else { return .failed("the answer could not be read") }
         if let release = available(from: data, current: current) { return .newer(release) }
@@ -108,17 +118,58 @@ public enum UpdateCheck {
     }
 
     public static func fetchWithSession(_ request: URLRequest) -> (Data?, Int) {
+        fetchLimited(request, configuration: makeConfiguration(), maximumBytes: maximumBytes)
+    }
+
+    /// Reads the answer part by part. When the parts add up to more than `maximumBytes`, the task is cancelled
+    /// at once, and the status is `tooLargeStatus`.
+    static func fetchLimited(_ request: URLRequest, configuration: URLSessionConfiguration, maximumBytes: Int) -> (Data?, Int) {
+        let collector = BoundedCollector(maximumBytes: maximumBytes)
+        let session = URLSession(configuration: configuration, delegate: collector, delegateQueue: nil)
+        let task = session.dataTask(with: request)
+        task.resume()
+        if collector.done.wait(timeout: .now() + 35) == .timedOut { task.cancel() }
+        session.finishTasksAndInvalidate()
+        return collector.result()
+    }
+
+    /// Collects the answer and adds up the size of each part.
+    private final class BoundedCollector: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         let done = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var result: (Data?, Int) = (nil, 0)
-        let session = makeSession()
-        let task = session.dataTask(with: request) { data, response, _ in
-            result = (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+        private let maximumBytes: Int
+        private let lock = NSLock()
+        private var data = Data()
+        private var status = 0
+        private var tooLarge = false
+        private var failed = false
+
+        init(maximumBytes: Int) { self.maximumBytes = maximumBytes }
+
+        func result() -> (Data?, Int) {
+            lock.lock(); defer { lock.unlock() }
+            if tooLarge { return (nil, UpdateCheck.tooLargeStatus) }
+            return (failed ? nil : data, status)
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+            lock.lock(); status = (response as? HTTPURLResponse)?.statusCode ?? 0; lock.unlock()
+            completionHandler(.allow)
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive part: Data) {
+            lock.lock()
+            data.append(part)
+            let over = data.count > maximumBytes
+            if over { tooLarge = true; data = Data() }
+            lock.unlock()
+            if over { dataTask.cancel() }
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            lock.lock(); if error != nil { failed = true }; lock.unlock()
             done.signal()
         }
-        task.resume()
-        if done.wait(timeout: .now() + 35) == .timedOut { task.cancel() }
-        session.finishTasksAndInvalidate()
-        return result
     }
 }
 
@@ -138,13 +189,47 @@ public struct UpdatePreferences {
 
     public var lastCheck: Date? { defaults.object(forKey: Self.lastCheckKey) as? Date }
 
-    public func markChecked(_ now: Date = Date()) { defaults.set(now, forKey: Self.lastCheckKey) }
+    static let failureStartKey = "updateFailureStart"
+    static let failureLastKey = "updateFailureLast"
+    static let failureCountKey = "updateFailureCount"
+    /// After a failed check, the app waits this long before it tries again.
+    public static let retryDelay: TimeInterval = 3_600
+    /// The most failed tries in one day. After that the app waits for the next day.
+    public static let maximumFailuresPerDay = 3
+
+    /// Call this only after a good answer. A failed check must not call it.
+    public func markChecked(_ now: Date = Date()) {
+        defaults.set(now, forKey: Self.lastCheckKey)
+        for key in [Self.failureStartKey, Self.failureLastKey, Self.failureCountKey] { defaults.removeObject(forKey: key) }
+    }
+
+    /// Call this after a failed check. The stored date of the last good check does not change.
+    public func markFailed(_ now: Date = Date()) {
+        let start = defaults.object(forKey: Self.failureStartKey) as? Date
+        let count = defaults.integer(forKey: Self.failureCountKey)
+        if let start, now.timeIntervalSince(start) >= 0, now.timeIntervalSince(start) < UpdateCheck.interval {
+            defaults.set(count + 1, forKey: Self.failureCountKey)
+        } else {
+            defaults.set(now, forKey: Self.failureStartKey)
+            defaults.set(1, forKey: Self.failureCountKey)
+        }
+        defaults.set(now, forKey: Self.failureLastKey)
+    }
 
     /// True when an automatic check is due: it is on, and it is the first one, or a day passed, or the clock went back.
+    /// After a failed check: not before 1 hour has passed, and at most 3 failed tries in one day.
     public func isDue(now: Date = Date()) -> Bool {
         guard isEnabled else { return false }
-        guard let last = lastCheck else { return true }
-        let passed = now.timeIntervalSince(last)
-        return passed >= UpdateCheck.interval || passed < 0
+        if let last = lastCheck {
+            let passed = now.timeIntervalSince(last)
+            guard passed >= UpdateCheck.interval || passed < 0 else { return false }
+        }
+        if let lastFailure = defaults.object(forKey: Self.failureLastKey) as? Date,
+           let start = defaults.object(forKey: Self.failureStartKey) as? Date {
+            let since = now.timeIntervalSince(lastFailure), inDay = now.timeIntervalSince(start)
+            if since >= 0 && since < Self.retryDelay { return false }
+            if inDay >= 0 && inDay < UpdateCheck.interval && defaults.integer(forKey: Self.failureCountKey) >= Self.maximumFailuresPerDay { return false }
+        }
+        return true
     }
 }
