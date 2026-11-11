@@ -76,7 +76,7 @@ final class UpdateController: NSObject {
             alert.informativeText = "You have \(current). Trash Panda does not install updates. The release page has the download and the steps."
             alert.addButton(withTitle: "Open the release page")
             alert.addButton(withTitle: "Later")
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.bringToFront()
             if alert.runModal() == .alertFirstButtonReturn { open(release) }
             return
         case .upToDate:
@@ -87,7 +87,7 @@ final class UpdateController: NSObject {
             alert.informativeText = "Check your internet connection and try again."
         }
         alert.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.bringToFront()
         alert.runModal()
     }
 

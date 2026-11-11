@@ -473,16 +473,17 @@ public final class DiskScanner {
 
     /// Service Worker storage of Chromium browsers. Offline web apps keep their files there, so this is a review item.
     /// One review item for each website. The user can keep the one web app that works offline and clear the rest (#44).
-    /// The host name is shown only when it is proven by the name of the folder. Otherwise the item is "Unknown site".
+    /// The host name is shown only when it is proven by the name of the folder. Otherwise the item says that the name is not known, and the folder name is in the tooltip.
     func scanServiceWorkerStorage() -> [Finding] {
         BrowserCaches.browsers.filter { $0.kind == .chromium }.flatMap { b -> [Finding] in
             let profiles = Set(ServiceWorkerSites.sites(of: b, home: home).map(\.profile)).count
             return ServiceWorkerSites.sites(of: b, home: home).compactMap { s in
                 guard s.bytes > 0, guardian.check(s.url) == nil else { return nil }
                 let where_ = profiles > 1 ? " · profile \(s.profile)" : ""
+                let folder = s.host == nil ? " · folder \(s.folder)" : ""
                 return Finding(id: "browser.sw:\(b.id):\(s.profile):\(s.folder)", ecosystem: .browsers,
-                               title: "Offline website · \(s.title) (\(b.name))",
-                               location: "Saved files of one website that works offline\(where_)",
+                               title: s.host == nil ? "\(s.title) · \(b.name)" : "\(s.title) (\(b.name))",
+                               location: "Saved files of one website that works offline\(where_)\(folder)",
                                bytes: s.bytes, tier: .review, rebuild: .download,
                                action: .removeServiceWorkerSite(browserID: b.id, profile: s.profile, folder: s.folder), owner: b.owner)
             }

@@ -7,7 +7,7 @@ import CryptoKit
 ///
 /// The folder does not say the host name. We find candidate host names as plain text in the files of the folder (`index.txt`:
 /// the names of the caches often hold an address), and we keep a candidate only when its hash is the name of the folder.
-/// So a name that we show is proven, and a site with no proven name is shown as "Unknown site". We never run a file and never show
+/// So a name that we show is proven, and a site with no proven name is shown as "Offline data of a website (name not known)". We never run a file and never show
 /// more than the host name (no path, no query, no token). The text is read as bytes with a size limit.
 public enum ServiceWorkerSites {
     /// How much of a file we read to look for a host name.
@@ -23,7 +23,7 @@ public enum ServiceWorkerSites {
         /// The proven host name, or nil.
         public let host: String?
 
-        public var title: String { host ?? "Unknown site" }
+        public var title: String { host.map { "Offline website · \($0)" } ?? "Offline data of a website (name not known)" }
     }
 
     /// True for the name of a site folder: the 40 lower case hex characters of a SHA-1.

@@ -48,7 +48,7 @@ final class DemoController {
             if arguments.contains("--backdrop") { showBackdrop(host) }
             // `--dialog volume|container|safe` shows that dialog. It deletes nothing, even if you confirm.
             if let kind = value(of: "--dialog"), let item = DemoData.dialogFinding(kind) {
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.bringToFront()
                 _ = Dialogs.makeAlert(for: host.demoDialog(for: item)).alert.runModal()
                 NSApp.terminate(nil)
             } else if let name = value(of: "--submenu")?.lowercased(),

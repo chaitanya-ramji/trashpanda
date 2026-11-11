@@ -214,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.open(MenuText.reportURL(appVersion: UpdateController.currentVersion,
                                                        osVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"))
         case .showAbout:
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.bringToFront()
             NSApp.orderFrontStandardAboutPanel(options: [
                 .applicationVersion: UpdateController.currentVersion,
                 .credits: NSAttributedString(string: "License: GNU GPL v3"),
@@ -246,7 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let alert = NSAlert()
             alert.messageText = "Could not change Open at login"
             alert.informativeText = error.localizedDescription
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.bringToFront()
             alert.runModal()
         }
         rebuildMenu()

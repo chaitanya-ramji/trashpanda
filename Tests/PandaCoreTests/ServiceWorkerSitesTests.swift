@@ -79,7 +79,7 @@ final class ServiceWorkerSitesTests: XCTestCase {
         XCTAssertNil(sites.first { $0.host == "evil.example.com" || $0.host == "other.example.com" }, "A name that does not match its folder is never shown")
         let titles = Set(scanner(box).scanServiceWorkerStorage().map(\.title))
         XCTAssertTrue(titles.contains("Offline website · www.example.com (Arc)"))
-        XCTAssertEqual(titles.filter { $0.contains("Unknown site") }.count, 1, "Three unknown sites share one title, so the set has one")
+        XCTAssertEqual(titles.filter { $0.contains("name not known") }.count, 1, "Three unknown sites share one title, so the set has one")
     }
 
     func testTheNameCanBeInACacheFolderToo() throws {

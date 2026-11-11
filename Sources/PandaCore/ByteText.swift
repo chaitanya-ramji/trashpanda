@@ -10,6 +10,7 @@ public enum ByteText {
         case 1e9...: return String(format: "%.1f GB", v / 1e9)
         case 1e6...: return String(format: "%.0f MB", v / 1e6)
         case 1e3...: return String(format: "%.0f KB", v / 1e3)
+        case 1...: return "Less than 1 KB"
         default: return "0 KB"
         }
     }

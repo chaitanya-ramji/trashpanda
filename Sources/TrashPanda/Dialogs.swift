@@ -60,7 +60,7 @@ enum Dialogs {
     /// Asks the user. Returns true when the user chose the button that means "yes, delete".
     static func confirm(_ box: FindingBox) -> Bool {
         let (alert, confirmed) = makeAlert(for: box)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.bringToFront()
         return alert.runModal() == confirmed
     }
 
@@ -70,7 +70,7 @@ enum Dialogs {
         let list = names.joined(separator: " and ")
         alert.messageText = "\(list) is still open"
         alert.informativeText = "It may be asking you to save. Finish that, or quit it yourself, then clean again. Nothing was removed."
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.bringToFront()
         alert.runModal()
     }
 
@@ -81,7 +81,7 @@ enum Dialogs {
             let names = report.blockedApps.joined(separator: " and ")
             alert.messageText = "Quit \(names) first"
             alert.informativeText = "Some items belong to \(names), and it is open. Trash Panda left them alone. Quit it and clean again."
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.bringToFront()
             alert.runModal()
         }
         if let note = report.dockerNote {
@@ -90,14 +90,14 @@ enum Dialogs {
             alert.informativeText = "Docker keeps its data in one disk file, and the file can give the space back slowly."
             alert.addButton(withTitle: "OK")
             alert.addButton(withTitle: "Read the steps")
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.bringToFront()
             if alert.runModal() == .alertSecondButtonReturn { NSWorkspace.shared.open(DockerDesktopDisk.helpURL) }
         }
         if !report.failed.isEmpty {
             let alert = NSAlert()
             alert.messageText = "A few things couldn't be cleaned"
             alert.informativeText = "They may be in use. Close your editor or Docker and try again. Details are in the log."
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.bringToFront()
             alert.runModal()
         }
     }
