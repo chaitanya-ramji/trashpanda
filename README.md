@@ -333,7 +333,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Small text and list defects ([#161](https://github.com/chaitanya-ramji/trashpanda/issues/161))
 - [ ] "Always keep this item" in the dialog ([#162](https://github.com/chaitanya-ramji/trashpanda/issues/162))
 - [ ] Remove dead code and code that is written two times ([#163](https://github.com/chaitanya-ramji/trashpanda/issues/163))
-- [ ] Own version type, and a failed update check is not a check ([#164](https://github.com/chaitanya-ramji/trashpanda/issues/164))
+- [x] Own version type, and a failed update check is not a check ([#164](https://github.com/chaitanya-ramji/trashpanda/issues/164))
 
 ### Later: v1.0 Signed and stable
 - [ ] Notarize the app and publish signed releases ([#30](https://github.com/chaitanya-ramji/trashpanda/issues/30))

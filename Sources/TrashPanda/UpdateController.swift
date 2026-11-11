@@ -49,15 +49,17 @@ final class UpdateController: NSObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.running = false
-                self.preferences.markChecked()
                 switch outcome {
                 case .newer(let release):
+                    self.preferences.markChecked()
                     Log.info("update check: \(release.version) is newer than \(current)")
                     self.available = release
                 case .upToDate:
+                    self.preferences.markChecked()
                     Log.info("update check: \(current) is the newest")
                     self.available = nil
                 case .failed(let why):
+                    self.preferences.markFailed()
                     Log.info("update check failed: \(why)")
                 }
                 self.onChange?()

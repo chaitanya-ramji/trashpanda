@@ -114,6 +114,89 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertNil(UpdateCheck.newestEligible(from: big, current: "0.4.0"))
     }
 
+    func testTheCheckWorksWithTheNewAndTheOldVersion() {
+        let list = [release("v0.8.0-beta.2", pre: true), release("v0.4.0-beta.6", pre: true), release("v0.7.0")]
+        if case .newer(let r) = UpdateCheck.check(current: "0.8.0-beta.1", fetch: fetch(list)) { XCTAssertEqual(r.version, "0.8.0-beta.2") } else { XCTFail("new beta") }
+        if case .newer(let r) = UpdateCheck.check(current: "0.4.0-beta.6", fetch: fetch(list)) { XCTAssertEqual(r.version, "0.8.0-beta.2") } else { XCTFail("old beta") }
+        XCTAssertEqual(UpdateCheck.check(current: "0.8.0-beta.2", fetch: fetch(list)), .upToDate)
+    }
+
+    // MARK: A failed check is not a check
+
+    func testAFailedCheckDoesNotChangeTheStoredDate() {
+        let p = UpdatePreferences(defaults: defaults())
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        p.markChecked(t0)
+        p.markFailed(t0.addingTimeInterval(90_000))
+        XCTAssertEqual(p.lastCheck, t0)
+    }
+
+    func testAfterAFailureTheNextTryIsAfterOneHourAndAtMostThreePerDay() {
+        let p = UpdatePreferences(defaults: defaults())
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertTrue(p.isDue(now: t0))
+        p.markFailed(t0)
+        XCTAssertFalse(p.isDue(now: t0.addingTimeInterval(3_599)))
+        XCTAssertTrue(p.isDue(now: t0.addingTimeInterval(3_600)))
+        p.markFailed(t0.addingTimeInterval(3_600))
+        XCTAssertTrue(p.isDue(now: t0.addingTimeInterval(7_200)))
+        p.markFailed(t0.addingTimeInterval(7_200))
+        XCTAssertFalse(p.isDue(now: t0.addingTimeInterval(10_800)), "Three failures in one day: stop")
+        XCTAssertFalse(p.isDue(now: t0.addingTimeInterval(86_399)))
+        XCTAssertTrue(p.isDue(now: t0.addingTimeInterval(86_400)), "The next day")
+    }
+
+    func testAGoodAnswerClearsTheFailures() {
+        let p = UpdatePreferences(defaults: defaults())
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        for i in 0..<3 { p.markFailed(t0.addingTimeInterval(Double(i) * 3_600)) }
+        p.markChecked(t0.addingTimeInterval(10_000))
+        XCTAssertFalse(p.isDue(now: t0.addingTimeInterval(20_000)), "A good check counts: wait a day")
+        XCTAssertTrue(p.isDue(now: t0.addingTimeInterval(10_000 + 86_400)))
+    }
+
+    func testAFailedFetchResultIsAnError() {
+        if case .failed = UpdateCheck.check(current: "0.4.0", fetch: { _ in (nil, UpdateCheck.tooLargeStatus) }) {} else { XCTFail("too large") }
+    }
+
+    // MARK: The size is checked while the answer arrives
+
+    func testAnAnswerOfTwoMegabytesIsCancelledWhileItArrives() {
+        final class FakeServer: URLProtocol {
+            nonisolated(unsafe) static var sent = 0
+            nonisolated(unsafe) static var stopped = false
+            override class func canInit(with request: URLRequest) -> Bool { true }
+            override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+            override func startLoading() {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                let part = Data(repeating: 0x20, count: 100_000)
+                // One part every 50 ms, so that the cancel has time to arrive.
+                for i in 0..<20 {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.05 * Double(i)) { [self] in
+                        guard !Self.lock.withLock({ Self.stopped }) else { return }
+                        Self.lock.withLock { Self.sent += part.count }
+                        client?.urlProtocol(self, didLoad: part)
+                        if i == 19 { client?.urlProtocolDidFinishLoading(self) }
+                    }
+                }
+            }
+            override func stopLoading() { Self.lock.withLock { Self.stopped = true } }
+            static let lock = NSLock()
+        }
+        FakeServer.sent = 0
+        FakeServer.stopped = false
+        let configuration = UpdateCheck.makeConfiguration()
+        configuration.protocolClasses = [FakeServer.self]
+        let (data, status) = UpdateCheck.fetchLimited(UpdateCheck.request(), configuration: configuration, maximumBytes: UpdateCheck.maximumBytes)
+        XCTAssertNil(data)
+        XCTAssertEqual(status, UpdateCheck.tooLargeStatus)
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(FakeServer.lock.withLock { FakeServer.stopped }, "The task was cancelled")
+        XCTAssertLessThan(FakeServer.sent, 2_000_000, "Not the whole 2 MB was read")
+        if case .failed = UpdateCheck.check(current: "0.4.0", fetch: { _ in (data, status) }) {} else { XCTFail("an error") }
+    }
+
     // MARK: Privacy
 
     func testTheRequestIsOnlyTheRequestItself() throws {

@@ -14,37 +14,26 @@ public enum ClaudeVersions {
 
     public static func directoryURL(home: URL) -> URL { home.appendingPathComponent(directory, isDirectory: true) }
 
-    /// A version name such as `2.1.321` or `2.2.0-beta.1`: three numbers, and an optional pre-release part after a dash.
-    /// A fourth number, a dot suffix (`2.1.10.tmp`), or a number with more than nine digits is not a version name,
-    /// so that a leftover file can never tie with a real version.
+    /// A version name such as `2.1.321` or `2.2.0-beta.1`. The rules are in `SemanticVersion`.
+    /// A leading `v` is not part of a folder name.
     public static func isVersionName(_ name: String) -> Bool {
-        name.range(of: #"^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[A-Za-z0-9]+(\.[A-Za-z0-9]+)*)?\z"#, options: .regularExpression) != nil
+        !name.hasPrefix("v") && SemanticVersion(name) != nil
     }
 
-    /// Orders two version names like semantic versions. `2.1.9` is older than `2.1.10`. A pre-release is older than
-    /// its plain version. Pre-release parts are compared one by one: numbers by value, and a number before a word.
+    /// Orders two version names. Names that are versions use `SemanticVersion`. Other names, such as `3.12` or `1.2.3.4`
+    /// (the runtime stores need this), are compared by their numbers, and a pre-release is older than its plain version.
     public static func isNewer(_ a: String, than b: String) -> Bool {
-        func split(_ s: String) -> ([Int], [String]) {
+        if let x = SemanticVersion(a), let y = SemanticVersion(b) { return x > y }
+        func numbers(_ s: String) -> ([Int], Bool) {
             let halves = s.split(separator: "-", maxSplits: 1).map(String.init)
-            let nums = halves[0].split(separator: ".").map { Int($0) ?? 0 }
-            let pre = halves.count > 1 ? halves[1].split(separator: ".").map(String.init) : []
-            return (nums, pre)
+            return (halves[0].split(separator: ".").map { Int($0) ?? 0 }, halves.count > 1)
         }
-        let (x, xp) = split(a), (y, yp) = split(b)
+        let (x, xp) = numbers(a), (y, yp) = numbers(b)
         for i in 0..<max(x.count, y.count) {
             let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
             if p != q { return p > q }
         }
-        if xp.isEmpty || yp.isEmpty { return xp.isEmpty && !yp.isEmpty }
-        for i in 0..<min(xp.count, yp.count) where xp[i] != yp[i] {
-            switch (Int(xp[i]), Int(yp[i])) {
-            case let (m?, n?): return m > n
-            case (_?, nil): return false
-            case (nil, _?): return true
-            default: return xp[i] > yp[i]
-            }
-        }
-        return xp.count > yp.count
+        return !xp && yp
     }
 
     /// The newest of some version names. When two names mean the same version, the larger text wins, so the answer never depends on the order.
