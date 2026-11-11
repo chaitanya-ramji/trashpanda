@@ -5,6 +5,8 @@ public struct ShellResult: Sendable {
     public let stdout: String
     public let stderr: String
     public let timedOut: Bool
+    /// True when the tool file was not safe, so the command did not start.
+    public var refused = false
 }
 
 public enum Shell {
@@ -23,12 +25,43 @@ public enum Shell {
         ]
     }
 
+    /// System tools have one fixed path. We never search for them, so a file with the same name
+    /// in a folder that the user can write to is never used.
+    public static let systemTools: [String: String] = [
+        "osascript": "/usr/bin/osascript",
+        "xcrun": "/usr/bin/xcrun",
+        "xcode-select": "/usr/bin/xcode-select",
+        "tmutil": "/usr/bin/tmutil",
+        "lsof": "/usr/sbin/lsof",
+        "ps": "/bin/ps",
+    ]
+
     public static func resolve(_ tool: String) -> String? {
         let fm = FileManager.default
+        if let fixed = systemTools[tool] {
+            // Only tests set the override, to hide a tool. A fixed tool is hidden unless its own folder is in the list.
+            // The override never moves a fixed tool to another folder.
+            if let override = searchDirsOverride, !override.contains((fixed as NSString).deletingLastPathComponent) { return nil }
+            return fm.isExecutableFile(atPath: fixed) ? fixed : nil
+        }
         for dir in searchDirs {
             let path = "\(dir)/\(tool)"
             if fm.isExecutableFile(atPath: path) { return path }
         }
+        return nil
+    }
+
+    /// A tool file is trusted when its owner is root or the current user, and group and others cannot write to it.
+    /// Links are resolved first, so the check is on the real file.
+    public static func isTrustedBinary(_ url: URL) -> Bool { untrustedReason(url) == nil }
+
+    static func untrustedReason(_ url: URL) -> String? {
+        let real = url.resolvingSymlinksInPath().path
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: real) else { return "the file cannot be read" }
+        let owner = (attrs[.ownerAccountID] as? NSNumber)?.uint32Value
+        let mode = (attrs[.posixPermissions] as? NSNumber)?.uint16Value ?? 0o777
+        if owner != 0 && owner != getuid() { return "the owner of \(real) is not root or the current user" }
+        if mode & 0o022 != 0 { return "group or others can write to \(real)" }
         return nil
     }
 
@@ -42,6 +75,10 @@ public enum Shell {
     public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
                            unsetEnvironment: [String], quiet: Bool = false) -> ShellResult {
         let started = Date()
+        if let reason = untrustedReason(URL(fileURLWithPath: path)) {
+            Log.error("refused to run \(path): \(reason)")
+            return ShellResult(status: -1, stdout: "", stderr: "The tool is not safe to run", timedOut: false, refused: true)
+        }
         let result = execute(path, args, timeout: timeout, unset: unsetEnvironment)
         if quiet && result.status == 0 { return result }
         let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
@@ -62,6 +99,7 @@ public enum Shell {
         env["PATH"] = searchDirs.joined(separator: ":")
         env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
         env["HOMEBREW_NO_ANALYTICS"] = "1"
+        for key in env.keys where key.hasPrefix("DYLD_") || key.hasPrefix("LD_") { env.removeValue(forKey: key) }
         for key in unset { env.removeValue(forKey: key) }
         process.environment = env
         let out = Pipe(), err = Pipe()

@@ -614,7 +614,7 @@ public final class Cleaner {
         if let tool = hfTool(), let args = HuggingFace.removeArguments(id) {
             // The tool picks its cache from these variables. We checked the default folder, so the tool must use that one.
             let result = Shell.run(tool, args, timeout: 300, unsetEnv: ["HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME"])
-            guard result.status == 0, !result.timedOut else { report.failed.append("\(finding.title): hf cache rm failed"); return }
+            guard result.status == 0, !result.timedOut else { report.failed.append("\(finding.title): " + (result.refused ? "The tool is not safe to run" : "hf cache rm failed")); return }
             // An exit status of 0 is not proof. If the folder that we checked is still there, the tool worked on another cache.
             if FileManager.default.fileExists(atPath: repo.folder.path) {
                 Log.warn("hf cache rm exited 0, but \(repo.folder.path) is still there")
@@ -1111,7 +1111,7 @@ public final class Cleaner {
             result = Shell.run(tool, command.arguments, timeout: command.timeout)
         }
         guard result.status == 0, !result.timedOut else {
-            report.failed.append("\(finding.title): \(command.toolName) failed")
+            report.failed.append("\(finding.title): " + (result.refused ? "The tool is not safe to run" : "\(command.toolName) failed"))
             return
         }
         // Ask again. The tool may keep files that it never removes.
