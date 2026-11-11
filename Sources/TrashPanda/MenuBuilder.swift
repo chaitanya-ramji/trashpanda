@@ -12,6 +12,8 @@ final class MenuBuilder: NSObject {
 
     private let handler: (MenuModel.Action) -> Void
     /// The two rows that stay up to date while the menu is open: the main action and "Scan again".
+    /// How many times the main menu was filled. A test reads it.
+    private(set) var populateCount = 0
     private var mainItem: NSMenuItem?
     private var rescanItem: NSMenuItem?
     private static let iconSize = NSSize(width: 16, height: 16)
@@ -20,8 +22,30 @@ final class MenuBuilder: NSObject {
         self.handler = handler
     }
 
+    /// The model of the last `rebuild`. nil when the menu may no longer show it.
+    private var lastBuiltModel: MenuModel?
+
+    /// The menu no longer shows the last build (a live row changed), so the next `rebuild` must build.
+    func invalidate() { lastBuiltModel = nil }
+
+    /// Builds the menu with a NEW header view, unless `model` is the one that the menu shows already. Then it returns nil.
+    /// A header view is never used twice: an old menu item could still hold it.
+    func rebuild(_ menu: NSMenu, model: MenuModel, onSelect: @escaping (SplitSegment) -> Void) -> StorageHeaderView? {
+        if model == lastBuiltModel { return nil }
+        lastBuiltModel = model
+        let header = StorageHeaderView(frame: .zero)
+        header.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content, segments: model.header.segments)
+        header.onSelect = onSelect
+        populate(menu, model: model, header: header)
+        return header
+    }
+
     /// Fills `menu` with the rows of `model`. `header` is the view of the storage header.
     func populate(_ menu: NSMenu, model: MenuModel, header: NSView) {
+        populateCount += 1
+        // An old item must not keep a view that a new item will hold: when AppKit tears down the old item's viewer, it takes the
+        // view out of its new place, and the menu shows an empty header. So the old items let go of their views first.
+        for item in menu.items { item.view = nil }
         menu.removeAllItems()
         for item in items(model.rows, tab: mainTab(for: model), header: header) { menu.addItem(item) }
         // The group rows have a color dot. The "Smaller groups" row has a blank one, so that the texts line up.

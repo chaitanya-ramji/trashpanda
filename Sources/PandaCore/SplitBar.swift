@@ -19,6 +19,9 @@ public struct SplitSegment: Equatable, Sendable {
     /// The open apps that block `blockedBytes`, sorted by name.
     public var blockingApps: [String] = []
 
+    /// The part of `bytes` that you should look at first, and that can be cleaned now.
+    public var reviewBytes: Int64 { max(0, bytes - blockedBytes - safeBytes) }
+
     /// True when every item of the part belongs to an open app. The bar draws it lighter, with stripes.
     public var isBlockedOnly: Bool { bytes > 0 && blockedBytes >= bytes }
 
@@ -48,6 +51,8 @@ public struct SplitSegment: Equatable, Sendable {
     public func hoverText(shortName short: Bool) -> String {
         var text = "\(short ? shortName : name) · \(ByteText.string(bytes)) · \(percentText)"
         if safeBytes > 0 && safeBytes < bytes { text += " · \(ByteText.string(safeBytes)) safe" }
+        // The pale share of the bar: say what it is.
+        if reviewBytes > 0 { text += reviewBytes == bytes ? " · look through first" : " · \(ByteText.string(reviewBytes)) to look through" }
         if let blocked = blockedText { text += " · \(blocked)" }
         return text
     }
@@ -56,6 +61,7 @@ public struct SplitSegment: Equatable, Sendable {
     public var accessibilityLabel: String {
         let pct = share < 0.01 ? "less than 1 percent" : "\(Int((share * 100).rounded())) percent"
         var text = "\(name), \(ByteText.string(bytes)), \(pct) of what you can clean"
+        if reviewBytes > 0 { text += reviewBytes == bytes ? ", look through first" : ", \(ByteText.string(reviewBytes)) to look through" }
         if let blocked = blockedText { text += ", \(blocked)" }
         return text
     }
@@ -83,14 +89,43 @@ public struct SplitTotals: Equatable, Sendable {
 
     public var all: Int64 { free + review + waiting }
 
+    /// How many words the line uses. The menu picks the longest one that fits.
+    public enum Wording: CaseIterable, Sendable {
+        case long, compact, short
+    }
+
     /// "You can free 1.5 GB now · 1.4 GB to look through · 491 MB when apps quit".
     /// With `compact`, the words are shorter, for a narrow menu.
-    public func summary(compact: Bool = false) -> String {
-        guard all > 0 else { return "All tidy. Nothing to clean." }
+    public func summary(compact: Bool = false) -> String { summary(compact ? .compact : .long) }
+
+    /// The same three numbers in three lengths:
+    /// long "You can free 1.5 GB now · 1.4 GB to look through · 491 MB when apps quit",
+    /// compact "Free 1.5 GB now · 1.4 GB to review · 491 MB in open apps",
+    /// short "Free 1.5 GB · 1.4 GB review · 491 MB in apps". The short one keeps all three numbers.
+    public func summary(_ wording: Wording) -> String {
+        guard all > 0 else { return "All tidy." }
         var parts: [String] = []
-        if free > 0 { parts.append(compact ? "Free \(ByteText.string(free)) now" : "You can free \(ByteText.string(free)) now") }
-        if review > 0 { parts.append(compact ? "\(ByteText.string(review)) to review" : "\(ByteText.string(review)) to look through") }
-        if waiting > 0 { parts.append(compact ? "\(ByteText.string(waiting)) in open apps" : "\(ByteText.string(waiting)) when apps quit") }
+        if free > 0 {
+            switch wording {
+            case .long: parts.append("You can free \(ByteText.string(free)) now")
+            case .compact: parts.append("Free \(ByteText.string(free)) now")
+            case .short: parts.append("Free \(ByteText.string(free))")
+            }
+        }
+        if review > 0 {
+            switch wording {
+            case .long: parts.append("\(ByteText.string(review)) to look through")
+            case .compact: parts.append("\(ByteText.string(review)) to review")
+            case .short: parts.append("\(ByteText.string(review)) review")
+            }
+        }
+        if waiting > 0 {
+            switch wording {
+            case .long: parts.append("\(ByteText.string(waiting)) when apps quit")
+            case .compact: parts.append("\(ByteText.string(waiting)) in open apps")
+            case .short: parts.append("\(ByteText.string(waiting)) in apps")
+            }
+        }
         return parts.joined(separator: " · ")
     }
 }
@@ -142,7 +177,19 @@ public enum SplitBar {
             let a = groups[$0], b = groups[$1]
             return a.bytes != b.bytes ? a.bytes > b.bytes : a.ecosystem.name < b.ecosystem.name
         }
+        // First, each slot goes to the largest group that wants it. A group that nobody beats keeps its own slot.
+        // (If the smaller groups took a free slot at once, they could take the slot of a group that comes later,
+        // and that group would change color for no reason.)
+        var losers: [Int] = []
         for i in ranked {
+            let slot = wanted(groups[i].ecosystem)
+            if taken.contains(slot) { losers.append(i) } else {
+                taken.insert(slot)
+                result[i] = slot
+            }
+        }
+        // Then, the others take the next free slot after the one they wanted, the larger ones first.
+        for i in losers {
             var slot = wanted(groups[i].ecosystem)
             if taken.count < slots { while taken.contains(slot) { slot = (slot + 1) % slots } }
             taken.insert(slot)
@@ -203,19 +250,28 @@ public enum SplitBar {
     /// Places the parts across `width`. Each part is at least `minWidth` wide, so that it can be seen and chosen.
     /// The widths and the gaps add up to `width`.
     public static func layout(_ segments: [SplitSegment], width: CGFloat, gap: CGFloat = 1.5,
-                              minWidth: CGFloat = 4) -> [SplitSlot] {
+                              minWidth: CGFloat = 6) -> [SplitSlot] {
         guard !segments.isEmpty else { return [] }
         let available = max(0, width - gap * CGFloat(segments.count - 1))
+        let count = CGFloat(segments.count)
         var widths = segments.map { CGFloat($0.share) * available }
-
-        // Raise the parts that are too small, and take the same space from the large ones.
-        let small = widths.indices.filter { widths[$0] < minWidth }
-        let deficit = small.reduce(CGFloat(0)) { $0 + (minWidth - widths[$1]) }
-        if deficit > 0 {
-            let largeTotal = widths.indices.filter { !small.contains($0) }.reduce(CGFloat(0)) { $0 + widths[$1] }
-            let scale = largeTotal > deficit ? (largeTotal - deficit) / largeTotal : 0
-            for i in widths.indices { widths[i] = small.contains(i) ? minWidth : widths[i] * scale }
-            if scale == 0 { widths = Array(repeating: available / CGFloat(segments.count), count: segments.count) }
+        if available < minWidth * count {
+            // There is no room for the minimum: all parts get the same width.
+            widths = Array(repeating: available / count, count: segments.count)
+        } else {
+            // Parts that are too small get the minimum. The others share what is left, in the ratio of their shares.
+            // Taking space from them can make another part too small, so this repeats until no part is.
+            var fixed = Set<Int>()
+            while true {
+                let free = segments.indices.filter { !fixed.contains($0) }
+                let freeShare = free.reduce(0.0) { $0 + segments[$1].share }
+                let room = available - minWidth * CGFloat(fixed.count)
+                guard freeShare > 0 else { break }
+                for i in segments.indices { widths[i] = fixed.contains(i) ? minWidth : CGFloat(segments[i].share / freeShare) * room }
+                let thin = free.filter { widths[$0] < minWidth }
+                if thin.isEmpty { break }
+                fixed.formUnion(thin)
+            }
         }
 
         var x: CGFloat = 0

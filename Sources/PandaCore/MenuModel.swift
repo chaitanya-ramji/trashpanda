@@ -133,6 +133,8 @@ public struct MenuModel: Equatable, Sendable {
         public let totals: SplitTotals
         public let activity: Activity
         public let segments: [SplitSegment]
+        /// What the header shows: the bar or the skeleton, the detail text, and how strong the bar is drawn.
+        public let content: HeaderContent
     }
 
     public let header: Header
@@ -183,13 +185,17 @@ public struct MenuModel: Equatable, Sendable {
         let usableSafe = findings.filter { $0.isActionable && $0.tier == .safe && input.blockers($0).isEmpty }
         let safeBytes = usableSafe.reduce(Int64(0)) { $0 + $1.countedBytes }
         // The bar has one part for each group row that shows a size. An item of an open app stays in the bar.
-        let segments = cleaning ? [] : SplitBar.segments(from: findings, blockers: input.blockers)
+        // The bar stays while the app cleans, so the header keeps its height. The view draws it lighter.
+        let segments = SplitBar.segments(from: findings, blockers: input.blockers)
         let header = Header(disk: input.disk, totals: SplitBar.totals(from: findings, blockers: input.blockers),
-                            activity: input.activity, segments: segments)
+                            activity: input.activity, segments: segments,
+                            content: HeaderContent.make(activity: input.activity, hasResult: input.hasResult, hasParts: !segments.isEmpty,
+                                                        progress: input.cleaningTitle))
 
         var rows: [Row] = [Row(kind: .header), .separator]
         if cleaning {
-            rows.append(.note(input.cleaningTitle ?? "Cleaning…"))
+            // The progress text is in the header, under the title. The row says only what happens.
+            rows.append(.note("Cleaning…"))
             rows.append(Row(title: input.stopRequested ? "Stopping after this item…" : "Stop after this item",
                             enabled: !input.stopRequested, action: .stopClean))
         } else if input.hasResult {

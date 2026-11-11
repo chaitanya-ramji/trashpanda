@@ -37,7 +37,7 @@ final class SplitBarTests: XCTestCase {
     func testNothingToCleanGivesNoBar() {
         XCTAssertTrue(SplitBar.segments(from: []).isEmpty)
         XCTAssertTrue(SplitBar.segments(from: [item(.swift, 100, action: .inform)]).isEmpty)
-        XCTAssertTrue(SplitBar.totals(from: [item(.swift, 100, action: .inform)]).summary() == "All tidy. Nothing to clean.")
+        XCTAssertTrue(SplitBar.totals(from: [item(.swift, 100, action: .inform)]).summary() == "All tidy.")
     }
 
     // MARK: The bar matches the rows of the menu
@@ -102,7 +102,7 @@ final class SplitBarTests: XCTestCase {
 
         let js = parts[0]
         XCTAssertEqual(js.blockedBytes, 0)
-        XCTAssertEqual(js.hoverText, "JavaScript & TypeScript · 2.8 GB · 84% · 1.4 GB safe", "No quit words when no app blocks it")
+        XCTAssertEqual(js.hoverText, "JavaScript & TypeScript · 2.8 GB · 84% · 1.4 GB safe · 1.4 GB to look through","No quit words when no app blocks it")
     }
 
     func testTheLineUnderTheTitleCountsEveryRowOnce() {
@@ -244,8 +244,8 @@ final class SplitBarTests: XCTestCase {
     func testHoverTextAndPercent() {
         let parts = SplitBar.segments(from: [item(.swift, 10_000_000_000, tier: .safe), item(.swift, 4_000_000_000, tier: .review),
                                              item(.javascript, 17_000_000_000, tier: .review)])
-        XCTAssertEqual(parts[0].hoverText, "JavaScript & TypeScript · 17 GB · 55%", "The hover uses the full name. The legend uses the short one.")
-        XCTAssertEqual(parts[1].hoverText, "Xcode & Swift · 14 GB · 45% · 10 GB safe")
+        XCTAssertEqual(parts[0].hoverText, "JavaScript & TypeScript · 17 GB · 55% · look through first","The hover uses the full name. The legend uses the short one.")
+        XCTAssertEqual(parts[1].hoverText, "Xcode & Swift · 14 GB · 45% · 10 GB safe · 4.0 GB to look through")
         XCTAssertTrue(parts[1].accessibilityLabel.hasPrefix("Xcode & Swift, 14 GB, 45 percent"))
     }
 
