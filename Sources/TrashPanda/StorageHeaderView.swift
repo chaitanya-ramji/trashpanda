@@ -80,7 +80,8 @@ final class StorageHeaderView: NSView {
     private var rows: HeaderLayout { Self.layout(hasBar: !segments.isEmpty) }
     var preferredHeight: CGFloat { rows.height }
 
-    private var splitBarRect: NSRect {
+    /// The bar. Internal, so that a test can look at the pixels inside it.
+    var splitBarRect: NSRect {
         NSRect(x: Self.inset, y: rows.barY ?? 0, width: barWidth, height: Self.splitBarHeight)
     }
 
@@ -264,7 +265,8 @@ final class StorageHeaderView: NSView {
             let alpha: CGFloat = style.dimOtherParts && hovered != nil && hovered != i ? 0.30 : 1
             let rect = NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height)
             let widths = SplitBar.partWidths(s, width: rect.width)
-            let (rest, open) = rect.divided(atDistance: widths.blocked, from: .maxXEdge)
+            // `divided` returns the slice first and the remainder second.
+            let (open, rest) = rect.divided(atDistance: widths.blocked, from: .maxXEdge)
             let (review, solid) = rest.divided(atDistance: widths.review, from: .maxXEdge)
             color(i).withAlphaComponent(alpha).setFill()
             solid.fill()
