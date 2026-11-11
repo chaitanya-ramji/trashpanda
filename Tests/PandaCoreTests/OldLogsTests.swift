@@ -206,4 +206,42 @@ final class OldLogsTests: XCTestCase {
         XCTAssertTrue(c.cancelIsDefault)
         XCTAssertTrue(c.footer?.contains("30 days") == true && c.footer?.contains("log of Trash Panda") == true)
     }
+
+    /// S-11 a. Library/Logs is a link to a folder inside the home. The folder behind it is not ours: nothing is deleted.
+    func testALinkedLogsFolderIsNeverCleanedEvenWithAForgedFinding() throws {
+        let box = try Sandbox()
+        try box.file("Documents/real/old.log", bytes: 2 * mb, age: 90)
+        try FileManager.default.createDirectory(at: box.home.appendingPathComponent("Library"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: box.home.appendingPathComponent("Library/Logs"),
+                                                   withDestinationURL: box.home.appendingPathComponent("Documents/real"))
+        let forged = Finding(id: "logs.logs", ecosystem: .logs, title: "x", location: "../Documents/real", bytes: 1, tier: .review,
+                             rebuild: .never, action: .removeOldLogs(.logs))
+        let report = cleaner(scanner(box)).clean([forged])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(report.freed, 0)
+        XCTAssertTrue(exists(box, "Documents/real/old.log"))
+    }
+
+    /// S-11 a. A folder of Logs becomes a link after the preview. The handler finds the file again, and refuses it.
+    func testAFolderOfLogsThatBecameALinkAfterThePreviewIsRefused() throws {
+        let box = try Sandbox()
+        try box.file("Library/Logs/App/old.log", bytes: 2 * mb, age: 90)
+        let s = scanner(box)
+        let f = try XCTUnwrap(s.scanLogs().first)
+        let c = cleaner(s)
+        var swapped = false
+        c.sizeOf = { url in
+            if !swapped {
+                swapped = true
+                let dir = box.home.appendingPathComponent("Library/Logs/App")
+                try? FileManager.default.moveItem(at: dir, to: box.home.appendingPathComponent("Library/Logs/App-moved"))
+                try? FileManager.default.createSymbolicLink(at: dir, withDestinationURL: box.home.appendingPathComponent("Library/Logs/App-moved"))
+            }
+            return Sizer.size(of: url)
+        }
+        let report = c.clean([f])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(report.freed, 0)
+        XCTAssertTrue(exists(box, "Library/Logs/App-moved/old.log"))
+    }
 }

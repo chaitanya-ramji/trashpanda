@@ -127,6 +127,33 @@ final class CleanerLinkWhileMeasuringTests: XCTestCase {
         XCTAssertTrue(exists(box, "Developer/real/node_modules/x/i.js"))
     }
 
+    /// S-11 b. A forged finding: the path ends in `..`, so it is not a build folder name. The project stays.
+    func testAForgedBuildFolderPathWithDotDotIsRefused() throws {
+        let box = try Sandbox()
+        try box.file("Developer/app/package.json", bytes: 10)
+        try box.file("Developer/app/node_modules/x/i.js", bytes: 1_000_000)
+        let forged = box.home.appendingPathComponent("Developer/app/node_modules/..")
+        let report = plainCleaner(box).clean([finding(.removeArtifact(forged))])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(report.freed, 0)
+        XCTAssertTrue(exists(box, "Developer/app/package.json"))
+        XCTAssertTrue(exists(box, "Developer/app/node_modules/x/i.js"))
+    }
+
+    /// S-11 b. The build folder itself is a link to a folder in the home. The link and the target stay.
+    func testABuildFolderThatIsALinkIsRefused() throws {
+        let box = try Sandbox()
+        try box.file("Developer/app/package.json", bytes: 10)
+        try box.file("Developer/other/data/i.js", bytes: 1_000_000)
+        let link = box.home.appendingPathComponent("Developer/app/node_modules")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: box.home.appendingPathComponent("Developer/other"))
+        let report = plainCleaner(box).clean([finding(.removeArtifact(link))])
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(report.freed, 0)
+        XCTAssertTrue(exists(box, "Developer/other/data/i.js"))
+        XCTAssertTrue(exists(box, "Developer/app/node_modules"), "the link is left alone")
+    }
+
     // MARK: A program starts while measuring
 
     /// A program starts from the second version only while the second version is measured. The list that was read for the first is too old.

@@ -338,7 +338,9 @@ public final class DiskScanner {
         if unavailableBytes > 0 {
             out.append(Finding(id: "xcode.sim.unavailable", ecosystem: .swift, title: "Unavailable simulators",
                                location: place, bytes: unavailableBytes, tier: .safe, rebuild: .seconds,
-                               action: .owner(.simctlDeleteUnavailable)))
+                               action: .owner(.simctlDeleteUnavailable),
+                               note: "Apple's command removes every simulator whose runtime is gone. It can remove more than this size.",
+                               sizeIsUpperLimit: true))
         }
 
         // 2. Runtimes. Keep the newest of each platform, and any runtime that is in use.
@@ -530,7 +532,9 @@ public final class DiskScanner {
         let cache = home.appendingPathComponent("Library/Caches/Homebrew", isDirectory: true)
         return [Finding(id: "brew.cleanup", ecosystem: .homebrew, title: "Old downloads and versions",
                         location: cache.path, bytes: bytes, tier: .safe, rebuild: .download,
-                        action: .owner(.brewCleanup))]
+                        action: .owner(.brewCleanup),
+                        note: "brew cleanup --prune=all removes all old downloads and old versions of packages. It can remove more than this size.",
+                        sizeIsUpperLimit: true)]
     }
 
     func brew() -> Brew? {
