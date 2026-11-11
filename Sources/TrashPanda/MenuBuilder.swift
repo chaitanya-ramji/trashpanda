@@ -11,6 +11,9 @@ final class MenuBuilder: NSObject {
     }
 
     private let handler: (MenuModel.Action) -> Void
+    /// The two rows that stay up to date while the menu is open: the main action and "Scan again".
+    private var mainItem: NSMenuItem?
+    private var rescanItem: NSMenuItem?
     private static let iconSize = NSSize(width: 16, height: 16)
 
     init(handler: @escaping (MenuModel.Action) -> Void) {
@@ -21,6 +24,36 @@ final class MenuBuilder: NSObject {
     func populate(_ menu: NSMenu, model: MenuModel, header: NSView) {
         menu.removeAllItems()
         for item in items(model.rows, tab: CGFloat(MenuModel.defaultTab), header: header) { menu.addItem(item) }
+        mainItem = menu.items.indices.contains(Self.mainIndex) ? menu.items[Self.mainIndex] : nil
+        rescanItem = Self.rescanIndex(in: model).flatMap { menu.items.indices.contains($0) ? menu.items[$0] : nil }
+    }
+
+    /// The main action is the row after the header and the first separator.
+    private static let mainIndex = 2
+
+    private static func rescanIndex(in model: MenuModel) -> Int? {
+        model.rows.firstIndex { $0.action == .rescan }
+    }
+
+    /// Changes only the title, the second line, the state and the action of the main row and of "Scan again".
+    /// The menu is open, so no row is added or removed, and a submenu that the user reads stays open.
+    func updateLiveRows(model: MenuModel) {
+        if let item = mainItem, model.rows.indices.contains(Self.mainIndex) { applyLive(model.rows[Self.mainIndex], to: item) }
+        if let item = rescanItem, let index = Self.rescanIndex(in: model) { applyLive(model.rows[index], to: item) }
+    }
+
+    private func applyLive(_ row: MenuModel.Row, to item: NSMenuItem) {
+        item.title = row.title
+        item.isEnabled = row.enabled
+        if #available(macOS 14.4, *) { item.subtitle = row.subtitle }
+        if let action = row.action, action != .quit {
+            item.action = #selector(fire(_:))
+            item.target = self
+            item.representedObject = ActionBox(action)
+        } else {
+            item.action = nil
+            item.representedObject = nil
+        }
     }
 
     /// Fills `menu` with the rows of a submenu.

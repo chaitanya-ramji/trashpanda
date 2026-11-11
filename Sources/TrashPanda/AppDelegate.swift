@@ -23,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var cleaning: Bool { cleaner.isCleaning }
     private var flash: String? { cleaner.flash }
     private var timer: Timer?
+    /// Knows whether the menu is open. While it is, a change updates a few rows and waits for the close.
+    private var refreshGate = MenuRefreshGate()
+    /// Read when the Settings submenu opens, not at each build.
+    private var loginEnabled = false
     private let updates = UpdateController()
     /// Waits a moment after an app opens or quits, so that a burst of changes gives one refresh.
     private var appsChangedTimer: Timer?
@@ -46,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         if let demo { demo.start(self); return }
-        updates.onChange = { [weak self] in self?.rebuildMenu() }
+        updates.onChange = { [weak self] in self?.menuChanged() }
         updates.start()
         refreshStatusItem()
         rebuildMenu()
@@ -81,16 +85,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self, !self.cleaning else { return }
             let before = (self.result?.findings ?? []).map(self.blockers)
             self.running = self.runningApps.cached
-            if (self.result?.findings ?? []).map(self.blockers) != before { self.rebuildMenu() }
+            if (self.result?.findings ?? []).map(self.blockers) != before { self.menuChanged() }
         }
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        guard menu === self.menu else { settingsWillOpen(menu); return }
         if demo == nil { disk = DiskUsage.current() }
         refreshStatusItem()
         if let last = result?.date, Date().timeIntervalSince(last) > 30 * 60 { scan() }
         rebuildMenu()
+        refreshGate.opened()
         refreshRunning()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        guard menu === self.menu else { return }
+        if refreshGate.closed() { rebuildMenu() }
+    }
+
+    /// The Settings submenu is about to open. Only now is the login state read, and the check mark is set.
+    private func settingsWillOpen(_ settings: NSMenu) {
+        loginEnabled = SMAppService.mainApp.status == .enabled
+        settings.items.first { $0.title == "Open at login" }?.state = loginEnabled ? .on : .off
     }
 
     // MARK: Scan
@@ -131,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             spinnerTimer = t
         }
         refreshStatusItem()
-        rebuildMenu()
+        menuChanged()
     }
 
     private func refreshStatusItem() {
@@ -148,11 +165,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func menuInput() -> MenuInput {
         MenuInput(result: result, disk: disk, scanning: scanning, cleaning: cleaning, running: running,
                   staleDays: scanner.config.staleDays, updateVersion: updates.available?.version,
-                  updateCheckEnabled: updates.isEnabled, loginEnabled: SMAppService.mainApp.status == .enabled)
+                  updateCheckEnabled: updates.isEnabled, loginEnabled: loginEnabled)
     }
 
     /// The programs that block this item right now. An empty list means that it can be cleaned.
     private func blockers(_ f: Finding) -> [String] { f.owner.map { running.running($0) } ?? [] }
+
+    /// The state changed. A closed menu is built again. An open menu keeps its rows (a rebuild would close the
+    /// submenu that the user reads): the header and two rows are updated, and the build waits for the close.
+    private func menuChanged() {
+        switch refreshGate.changed() {
+        case .rebuild:
+            rebuildMenu()
+        case .updateLiveRows:
+            let model = MenuModel.make(menuInput())
+            header.update(disk: model.header.disk, totals: model.header.totals, activity: model.header.activity,
+                          segments: model.header.segments)
+            builder.updateLiveRows(model: model)
+        }
+    }
 
     private func rebuildMenu() {
         let model = MenuModel.make(menuInput())
@@ -160,6 +191,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                       segments: model.header.segments)
         header.onSelect = { [weak self] segment in self?.showGroup(segment) }
         builder.populate(menu, model: model, header: header)
+        if let index = model.rows.firstIndex(where: { $0.title == "Settings" && $0.submenu != nil }),
+           menu.items.indices.contains(index) {
+            menu.items[index].submenu?.delegate = self
+        }
     }
 
 
@@ -198,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             updates.checkNow()
         case .toggleUpdateCheck:
             updates.isEnabled.toggle()
-            rebuildMenu()
+            menuChanged()
         case .toggleLogin:
             toggleLogin()
         case .quit:
@@ -249,7 +284,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.bringToFront()
             alert.runModal()
         }
-        rebuildMenu()
+        loginEnabled = SMAppService.mainApp.status == .enabled
+        menuChanged()
     }
 }
 
@@ -260,7 +296,7 @@ extension AppDelegate: DemoHost {
         result = demoResult
         disk = demoResult.disk
         refreshStatusItem()
-        rebuildMenu()
+        menuChanged()
         refreshRunning()
     }
 }

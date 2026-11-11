@@ -323,7 +323,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Show the time of the last scan ([#152](https://github.com/chaitanya-ramji/trashpanda/issues/152))
 - [ ] "Show in Finder" for an item, and the rebuild label as a subtitle ([#153](https://github.com/chaitanya-ramji/trashpanda/issues/153))
 - [x] Section headers in a group submenu ([#154](https://github.com/chaitanya-ramji/trashpanda/issues/154))
-- [ ] Do not build the menu again while it is open ([#155](https://github.com/chaitanya-ramji/trashpanda/issues/155))
+- [x] Do not build the menu again while it is open ([#155](https://github.com/chaitanya-ramji/trashpanda/issues/155))
 - [ ] Progress and a stop during a clean ([#156](https://github.com/chaitanya-ramji/trashpanda/issues/156))
 - [x] One summary dialog after a clean, with the check of the real free space ([#157](https://github.com/chaitanya-ramji/trashpanda/issues/157))
 - [ ] A fixed color for each group ([#158](https://github.com/chaitanya-ramji/trashpanda/issues/158))
