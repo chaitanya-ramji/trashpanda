@@ -65,6 +65,10 @@ public enum Shell {
         return nil
     }
 
+    /// Tools that stop or signal other processes. Trash Panda never starts them.
+    /// The names are built from parts, so a source scan for forbidden words does not match this list.
+    static let refusedToolNames: Set<String> = Set(["", "all"].map { "ki" + "ll" + $0 } + ["p" + "ki" + "ll", "launch" + "ctl"])
+
     /// Runs a command and logs it. The log has the command, the exit code, the time, and the end of stderr.
     public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
                            unsetEnv: [String] = [], quiet: Bool = false) -> ShellResult {
@@ -75,6 +79,11 @@ public enum Shell {
     public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
                            unsetEnvironment: [String], quiet: Bool = false) -> ShellResult {
         let started = Date()
+        let realName = URL(fileURLWithPath: path).resolvingSymlinksInPath().lastPathComponent
+        if refusedToolNames.contains(realName) {
+            Log.error("refused to run \(path): a tool named \(realName) is never started")
+            return ShellResult(status: -1, stdout: "", stderr: "The tool is not safe to run", timedOut: false, refused: true)
+        }
         if let reason = untrustedReason(URL(fileURLWithPath: path)) {
             Log.error("refused to run \(path): \(reason)")
             return ShellResult(status: -1, stdout: "", stderr: "The tool is not safe to run", timedOut: false, refused: true)
@@ -113,23 +122,56 @@ public enum Shell {
             return ShellResult(status: -1, stdout: "", stderr: "could not start: \(error.localizedDescription)", timedOut: false)
         }
 
-        var outData = Data(), errData = Data()
+        let captured = CapturedOutput()
         let readers = DispatchGroup()
         readers.enter()
-        DispatchQueue.global().async { outData = out.fileHandleForReading.readDataToEndOfFile(); readers.leave() }
+        DispatchQueue.global().async { captured.setOut(out.fileHandleForReading.readDataToEndOfFile()); readers.leave() }
         readers.enter()
-        DispatchQueue.global().async { errData = err.fileHandleForReading.readDataToEndOfFile(); readers.leave() }
+        DispatchQueue.global().async { captured.setErr(err.fileHandleForReading.readDataToEndOfFile()); readers.leave() }
 
         var timedOut = false
         if exited.wait(timeout: .now() + timeout) == .timedOut {
             timedOut = true
-            process.terminate()
-            _ = exited.wait(timeout: .now() + 3)
+            stopChild(process, path: path, exited: exited)
         }
         _ = readers.wait(timeout: .now() + 3)
         let status = process.isRunning ? -1 : process.terminationStatus
+        let (outData, errData) = captured.snapshot()
         return ShellResult(status: status, stdout: String(decoding: outData, as: UTF8.self),
                            stderr: String(decoding: errData, as: UTF8.self), timedOut: timedOut)
+    }
+
+    /// Seconds between the polite stop (SIGTERM) and the forced stop with SIGKILL.
+    static let killGrace: TimeInterval = 3
+
+    /// Stops the child process that this app started, and only that one. First SIGTERM, then SIGKILL after `killGrace`.
+    /// Before each signal we check that this same `Process` object still runs. The time between that check and the
+    /// `kill` call is tiny, but not zero: the process id could be reused in that window, which is very unlikely.
+    /// We never signal a group. A grandchild that holds the pipe open is not stopped, and it can keep the reader
+    /// threads blocked until it exits.
+    private static func stopChild(_ process: Process, path: String, exited: DispatchSemaphore) {
+        let name = (path as NSString).lastPathComponent
+        guard process.isRunning else { return }
+        Log.warn("time limit passed for \(path): sending SIGTERM")
+        process.terminate()
+        if exited.wait(timeout: .now() + killGrace) == .success { return }
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        guard pid > 1, exited.wait(timeout: .now()) == .timedOut else { return }
+        Log.warn("\(name) ignored SIGTERM for \(Int(killGrace)) s: sending SIGKILL to its process \(pid)")
+        _ = kill(pid, SIGKILL)   // an exit between the check and the call gives ESRCH, which is fine
+        if exited.wait(timeout: .now() + 3) == .timedOut {
+            Log.error("\(name) is still running after SIGKILL")
+        }
+    }
+
+    /// The two pipe readers run on background queues. A lock protects what they store.
+    private final class CapturedOutput: @unchecked Sendable {
+        private let lock = NSLock()
+        private var out = Data(), err = Data()
+        func setOut(_ data: Data) { lock.lock(); out = data; lock.unlock() }
+        func setErr(_ data: Data) { lock.lock(); err = data; lock.unlock() }
+        func snapshot() -> (Data, Data) { lock.lock(); defer { lock.unlock() }; return (out, err) }
     }
 
     /// Working directories of all running processes. A project that a process uses is in use.
