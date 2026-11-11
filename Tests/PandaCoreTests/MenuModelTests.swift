@@ -60,10 +60,14 @@ final class MenuModelTests: XCTestCase {
 
     private func titles(_ model: MenuModel) -> [String] { describe(model.rows) }
 
-    private let tail = [
-        "---", "Scan again", "Show log in Finder", "Check for updates…", "Check for updates every day",
-        "Open at login", "Quit Trash Panda",
+    private let settingsLines = [
+        "Settings",
+        "  Check for updates…", "  Check for updates every day", "  Open at login", "  ---",
+        "  Open the keep list", "  Open the project folders list", "  ---",
+        "  Show log in Finder", "  Help", "  Report a problem", "  About Trash Panda",
+        "Quit Trash Panda",
     ]
+    private var tail: [String] { ["---", "Scan again"] + settingsLines }
 
     // MARK: States
 
@@ -132,10 +136,9 @@ final class MenuModelTests: XCTestCase {
             "  Unused volume · data | 40 MB",
             "Python | info",
             "---",
+            "Scan again",
             "Update available: 9.9.9…",
-            "Scan again", "Show log in Finder", "Check for updates…", "Check for updates every day",
-            "Open at login", "Quit Trash Panda",
-        ])
+        ] + settingsLines)
     }
 
     // MARK: The main row says what it removes
@@ -207,15 +210,53 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(prompt.findings.map(\.id), ["1", "2"])
     }
 
-    func testTheOptionRowAndTheChecks() {
+    func testTheKeysAndTheChecks() throws {
         let model = MenuModel.make(input([]))
-        let log = model.rows.first { $0.title == "Show log in Finder" }
-        XCTAssertEqual(log?.isOptionAlternate, true)
-        XCTAssertEqual(log?.keyEquivalent, "r")
         XCTAssertEqual(model.rows.first { $0.action == .rescan }?.keyEquivalent, "r")
         XCTAssertEqual(model.rows.first { $0.action == .quit }?.keyEquivalent, "q")
-        XCTAssertEqual(model.rows.first { $0.action == .toggleUpdateCheck }?.checked, true)
-        XCTAssertEqual(model.rows.first { $0.action == .toggleLogin }?.checked, false)
+        XCTAssertFalse(model.rows.contains { $0.isOptionAlternate }, "No row waits for the Option key")
+        let settings = try XCTUnwrap(model.rows.first { $0.title == "Settings" }?.submenu?.rows)
+        XCTAssertEqual(settings.first { $0.action == .toggleUpdateCheck }?.checked, true)
+        XCTAssertEqual(settings.first { $0.action == .toggleLogin }?.checked, false)
+    }
+
+    func testTheMainListHasNoSettingsRowsAndSettingsHasThemInOrder() throws {
+        let model = MenuModel.make(input(fixture()))
+        let settingsActions: [MenuModel.Action] = [.checkForUpdates, .toggleUpdateCheck, .toggleLogin, .openKeepList, .openRootsList,
+                                                   .showLog, .openHelp, .reportProblem, .showAbout]
+        for action in settingsActions { XCTAssertFalse(model.rows.contains { $0.action == action }, "\(action) is in Settings only") }
+        let settings = try XCTUnwrap(model.rows.first { $0.title == "Settings" }?.submenu?.rows)
+        XCTAssertEqual(settings.compactMap(\.action), settingsActions)
+        XCTAssertEqual(model.rows.filter { $0.action == .rescan || $0.title == "Settings" }.map(\.title), ["Scan again", "Settings"])
+    }
+
+    func testReportURLHoldsOnlyTheTwoVersions() throws {
+        let url = MenuText.reportURL(appVersion: "1.2.3", osVersion: "15.1.0")
+        let parts = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(parts.host, "github.com")
+        XCTAssertEqual(parts.path, "/chaitanya-ramji/trashpanda/issues/new")
+        XCTAssertEqual(parts.queryItems?.map(\.name), ["body"])
+        XCTAssertEqual(parts.queryItems?.first?.value, "Trash Panda: 1.2.3\nmacOS: 15.1.0")
+        XCTAssertEqual(MenuText.helpURL.host, "github.com")
+    }
+
+    func testSettingsFilesAreMadeWithTwoCommentLinesAndKept() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tp-config-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        for name in ["keep", "roots"] {
+            let file = Config.ensureFile(name, home: home)
+            XCTAssertEqual(file.lastPathComponent, name)
+            let lines = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
+            XCTAssertEqual(lines.count, 2)
+            XCTAssertTrue(lines.allSatisfy { $0.hasPrefix("#") })
+        }
+        // A file that exists is not changed.
+        let keep = home.appendingPathComponent(".config/trashpanda/keep")
+        try "~/Projects/old\n".write(to: keep, atomically: true, encoding: .utf8)
+        Config.ensureFile("keep", home: home)
+        XCTAssertEqual(try String(contentsOf: keep, encoding: .utf8), "~/Projects/old\n")
+        // The comment lines are not read as paths.
+        XCTAssertEqual(Config.load(home: home).roots, [])
     }
 
     // MARK: An open app

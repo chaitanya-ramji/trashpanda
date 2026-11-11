@@ -20,10 +20,14 @@ final class MenuBuilderTests: XCTestCase {
             item.isSeparatorItem ? "---" : (item.view != nil ? "<header>" : (item.attributedTitle?.string ?? item.title))
         }
         XCTAssertEqual(menu.items.map(text), [
-            "<header>", "---", "Free up 1.3 GB…", "---", "JavaScript & TypeScript\t1.3 GB", "---", "Scan again", "Show log in Finder",
-            "Check for updates…", "Check for updates every day", "Open at login", "Quit Trash Panda",
+            "<header>", "---", "Free up 1.3 GB…", "---", "JavaScript & TypeScript\t1.3 GB", "---", "Scan again", "Settings",
+            "Quit Trash Panda",
         ])
         XCTAssertEqual(menu.items[4].submenu?.items.map(text), ["Free up 1.3 GB…", "---", "Safe to clean", "node_modules · app-a\t1.3 GB"])
-        XCTAssertTrue(menu.items[7].isAlternate)
+        XCTAssertEqual(menu.items[7].submenu?.items.map(text), [
+            "Check for updates…", "Check for updates every day", "Open at login", "---", "Open the keep list",
+            "Open the project folders list", "---", "Show log in Finder", "Help", "Report a problem", "About Trash Panda",
+        ])
+        XCTAssertFalse(menu.items.contains { $0.isAlternate })
     }
 }
