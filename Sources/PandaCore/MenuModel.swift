@@ -102,13 +102,12 @@ public struct MenuModel: Equatable, Sendable {
         public var icon: Icon?
         /// A check mark in front of the row.
         public var checked: Bool?
-        public var keyEquivalent: String
         /// Shown only while the Option key is held. It has the same key as the row before it.
         public var isOptionAlternate: Bool
 
         public init(kind: Kind = .text, title: String = "", size: String? = nil, enabled: Bool = true, action: Action? = nil,
                     submenu: Submenu? = nil, tooltip: String? = nil, subtitle: String? = nil, icon: Icon? = nil, checked: Bool? = nil,
-                    keyEquivalent: String = "", isOptionAlternate: Bool = false) {
+                    isOptionAlternate: Bool = false) {
             self.kind = kind
             self.title = title
             self.size = size
@@ -119,7 +118,6 @@ public struct MenuModel: Equatable, Sendable {
             self.subtitle = subtitle
             self.icon = icon
             self.checked = checked
-            self.keyEquivalent = keyEquivalent
             self.isOptionAlternate = isOptionAlternate
         }
 
@@ -150,9 +148,33 @@ public struct MenuModel: Equatable, Sendable {
         min(520, max(defaultTab, widestTitle + 90))
     }
 
-    /// How much room a title has before the size column starts: the tab, minus the size and a minimum space.
-    public static func titleRoom(tab: Double, sizeWidth: Double, minGap: Double = 12) -> Double {
+    /// The least space between a title and its size.
+    public static let minTitleGap: Double = 12
+
+    /// How much room a title has before the size column starts: the tab, minus the size and the minimum gap.
+    public static func titleRoom(tab: Double, sizeWidth: Double, minGap: Double = minTitleGap) -> Double {
         max(0, tab - sizeWidth - minGap)
+    }
+
+    /// The smallest tab of the main menu. The menu is as wide as its tab plus the icon and the chevron columns.
+    public static let minTab: Double = 220
+
+    /// The tab of the main menu: as small as the widest row allows (`widestRow` is title + minimum gap + size, in points),
+    /// so that the menu is not wider than its content. It never goes below `minTab`.
+    public static func mainTab(widestRow: Double) -> Double {
+        max(minTab, widestRow.rounded(.up))
+    }
+
+    /// The rows with a size that use the tab of the main menu: the group rows, and the groups inside "Smaller groups".
+    /// A submenu with its own `widthTitles` has its own tab.
+    public var sharedColumnRows: [Row] { Self.columnRows(in: rows) }
+
+    private static func columnRows(in rows: [Row]) -> [Row] {
+        rows.flatMap { row -> [Row] in
+            var found = row.kind == .columns ? [row] : []
+            if let sub = row.submenu, sub.widthTitles == nil { found += columnRows(in: sub.rows) }
+            return found
+        }
     }
 
     public static func make(_ input: MenuInput) -> MenuModel {
@@ -192,13 +214,12 @@ public struct MenuModel: Equatable, Sendable {
 
         rows.append(.separator)
         rows.append(Row(title: scanning ? "Scanning…" : "Scan again", enabled: !scanning && !cleaning, action: .rescan,
-                        subtitle: scanning ? nil : input.result.map { MenuText.lastScan($0.date, now: input.now) },
-                        keyEquivalent: "r"))
+                        subtitle: scanning ? nil : input.result.map { MenuText.lastScan($0.date, now: input.now) }))
         if let version = input.updateVersion {
             rows.append(Row(title: "Update available: \(version)…", action: .openUpdate))
         }
         rows.append(Row(title: "Settings", submenu: Submenu(rows: settingsRows(input))))
-        rows.append(Row(title: "Quit Trash Panda", action: .quit, keyEquivalent: "q"))
+        rows.append(Row(title: "Quit Trash Panda", action: .quit))
         return MenuModel(header: header, rows: rows)
     }
 

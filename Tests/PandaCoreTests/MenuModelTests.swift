@@ -230,8 +230,6 @@ final class MenuModelTests: XCTestCase {
 
     func testTheKeysAndTheChecks() throws {
         let model = MenuModel.make(input([]))
-        XCTAssertEqual(model.rows.first { $0.action == .rescan }?.keyEquivalent, "r")
-        XCTAssertEqual(model.rows.first { $0.action == .quit }?.keyEquivalent, "q")
         XCTAssertFalse(model.rows.contains { $0.isOptionAlternate }, "No row waits for the Option key")
         let settings = try XCTUnwrap(model.rows.first { $0.title == "Settings" }?.submenu?.rows)
         XCTAssertEqual(settings.first { $0.action == .toggleUpdateCheck }?.checked, true)
@@ -438,6 +436,19 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(MenuModel.titleRoom(tab: 268, sizeWidth: 50), 206)
         XCTAssertEqual(MenuModel.titleRoom(tab: 40, sizeWidth: 50), 0)
         XCTAssertEqual(MenuModel.titleRoom(tab: 268, sizeWidth: 50, minGap: 20), 198)
+    }
+
+    func testTheMainTabFollowsTheWidestRowWithAFloor() throws {
+        XCTAssertEqual(MenuModel.mainTab(widestRow: 100), MenuModel.minTab)
+        XCTAssertEqual(MenuModel.mainTab(widestRow: 219.2), 220)
+        XCTAssertEqual(MenuModel.mainTab(widestRow: 251.6), 252)
+        let model = MenuModel.make(input(fixture()))
+        let rows = model.sharedColumnRows
+        XCTAssertTrue(rows.allSatisfy { $0.kind == .columns })
+        XCTAssertTrue(rows.contains { $0.title == "Smaller groups" })
+        // The groups inside "Smaller groups" share the tab, but the items of a group do not (they have their own titles).
+        let smaller = try XCTUnwrap(model.rows.first { $0.title == "Smaller groups" })
+        for row in smaller.submenu?.rows ?? [] where row.kind == .columns { XCTAssertTrue(rows.contains { $0.title == row.title }) }
     }
 
     // MARK: Bar clicks and the AI agents group
