@@ -49,6 +49,7 @@ final class MenuModelTests: XCTestCase {
             switch row.kind {
             case .separator: return [pad + "---"]
             case .header: return [pad + "<header>"]
+            case .sectionHeader: return [pad + "# " + row.title]
             case .text, .columns:
                 var line = pad + row.title + (row.size.map { " | \($0)" } ?? "")
                 if !row.enabled { line += " [off]" }
@@ -96,7 +97,7 @@ final class MenuModelTests: XCTestCase {
     func testOnlyReviewItemsSayNothingToCleanAutomatically() {
         let model = MenuModel.make(input([item("a", .trash, "Trash", 5_300 * mb, .review, action: .emptyTrash)]))
         XCTAssertEqual(titles(model), ["<header>", "---", "Nothing to clean now · 5.3 GB to review [off]", "---",
-                                       "Trash | 5.3 GB", "  Take a look first [off]", "  Trash | 5.3 GB"] + tail)
+                                       "Trash | 5.3 GB", "  # Review first", "  Trash | 5.3 GB"] + tail)
     }
 
     // MARK: The full menu
@@ -109,23 +110,25 @@ final class MenuModelTests: XCTestCase {
             "Xcode & Swift | 10 GB",
             "  Free up 6.3 GB…",
             "  ---",
+            "  # Safe to clean",
             "  Build data | 4.2 GB",
             "  Unavailable simulators | 2.1 GB",
             "  ---",
-            "  Take a look first [off]",
+            "  # Review first",
             "  Device support · example | 3.8 GB",
             "Trash | 5.3 GB",
-            "  Take a look first [off]",
+            "  # Review first",
             "  Trash | 5.3 GB",
             "JavaScript & TypeScript | 1.8 GB",
             "  Free up 1.8 GB…",
             "  ---",
+            "  # Safe to clean",
             "  node_modules · app-a | 1.3 GB",
             "  node_modules · app-b | 500 MB",
             "Docker | 40 MB",
             "  Engine: Test Engine · no container uses it (local) [off]",
             "  ---",
-            "  Take a look first [off]",
+            "  # Review first",
             "  Unused volume · data | 40 MB",
             "Python | info",
             "---",
@@ -225,8 +228,8 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(group.size, "10 GB", "The group still counts the item of the open app")
         XCTAssertEqual(describe(group.submenu?.rows ?? []), [
             "Free up 2.1 GB…", "---",
-            "Build data | 4.2 GB", "Unavailable simulators | 2.1 GB", "---",
-            "Take a look first [off]", "Device support · example | 3.8 GB",
+            "# Safe to clean", "Build data | 4.2 GB", "Unavailable simulators | 2.1 GB", "---",
+            "# Review first", "Device support · example | 3.8 GB",
         ])
         let blocked = try XCTUnwrap(group.submenu?.rows.first { $0.title == "Build data" })
         guard case .quitAndClean(let prompt)? = blocked.action else { return XCTFail("The click asks to quit first") }
@@ -265,15 +268,16 @@ final class MenuModelTests: XCTestCase {
         let model = MenuModel.make(input(many))
         let group = try XCTUnwrap(model.rows.first { $0.title == "Python" })
         let rows = try XCTUnwrap(group.submenu?.rows)
-        // Free up, a separator, 12 rows, and the "more" row.
-        XCTAssertEqual(rows.count, 15)
-        XCTAssertEqual(rows[2].title, "Env 40", "The largest first")
-        XCTAssertEqual(rows[13].title, "Env 29")
-        XCTAssertEqual(rows[14].title, "28 more…")
-        XCTAssertEqual(rows[14].submenu?.rows.count, 28)
-        XCTAssertEqual(rows[14].submenu?.rows.first?.title, "Env 28")
-        XCTAssertEqual(rows[14].submenu?.rows.last?.title, "Env 1")
-        XCTAssertNil(rows[14].action)
+        // Free up, a separator, a label, 12 rows, and the "more" row.
+        XCTAssertEqual(rows.count, 16)
+        XCTAssertEqual(rows[2].title, "Safe to clean")
+        XCTAssertEqual(rows[3].title, "Env 40", "The largest first")
+        XCTAssertEqual(rows[14].title, "Env 29")
+        XCTAssertEqual(rows[15].title, "28 more…")
+        XCTAssertEqual(rows[15].submenu?.rows.count, 28)
+        XCTAssertEqual(rows[15].submenu?.rows.first?.title, "Env 28")
+        XCTAssertEqual(rows[15].submenu?.rows.last?.title, "Env 1")
+        XCTAssertNil(rows[15].action)
     }
 
     func testReviewItemsAlsoFoldAfterTwelve() throws {
@@ -281,8 +285,21 @@ final class MenuModelTests: XCTestCase {
         let group = try XCTUnwrap(MenuModel.make(input(many)).rows.first { $0.title == "Python" })
         let rows = try XCTUnwrap(group.submenu?.rows)
         XCTAssertEqual(rows.count, 14)
-        XCTAssertEqual(rows[0].title, "Take a look first")
+        XCTAssertEqual(rows[0].title, "Review first")
+        XCTAssertEqual(rows[0].kind, .sectionHeader)
         XCTAssertEqual(rows[13].title, "1 more…")
+    }
+
+    func testSectionLabelsShowOnlyForTheirList() throws {
+        func labels(_ findings: [Finding], _ name: String) throws -> [String] {
+            let group = try XCTUnwrap(MenuModel.make(input(findings)).rows.first { $0.title == name })
+            return try XCTUnwrap(group.submenu?.rows).filter { $0.kind == .sectionHeader }.map(\.title)
+        }
+        let safe = item("s", .python, "Old safe", 200 * mb, .safe), review = item("r", .python, "Old review", 200 * mb, .review)
+        XCTAssertEqual(try labels([safe, review], "Python"), ["Safe to clean", "Review first"])
+        XCTAssertEqual(try labels([safe], "Python"), ["Safe to clean"])
+        XCTAssertEqual(try labels([review], "Python"), ["Review first"])
+        XCTAssertFalse(MenuModel.Row.section("x").enabled)
     }
 
     func testEveryGroupGetsARow() {
@@ -313,7 +330,7 @@ final class MenuModelTests: XCTestCase {
         let inp = input(fixture())
         let model = MenuModel.make(inp)
         let trashPart = try XCTUnwrap(model.header.segments.first { $0.name == "Trash" })
-        XCTAssertEqual(describe(MenuModel.popup(for: trashPart, inp).rows), ["Take a look first [off]", "Trash | 5.3 GB"])
+        XCTAssertEqual(describe(MenuModel.popup(for: trashPart, inp).rows), ["# Review first", "Trash | 5.3 GB"])
     }
 
     func testAClickOnOtherOpensOneRowForEachGroup() throws {
