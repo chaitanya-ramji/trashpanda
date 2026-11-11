@@ -310,6 +310,15 @@ public struct Finding: Identifiable, Sendable {
     public let helpURL: URL?
     /// The app that uses this item. The item is not cleaned while the app runs.
     public let owner: AppOwner?
+    /// True when `bytes` is only an upper limit of what the clean frees. The same bytes are also in another item.
+    /// The item stays in the clean, but its size is not added to any total.
+    public let sizeIsUpperLimit: Bool
+
+    /// The bytes that a total adds up. An upper limit is not counted, so no byte is counted two times.
+    public var countedBytes: Int64 { sizeIsUpperLimit ? 0 : bytes }
+
+    /// The size as the menu shows it. An upper limit starts with "up to".
+    public var sizeText: String { sizeIsUpperLimit ? "up to \(ByteText.string(bytes))" : ByteText.string(bytes) }
 
     /// False for an information line. It has no action, so it is not part of any total.
     public var isActionable: Bool {
@@ -319,7 +328,8 @@ public struct Finding: Identifiable, Sendable {
 
     public init(id: String, ecosystem: Ecosystem, title: String, location: String, bytes: Int64,
                 tier: Tier, rebuild: Rebuild, action: Action, lastActivity: Date? = nil,
-                note: String? = nil, helpURL: URL? = nil, owner: AppOwner? = nil) {
+                note: String? = nil, helpURL: URL? = nil, owner: AppOwner? = nil, sizeIsUpperLimit: Bool = false) {
+        self.sizeIsUpperLimit = sizeIsUpperLimit
         self.note = note
         self.helpURL = helpURL
         self.owner = owner
@@ -365,8 +375,8 @@ public struct ScanResult: Sendable {
     public let disk: DiskUsage
     public let date: Date
 
-    public var reclaimable: Int64 { findings.filter { $0.isActionable && $0.tier == .safe }.reduce(0) { $0 + $1.bytes } }
-    public var reviewable: Int64 { findings.filter { $0.isActionable && $0.tier == .review }.reduce(0) { $0 + $1.bytes } }
+    public var reclaimable: Int64 { findings.filter { $0.isActionable && $0.tier == .safe }.reduce(0) { $0 + $1.countedBytes } }
+    public var reviewable: Int64 { findings.filter { $0.isActionable && $0.tier == .review }.reduce(0) { $0 + $1.countedBytes } }
 
     public init(findings: [Finding], disk: DiskUsage, date: Date = Date()) {
         self.findings = findings

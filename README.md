@@ -300,7 +300,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Git worktrees: find the ones that tools and you left behind, and remove them safely ([#118](https://github.com/chaitanya-ramji/trashpanda/issues/118))
 
 ### Now: v0.7 Correct numbers and safe tools
-- [ ] Do not count the uv cache two times in the totals ([#124](https://github.com/chaitanya-ramji/trashpanda/issues/124))
+- [x] Do not count the uv cache two times in the totals ([#124](https://github.com/chaitanya-ramji/trashpanda/issues/124))
 - [ ] Show one folder in one group only ([#125](https://github.com/chaitanya-ramji/trashpanda/issues/125))
 - [x] Careful dialog for a container, and the critical style for a permanent delete ([#126](https://github.com/chaitanya-ramji/trashpanda/issues/126))
 - [ ] Start system tools from fixed paths, and refuse a tool file that others can write to ([#127](https://github.com/chaitanya-ramji/trashpanda/issues/127))

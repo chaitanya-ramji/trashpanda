@@ -28,7 +28,7 @@ public enum AgentMenu {
         return byProduct.map { product, list in
             Group(product: product, info: AgentProduct.all.first { $0.name == product },
                   items: list.sorted { ($0.bytes, $1.title) > ($1.bytes, $0.title) },
-                  bytes: list.filter(\.isActionable).reduce(Int64(0)) { $0 + $1.bytes })
+                  bytes: list.filter(\.isActionable).reduce(Int64(0)) { $0 + $1.countedBytes })
         }.sorted { ($0.bytes, $1.product) > ($1.bytes, $0.product) }
     }
 }

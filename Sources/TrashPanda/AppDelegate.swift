@@ -235,7 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // "Free up" takes only safe items that need no quit.
         let usableSafe = (result?.findings ?? []).filter { $0.isActionable && $0.tier == .safe && blockers($0).isEmpty }
-        let safeBytes = usableSafe.reduce(Int64(0)) { $0 + $1.bytes }
+        let safeBytes = usableSafe.reduce(Int64(0)) { $0 + $1.countedBytes }
         // The bar has one part for each group row that shows a size, with the same number as the row.
         // An item of an open app stays in the bar, drawn with stripes. The line under the title does not count it
         // as "free now", because it cannot be freed now. It counts it as "when apps quit", so it does not vanish.
@@ -352,7 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let sub = NSMenu()
         let safe = items.filter { $0.isActionable && $0.tier == .safe && blockers($0).isEmpty }
         if !safe.isEmpty {
-            let total = safe.reduce(Int64(0)) { $0 + $1.bytes }
+            let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
             let bulk = NSMenuItem(title: "Free up \(Format.bytes(total))…", action: #selector(confirmAndClean(_:)), keyEquivalent: "")
             bulk.target = self
             bulk.representedObject = FindingBox(safe, title: "Free up \(Format.bytes(total)) of AI agents files?",
@@ -396,7 +396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let review = actionable.filter { $0.tier == .review }.sorted { $0.bytes > $1.bytes }
 
         if !safe.isEmpty {
-            let total = safe.reduce(Int64(0)) { $0 + $1.bytes }
+            let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
             let item = NSMenuItem(title: "Free up \(Format.bytes(total))…",
                                   action: #selector(confirmAndClean(_:)), keyEquivalent: "")
             item.target = self
@@ -434,7 +434,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func findingItem(_ f: Finding) -> NSMenuItem {
         let item = NSMenuItem(title: f.title, action: #selector(confirmAndClean(_:)), keyEquivalent: "")
-        item.attributedTitle = line(f.title, Format.bytes(f.bytes))
+        item.attributedTitle = line(f.title, f.sizeText)
         item.target = self
         item.image = icon(for: f)
         let open = blockers(f)
