@@ -220,12 +220,15 @@ public struct MenuModel: Equatable, Sendable {
         let grouped = Dictionary(grouping: findings, by: \.ecosystem)
         // The rows follow the number that each row shows, like the parts of the bar. A tie is broken by name.
         // A row that only says "info" has no number, so it goes after the rows with a size.
-        let sizes = grouped.mapValues(SplitBar.rowBytes)
-        let ordered = grouped.sorted { a, b in
-            let x = sizes[a.key] ?? 0, y = sizes[b.key] ?? 0
-            return x != y ? x > y : a.key.name < b.key.name
+        let (main, folded) = SplitBar.fold(grouped.map { ($0.key, SplitBar.rowBytes($0.value)) })
+        var rows = main.map { groupRow($0.0, grouped[$0.0] ?? [], input) }
+        if !folded.isEmpty {
+            // The same groups as the "Other" part of the bar.
+            let sum = folded.reduce(Int64(0)) { $0 + $1.1 }
+            rows.append(Row(kind: .columns, title: "Smaller groups", size: sum > 0 ? ByteText.string(sum) : "info",
+                            submenu: Submenu(rows: folded.map { groupRow($0.0, grouped[$0.0] ?? [], input) })))
         }
-        return ordered.map { groupRow($0.key, $0.value, input) }
+        return rows
     }
 
     /// One row for a group, with its items as a submenu.

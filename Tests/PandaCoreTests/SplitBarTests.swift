@@ -146,45 +146,91 @@ final class SplitBarTests: XCTestCase {
     }
 
     func testOtherJoinsTheBlockedDataOfItsGroups() throws {
-        let sizes: [(Ecosystem, Int64)] = [(.swift, 80), (.javascript, 70), (.python, 60), (.rust, 50), (.go, 40),
-                                           (.docker, 30), (.ruby, 20)]
-        let findings = sizes.map { item($0.0, $0.1) }
-        let parts = SplitBar.segments(from: findings, blockers: { $0.ecosystem == .ruby ? ["RubyMine"] : [] })
+        // Ten groups: the largest eight stay. The last two are one part.
+        let sizes: [(Ecosystem, Int64)] = [(.swift, 100), (.javascript, 90), (.python, 80), (.rust, 70), (.go, 60),
+                                           (.docker, 50), (.php, 40), (.jvm, 30), (.ruby, 20), (.dart, 10)]
+        let findings = sizes.map { item($0.0, $0.1 * 1_000_000) }
+        let parts = SplitBar.segments(from: findings, blockers: { $0.ecosystem == .ruby ? ["RubyMine"] : [] }, limit: 8, minimumBytes: 0)
         let other = try XCTUnwrap(parts.last)
         XCTAssertTrue(other.isOther)
-        XCTAssertEqual(other.bytes, 50)
-        XCTAssertEqual(other.blockedBytes, 20)
+        XCTAssertEqual(other.bytes, 30_000_000)
+        XCTAssertEqual(other.blockedBytes, 20_000_000)
         XCTAssertEqual(other.blockingApps, ["RubyMine"])
         XCTAssertFalse(other.isBlockedOnly)
     }
 
-    func testTheSmallestGroupsAreJoinedAsOther() {
-        // Eight groups: the largest five are named. The other three are one part.
-        let sizes: [(Ecosystem, Int64)] = [(.swift, 80), (.javascript, 70), (.python, 60), (.rust, 50), (.go, 40),
-                                           (.docker, 30), (.ruby, 20), (.php, 10)]
-        let parts = SplitBar.segments(from: sizes.map { item($0.0, $0.1 * 1_000_000) })
-        XCTAssertEqual(parts.count, 6)
-        XCTAssertEqual(parts.dropLast().map(\.shortName), ["Xcode", "JavaScript", "Python", "Rust", "Go"])
-        let other = try! XCTUnwrap(parts.last)
+    func testTheSmallGroupsAreJoinedAsOther() {
+        // Ten groups: eight stay. The other two are one part, the same ones that "Smaller groups" holds.
+        let sizes: [(Ecosystem, Int64)] = [(.swift, 100), (.javascript, 90), (.python, 80), (.rust, 70), (.go, 60),
+                                           (.docker, 50), (.php, 40), (.jvm, 30), (.ruby, 20), (.dart, 10)]
+        let findings = sizes.map { item($0.0, $0.1 * 1_000_000) }
+        let parts = SplitBar.segments(from: findings, minimumBytes: 0)
+        XCTAssertEqual(parts.count, 9)
+        XCTAssertEqual(parts.dropLast().map(\.shortName).count, 8)
+        let other = parts.last!
         XCTAssertTrue(other.isOther)
         XCTAssertEqual(other.name, "Other")
-        XCTAssertEqual(Set(other.ecosystems), [.docker, .ruby, .php])
-        XCTAssertEqual(other.bytes, 60_000_000)
-        XCTAssertEqual(parts.map(\.bytes).reduce(0, +), 360_000_000)
+        XCTAssertEqual(Set(other.ecosystems), [.ruby, .dart])
+        XCTAssertEqual(parts.map(\.bytes).reduce(0, +), 550_000_000)
+        let fold = SplitBar.fold(sizes.map { ($0.0, $0.1 * 1_000_000) }, minimumBytes: 0)
+        XCTAssertEqual(fold.folded.map(\.0), other.ecosystems)
+        XCTAssertEqual(fold.main.map(\.0), parts.dropLast().flatMap(\.ecosystems))
     }
 
-    func testOneLeftoverGroupKeepsItsOwnName() {
-        // Six groups with room for five: "Other" would hide a single group, so it is named instead.
-        let sizes: [(Ecosystem, Int64)] = [(.swift, 60), (.javascript, 50), (.python, 40), (.rust, 30), (.go, 20), (.docker, 10)]
-        let parts = SplitBar.segments(from: sizes.map { item($0.0, $0.1 * 1_000_000) })
-        XCTAssertEqual(parts.count, 6)
-        XCTAssertFalse(parts.contains { $0.isOther })
-        XCTAssertEqual(parts.last?.shortName, "Docker")
-        // Seven groups: two are left over, so they are joined.
-        let seven = SplitBar.segments(from: (sizes + [(.ruby, 5)]).map { item($0.0, $0.1 * 1_000_000) })
-        XCTAssertEqual(seven.count, 6)
-        XCTAssertTrue(seven.last!.isOther)
-        XCTAssertEqual(Set(seven.last!.ecosystems), [.docker, .ruby])
+    func testAGroupBelowTheMinimumIsOtherEvenWhenTheListIsShort() throws {
+        let parts = SplitBar.segments(from: [item(.swift, 5_000_000_000), item(.go, 30_000_000)])
+        XCTAssertEqual(parts.map(\.shortName), ["Xcode", "Other"])
+        XCTAssertEqual(try XCTUnwrap(parts.last).ecosystems, [.go])
+    }
+
+    // MARK: Fold
+
+    private func rows(_ count: Int, mb: Int64 = 200) -> [(Ecosystem, Int64)] {
+        Array(Ecosystem.allCases.prefix(count).enumerated().map { ($1, Int64(count - $0) * mb * 1_000_000) })
+    }
+
+    func testFoldOfNoRowsAndOneRow() {
+        let none = SplitBar.fold([])
+        XCTAssertTrue(none.main.isEmpty && none.folded.isEmpty)
+        let one = SplitBar.fold(rows(1))
+        XCTAssertEqual(one.main.count, 1)
+        XCTAssertTrue(one.folded.isEmpty)
+    }
+
+    func testFoldKeepsTheLargestEight() {
+        let eight = SplitBar.fold(rows(8))
+        XCTAssertEqual(eight.main.count, 8)
+        XCTAssertTrue(eight.folded.isEmpty)
+        let nine = SplitBar.fold(rows(9))
+        XCTAssertEqual(nine.main.count, 8)
+        XCTAssertEqual(nine.folded.map(\.0), [rows(9)[8].0], "The smallest one is folded")
+        let all = Ecosystem.allCases.count
+        let many = SplitBar.fold(rows(all, mb: 150))
+        XCTAssertEqual(many.main.count, 8)
+        XCTAssertEqual(many.folded.count, all - 8)
+        XCTAssertGreaterThanOrEqual(many.main.last!.1, many.folded.first!.1, "Both lists start with the largest")
+    }
+
+    func testFoldFoldsARowBelowTheMinimumEvenInAShortList() {
+        // 5 MB is less than 100 MB, and less than 1 percent of 5 GB.
+        let result = SplitBar.fold([(.swift, 5_000_000_000), (.go, 5_000_000)])
+        XCTAssertEqual(result.main.map(\.0), [.swift])
+        XCTAssertEqual(result.folded.map(\.0), [.go])
+    }
+
+    func testFoldKeepsASmallRowThatIsOnePercentOfTheTotal() {
+        let result = SplitBar.fold([(.swift, 50_000_000), (.go, 40_000_000)])
+        XCTAssertEqual(result.main.count, 2, "Both are at least 1 percent of the total")
+    }
+
+    func testFoldLosesNothing() {
+        for count in [0, 1, 8, 9, Ecosystem.allCases.count] {
+            let input = rows(count, mb: 3)
+            let result = SplitBar.fold(input)
+            let sum = { (list: [(Ecosystem, Int64)]) in list.reduce(Int64(0)) { $0 + $1.1 } }
+            XCTAssertEqual(sum(result.main) + sum(result.folded), sum(input), "\(count) rows")
+            XCTAssertEqual(result.main.count + result.folded.count, count)
+        }
     }
 
     func testTheOrderDoesNotChangeBetweenScansWhenSizesAreEqual() {

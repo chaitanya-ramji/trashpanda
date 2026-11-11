@@ -113,12 +113,28 @@ public enum SplitBar {
         return SplitTotals(free: free, review: review, waiting: waiting)
     }
 
+    /// Splits the group rows into the ones that stay in the main list and the small ones that go into "Smaller groups".
+    /// A row stays in `main` when it is one of the largest `limit` rows, and it has at least `minimumBytes` or at least
+    /// 1 percent of the total. Both lists are sorted from the largest. A tie is broken by name.
+    public static func fold(_ rows: [(Ecosystem, Int64)], limit: Int = 8, minimumBytes: Int64 = 100_000_000)
+        -> (main: [(Ecosystem, Int64)], folded: [(Ecosystem, Int64)]) {
+        let ordered = rows.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.name < $1.0.name }
+        let total = ordered.reduce(Int64(0)) { $0 + $1.1 }
+        var main: [(Ecosystem, Int64)] = [], folded: [(Ecosystem, Int64)] = []
+        for (rank, row) in ordered.enumerated() {
+            let big = row.1 >= minimumBytes || (total > 0 && Double(row.1) / Double(total) >= 0.01)
+            if rank < limit && big { main.append(row) } else { folded.append(row) }
+        }
+        return (main, folded)
+    }
+
     /// One part for each group row that shows a size. The size of a part is the number on its row.
     /// An item of an open app is in its part, and `blockers` gives the names of the apps that block it.
     /// A row that only says "info" has no part.
-    /// The largest `maxNamed` groups are named. The rest are joined as "Other". The parts add up to the total.
+    /// The groups that `fold` keeps in the main list are named. The rest are joined as "Other", the same groups as the
+    /// "Smaller groups" row. The parts add up to the total.
     public static func segments(from findings: [Finding], blockers: (Finding) -> [String] = { _ in [] },
-                                maxNamed: Int = 5) -> [SplitSegment] {
+                                limit: Int = 8, minimumBytes: Int64 = 100_000_000) -> [SplitSegment] {
         var bytes: [Ecosystem: Int64] = [:], safe: [Ecosystem: Int64] = [:], blocked: [Ecosystem: Int64] = [:]
         var apps: [Ecosystem: Set<String>] = [:]
         for f in findings where f.isActionable && f.countedBytes > 0 {
@@ -134,8 +150,9 @@ public enum SplitBar {
         let total = bytes.values.reduce(0, +)
         guard total > 0 else { return [] }
 
-        // The largest first. A tie is broken by name, so that the order does not change between scans.
-        let ordered = bytes.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key.name < $1.key.name }
+        let (main, folded) = fold(bytes.map { ($0.key, $0.value) }, limit: limit, minimumBytes: minimumBytes)
+        let ordered = main.map { (key: $0.0, value: $0.1) }
+        let rest = folded.map { (key: $0.0, value: $0.1) }
         func part(_ list: [(key: Ecosystem, value: Int64)], other: Bool) -> SplitSegment {
             let sum = list.reduce(Int64(0)) { $0 + $1.value }
             return SplitSegment(
@@ -148,10 +165,8 @@ public enum SplitBar {
                 blockingApps: list.reduce(into: Set<String>()) { $0.formUnion(apps[$1.key] ?? []) }.sorted())
         }
 
-        // If only one group is left over, it keeps its own name.
-        let named = ordered.count - maxNamed == 1 ? ordered.count : min(maxNamed, ordered.count)
-        var out = ordered.prefix(named).map { part([$0], other: false) }
-        if ordered.count > named { out.append(part(Array(ordered.dropFirst(named)), other: true)) }
+        var out = ordered.map { part([$0], other: false) }
+        if !rest.isEmpty { out.append(part(rest, other: true)) }
         return out
     }
 
