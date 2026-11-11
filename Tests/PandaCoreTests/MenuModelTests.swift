@@ -587,12 +587,12 @@ final class MenuModelTests: XCTestCase {
                     cache("com.apple.helpd · system cache", "com.apple.helpd", 700 * mb), cache("GeoServices · system cache", "GeoServices", 600 * mb)]
         let rows = try XCTUnwrap(MenuModel.make(input(list)).rows.first { $0.kind == .columns }?.submenu?.rows)
         XCTAssertEqual(rows.filter { $0.kind == .sectionHeader }.map(\.title),
-                       ["Review first · re-download when needed", "macOS caches · empty with care"])
+                       ["Review first · re-download when needed", "Apple caches · empty with care"])
         XCTAssertTrue(rows.filter { $0.kind == .sectionHeader }.allSatisfy { $0.title.count < 40 })
         XCTAssertEqual(rows.filter { $0.kind == .columns }.map(\.title), ["bun", "yarn", "helpd", "GeoServices"])
         XCTAssertEqual(rows.first { $0.title == "helpd" }?.tooltip?.hasPrefix("com.apple.helpd · system cache\n"), true)
         let tip = rows.first { $0.title == "helpd" }?.tooltip ?? ""
-        XCTAssertTrue(tip.contains("Empty with care"))
+        XCTAssertTrue(tip.contains("An Apple system cache. macOS manages it."), "The reason that the dialog shows")
         XCTAssertFalse(tip.contains("Downloads again"), "A system cache never says that it is safe to remove")
         XCTAssertNil(rows.first { $0.title == "helpd" }?.subtitle)
     }
@@ -617,13 +617,15 @@ final class MenuModelTests: XCTestCase {
     }
 
     func testAContainerKeepsItsOwnRecreateLabelNextToImages() throws {
-        let images = (1...3).map { dockerItem("i\($0)", "Image · app\($0)", " · on this Mac for 90 days", rebuild: .download, bytes: Int64(900 + $0) * 1_000_000) }
+        let images = (1...3).map { dockerItem("docker.image:i\($0)", "Image · app\($0)", " · on this Mac for 90 days", rebuild: .download, bytes: Int64(900 + $0) * 1_000_000) }
         let container = dockerItem("c", "Stopped container · db", " · image db:1 · Exited (0) 3 days ago", rebuild: .recreate)
         let rows = try XCTUnwrap(MenuModel.make(input(images + [container])).rows.first { $0.title == "Docker" }?.submenu?.rows)
-        XCTAssertEqual(rows.first { $0.kind == .sectionHeader }?.title, "Review first · re-download when needed")
+        XCTAssertEqual(rows.filter { $0.kind == .sectionHeader }.map(\.title), ["Review first", "Images · re-download when needed"])
         let row = try XCTUnwrap(rows.first { $0.title == "Stopped · db" })
         XCTAssertEqual(row.subtitle, "Exited 3 days ago · Must be recreated")
-        XCTAssertEqual(rows.first { $0.title == "Image · app1" }?.subtitle, "On this Mac for 90 days")
+        XCTAssertEqual(rows.first { $0.title == "app1" }?.subtitle, "On this Mac for 90 days", "No Image prefix, no repeated label")
+        XCTAssertNil(rows.first { $0.title == "Image · app1" })
+        XCTAssertEqual(rows.first { $0.title == "app1" }?.tooltip?.hasPrefix("Image · app1\n"), true, "The full title is in the tooltip")
     }
 
     func testSectionHeadersAreShort() {
@@ -659,6 +661,9 @@ final class MenuModelTests: XCTestCase {
                     cache("CloudKit · system cache", "CloudKit")]
         let rows = try XCTUnwrap(MenuModel.make(input(list)).rows.first { $0.kind == .columns }?.submenu?.rows)
         XCTAssertEqual(rows.filter { $0.kind == .columns }.map(\.title), ["bun", "helpd", "CloudKit"])
+        let cloud = rows.first { $0.title == "CloudKit" }?.tooltip ?? ""
+        XCTAssertTrue(cloud.contains("iCloud data. Deleting it can lose changes that are not synced yet."), cloud)
+        XCTAssertFalse(cloud.contains("Downloads again"))
     }
 
     func testGoodToKnowSectionShowsWhileNotCleaningAndNotDuringACleanEvenWithGroups() {
