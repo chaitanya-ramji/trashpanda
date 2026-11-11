@@ -56,7 +56,7 @@ swift run trashpanda --demo light --dialog volume
 | `Sources/PandaCore` | Finds items and deletes them. It has all the safety rules. |
 | `Sources/TrashPanda` | The menu bar app. It has no logic that deletes files. |
 | `Tests/PandaCoreTests` | Unit tests. |
-| `docs/` | The spec and the release guide. |
+| `docs/` | The spec, the review reports, and `VERSIONING.md` (the names of releases and how we cut one). |
 
 ## Add a language
 
