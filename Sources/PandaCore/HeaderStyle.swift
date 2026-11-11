@@ -40,7 +40,16 @@ public struct HeaderStyle: Equatable, Sendable {
     /// With "Reduce motion" the spinner does not show. The text still says that the app is busy.
     public let showSpinner: Bool
 
+    /// The skeleton: the alpha of the grey track and pills (of the label color), and of the white shimmer band.
+    public let skeletonAlpha: CGFloat
+    public let shimmerAlpha: CGFloat
+    /// The shimmer moves only when motion is allowed. With "Reduce motion" the skeleton is still.
+    public let animateSkeleton: Bool
+
     public init(_ settings: HeaderSettings) {
+        skeletonAlpha = settings.increaseContrast ? 0.20 : (settings.darkMode ? 0.14 : 0.09)
+        shimmerAlpha = settings.darkMode ? 0.10 : 0.65
+        animateSkeleton = !settings.reduceMotion
         // "Increase contrast" gives 0.6. In dark mode the light fill needs a little more to be seen.
         stripeFillAlpha = settings.increaseContrast ? 0.6 : (settings.darkMode ? 0.40 : 0.30)
         stripeLineAlpha = settings.increaseContrast ? 1 : 0.85

@@ -76,6 +76,7 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(titles(model), ["<header>", "---", "Scanning… [off]", "---", "Scanning… [off]"] + Array(tail.dropFirst(2)))
         XCTAssertEqual(model.header.activity, .scanning)
         XCTAssertTrue(model.header.segments.isEmpty)
+        XCTAssertEqual(model.header.content.bar, .skeleton, "No result yet: the header shows a skeleton")
     }
 
     func testAResultWithNoItemsSaysNothingToClean() {
@@ -110,7 +111,10 @@ final class MenuModelTests: XCTestCase {
         let model = MenuModel.make(input(fixture(), cleaning: true))
         XCTAssertEqual(titles(model), ["<header>", "---", "Cleaning… [off]", "Stop after this item", "---", "Scan again [off]"] + Array(tail.dropFirst(2)))
         XCTAssertEqual(model.header.activity, .cleaning)
-        XCTAssertTrue(model.header.segments.isEmpty, "The bar is empty while cleaning")
+        XCTAssertFalse(model.header.segments.isEmpty, "The last bar stays while cleaning, so the header keeps its height")
+        XCTAssertEqual(model.header.content.bar, .parts)
+        XCTAssertEqual(model.header.content.detail, "Cleaning up…")
+        XCTAssertEqual(model.header.content.barAlpha, HeaderContent.refreshingAlpha)
     }
 
     func testOnlyReviewItemsSayNothingToCleanAutomatically() {

@@ -42,7 +42,8 @@ final class SegmentElement: NSAccessibilityElement {
 final class StorageHeaderView: NSView {
     private var disk = DiskUsage(total: 0, free: 0)
     private var totals = SplitTotals(free: 0, review: 0, waiting: 0)
-    private var activity = MenuModel.Activity.scanning
+    /// What to show: the real bar, the skeleton, or an empty track. The model decides. This view only draws it.
+    private var content = HeaderContent.make(activity: .scanning, hasResult: false, hasParts: false)
     private var segments: [SplitSegment] = []
     private var slots: [SplitSlot] = []
     /// The color slot of each part. "Other" has none.
@@ -78,7 +79,8 @@ final class StorageHeaderView: NSView {
                               legendHeight: lineHeight(legendFont), barHeight: splitBarHeight, hasBar: hasBar)
     }
 
-    private var rows: HeaderLayout { Self.layout(hasBar: !segments.isEmpty) }
+    /// The bar area is always there, so the header has the same height in every state.
+    private var rows: HeaderLayout { Self.layout(hasBar: true) }
     var preferredHeight: CGFloat { rows.height }
 
     /// The bar. Internal, so that a test can look at the pixels inside it.
@@ -103,7 +105,7 @@ final class StorageHeaderView: NSView {
     }
 
     override init(frame: NSRect) {
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: Self.layout(hasBar: false).height))
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: Self.layout(hasBar: true).height))
         autoresizingMask = [.width]
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(accessibilityOptionsChanged), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
@@ -131,7 +133,13 @@ final class StorageHeaderView: NSView {
     private static let spinnerSize: CGFloat = 14
     private static let spinnerSpokes = 12
 
-    private var showsSpinner: Bool { activity != .idle && style.showSpinner }
+    private var showsSpinner: Bool { content.busy && style.showSpinner }
+
+    /// The skeleton moves (a shimmer), when motion is allowed.
+    private var shimmers: Bool { content.showsSkeleton && style.animateSkeleton }
+
+    /// How often the timer fires: 30 times a second for the shimmer, 12 for the spinner, never when nothing moves.
+    private var timerInterval: TimeInterval? { shimmers ? 1.0 / 30 : (showsSpinner ? 1.0 / 12 : nil) }
 
     /// Where the spinner is: at the right end of the title row.
     private var spinnerRect: NSRect {
@@ -140,19 +148,36 @@ final class StorageHeaderView: NSView {
 
     /// Starts or stops the timer. It runs only while something moves, and only while the view is in a window.
     private func applyActivity() {
-        let needed = showsSpinner && window != nil
-        if needed, animationTimer == nil {
-            let timer = Timer(timeInterval: 1.0 / 12, repeats: true) { [weak self] _ in
-                guard let self else { return }
-                self.setNeedsDisplay(self.spinnerRect.insetBy(dx: -1, dy: -1))
-            }
-            RunLoop.main.add(timer, forMode: .common)   // keeps turning while the menu is open
-            animationTimer = timer
-        } else if !needed {
+        let interval = (window != nil && !isHidden) ? timerInterval : nil
+        if animationTimer?.timeInterval != interval {
             animationTimer?.invalidate()
             animationTimer = nil
+            if let interval {
+                let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.tick() }
+                RunLoop.main.add(timer, forMode: .common)   // keeps running while the menu is open
+                animationTimer = timer
+            }
         }
         needsDisplay = true
+    }
+
+    /// Only the moving parts are drawn again.
+    private func tick() {
+        if shimmers { setNeedsDisplay(splitBarRect.insetBy(dx: -1, dy: -1)) }
+        if showsSpinner { setNeedsDisplay(spinnerRect.insetBy(dx: -1, dy: -1)) }
+    }
+
+    /// True while the timer runs. Internal, so that a test can check that it stops.
+    var isAnimating: Bool { animationTimer != nil }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        applyActivity()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        applyActivity()
     }
 
     override func viewDidMoveToWindow() {
@@ -186,10 +211,10 @@ final class StorageHeaderView: NSView {
         }
     }
 
-    func update(disk: DiskUsage, totals: SplitTotals, activity: MenuModel.Activity, segments: [SplitSegment]) {
+    func update(disk: DiskUsage, totals: SplitTotals, content: HeaderContent, segments: [SplitSegment]) {
         self.disk = disk
         self.totals = totals
-        self.activity = activity
+        self.content = content
         self.segments = segments
         self.colorSlots = SplitBar.colorSlots(for: segments)
         self.hovered = nil
@@ -222,11 +247,7 @@ final class StorageHeaderView: NSView {
         if let i = hovered, segments.indices.contains(i) {
             return fit(segments[i].hoverText, segments[i].hoverText(shortName: true))
         }
-        switch activity {
-        case .scanning: return "Scanning for things to clean…"
-        case .cleaning: return "Cleaning up…"
-        case .idle: return fit(totals.summary(), totals.summary(compact: true))
-        }
+        return content.detail ?? fit(totals.summary(), totals.summary(compact: true))
     }
 
     private func color(_ index: Int) -> NSColor {
@@ -319,9 +340,58 @@ final class StorageHeaderView: NSView {
             .foregroundColor: hovered == nil ? NSColor.secondaryLabelColor : NSColor.labelColor,
         ])
 
-        drawSplitBar()
-        drawLegend()
+        switch content.bar {
+        case .parts:
+            drawSplitBar()
+            drawLegend()
+        case .skeleton:
+            drawSkeleton()
+        case .emptyTrack:
+            drawTrack()
+        }
         drawSpinner()
+    }
+
+    // MARK: Skeleton
+
+    private static let barRadius: CGFloat = 5
+
+    /// The grey of the skeleton and of the empty track: the label color with a low alpha, so it works in light and dark mode.
+    private var skeletonColor: NSColor { NSColor.labelColor.withAlphaComponent(style.skeletonAlpha) }
+
+    /// A quiet track in the shape of the bar.
+    private func drawTrack() {
+        skeletonColor.setFill()
+        NSBezierPath(roundedRect: splitBarRect, xRadius: Self.barRadius, yRadius: Self.barRadius).fill()
+    }
+
+    /// The structure of the header before the first result: a track where the bar will be, a shimmer that moves over it,
+    /// and three pills where the legend will be. No numbers. With "Reduce motion" nothing moves.
+    private func drawSkeleton() {
+        let style = self.style
+        drawTrack()
+        if style.animateSkeleton {
+            let bar = splitBarRect
+            let phase = CGFloat(HeaderContent.shimmerPhase(at: Date().timeIntervalSinceReferenceDate))
+            let band = bar.width * 0.35
+            let x = bar.minX - band + (bar.width + band) * phase
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(roundedRect: bar, xRadius: Self.barRadius, yRadius: Self.barRadius).addClip()
+            let white = NSColor.white
+            NSGradient(colors: [white.withAlphaComponent(0), white.withAlphaComponent(style.shimmerAlpha), white.withAlphaComponent(0)])?
+                .draw(in: NSRect(x: x, y: bar.minY, width: band, height: bar.height), angle: 0)
+            NSGraphicsContext.restoreGraphicsState()
+        }
+        let height: CGFloat = 8
+        let line = rows.legendY ?? 10
+        let y = line + (Self.lineHeight(Self.legendFont) - height) / 2
+        var x = Self.inset
+        skeletonColor.setFill()
+        for width in HeaderContent.pillWidths {
+            guard x + width <= bounds.width - Self.rightInset else { break }
+            NSBezierPath(roundedRect: NSRect(x: x, y: y, width: width, height: height), xRadius: height / 2, yRadius: height / 2).fill()
+            x += width + 10
+        }
     }
 
     /// The second bar. Its whole width is the data of the group rows below it, split by group.
@@ -330,7 +400,7 @@ final class StorageHeaderView: NSView {
         guard !segments.isEmpty else { return }
         let bar = splitBarRect
         let style = self.style
-        let rounded = NSBezierPath(roundedRect: bar, xRadius: 5, yRadius: 5)
+        let rounded = NSBezierPath(roundedRect: bar, xRadius: Self.barRadius, yRadius: Self.barRadius)
         NSGraphicsContext.saveGraphicsState()
         rounded.addClip()
         for (i, slot) in slots.enumerated() {
@@ -338,7 +408,8 @@ final class StorageHeaderView: NSView {
             // A part that is not under the mouse gets lighter. The floor is on the final alpha of each fill,
             // so a pale part (a review share, or stripes) stays visible.
             let dimmed = style.dimOtherParts && hovered != nil && hovered != i
-            let fade: (CGFloat) -> CGFloat = dimmed ? { SplitBar.dimmedAlpha($0 * SplitBar.hoverDimFactor) } : { $0 }
+            let refresh = content.barAlpha
+            let fade: (CGFloat) -> CGFloat = dimmed ? { SplitBar.dimmedAlpha($0 * SplitBar.hoverDimFactor * refresh) } : { $0 * refresh }
             let rect = NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height)
             let widths = SplitBar.partWidths(s, width: rect.width)
             // `divided` returns the slice first and the remainder second.

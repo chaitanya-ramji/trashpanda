@@ -13,7 +13,7 @@ final class HeaderRenderTests: XCTestCase {
 
     /// Draws the header and returns the bitmap and the view.
     private func render(_ findings: [Finding], blocked: Set<Ecosystem>, width: CGFloat = 372, settings: HeaderSettings = HeaderSettings(),
-                        name: String? = nil, hover: Int? = nil)
+                        name: String? = nil, hover: Int? = nil, activity: MenuModel.Activity = .idle, hasResult: Bool = true)
         -> (NSBitmapImageRep, StorageHeaderView, [SplitSegment]) {
         let segments = SplitBar.segments(from: findings, blockers: { blocked.contains($0.ecosystem) ? ["Some App"] : [] })
         let totals = SplitBar.totals(from: findings, blockers: { blocked.contains($0.ecosystem) ? ["Some App"] : [] })
@@ -21,7 +21,8 @@ final class HeaderRenderTests: XCTestCase {
         // The picture must not depend on the accessibility settings or on the appearance of the machine.
         view.settingsOverride = settings
         view.appearance = NSAppearance(named: settings.darkMode ? .darkAqua : .aqua)
-        view.update(disk: DiskUsage(total: 245_000_000_000, free: 137_000_000_000), totals: totals, activity: .idle, segments: segments)
+        view.update(disk: DiskUsage(total: 245_000_000_000, free: 137_000_000_000), totals: totals,
+                    content: HeaderContent.make(activity: activity, hasResult: hasResult, hasParts: !segments.isEmpty), segments: segments)
         view.setFrameSize(NSSize(width: width, height: view.preferredHeight))
         view.setHovered(hover)
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
@@ -253,7 +254,7 @@ final class HeaderRenderTests: XCTestCase {
     }
 
     private func feed(_ view: StorageHeaderView, _ model: MenuModel) {
-        view.update(disk: model.header.disk, totals: model.header.totals, activity: model.header.activity, segments: model.header.segments)
+        view.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content, segments: model.header.segments)
     }
 
     /// The owner saw the whole header empty while the app scanned. The spinner was an NSProgressIndicator. When it animated,
@@ -299,5 +300,147 @@ final class HeaderRenderTests: XCTestCase {
             XCTAssertGreaterThan(ink(rep, rows: 0..<h / 3), 500, "\(label): the title is drawn")
             XCTAssertGreaterThan(ink(rep, rows: h / 3..<h), 2000, "\(label): the rest is drawn")
         }
+    }
+
+    // MARK: States and widths
+
+    /// The widths that the menu can have: 372 (old), 307 (typical now) and 300 (the minimum of the header).
+    private let widths: [CGFloat] = [372, 307, 300]
+
+    private func pixelAlpha(_ rep: NSBitmapImageRep, view: StorageHeaderView, x: CGFloat, y: CGFloat) -> CGFloat {
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        return alpha(rep, Int(x * scale), Int((view.bounds.height - y) * scale))
+    }
+
+    func testTheHeaderHasTheSameHeightInEveryState() {
+        var heights = Set<CGFloat>()
+        for (activity, hasResult, findings) in [(MenuModel.Activity.idle, true, ownerCase), (.idle, true, []), (.scanning, false, []),
+                                                (.scanning, true, ownerCase), (.cleaning, true, ownerCase)] {
+            let (_, view, _) = render(findings, blocked: [], activity: activity, hasResult: hasResult)
+            heights.insert(view.preferredHeight)
+        }
+        XCTAssertEqual(heights.count, 1, "heights: \(heights)")
+    }
+
+    /// Every state, in light and dark mode, at every width: the bar fills from the left inset to the right inset,
+    /// and the bar area is never empty.
+    func testEveryStateFillsTheBarAreaAtEveryWidth() throws {
+        let states: [(String, MenuModel.Activity, Bool, [Finding])] = [
+            ("idle", .idle, true, ownerCase), ("skeleton", .scanning, false, []), ("rescan", .scanning, true, ownerCase),
+            ("cleaning", .cleaning, true, ownerCase), ("tidy", .idle, true, []),
+        ]
+        for width in widths {
+            for dark in [false, true] {
+                for (name, activity, hasResult, findings) in states {
+                    let (rep, view, _) = render(findings, blocked: [.aiAgents, .browsers], width: width, settings: HeaderSettings(darkMode: dark),
+                                                name: "\(name)-\(Int(width))-\(dark ? "dark" : "light")", activity: activity, hasResult: hasResult)
+                    let bar = view.splitBarRect
+                    XCTAssertEqual(bar.minX, 16)
+                    XCTAssertEqual(bar.maxX, width - 20, "the bar ends at the right inset")
+                    let y = bar.midY
+                    for f in [0.04, 0.3, 0.6, 0.96] {
+                        XCTAssertGreaterThan(pixelAlpha(rep, view: view, x: bar.minX + bar.width * CGFloat(f), y: y), 0.03,
+                                             "\(name) \(width) dark \(dark): the bar area is empty at \(f)")
+                    }
+                    XCTAssertLessThan(pixelAlpha(rep, view: view, x: bar.maxX + 6, y: y), 0.02, "\(name): nothing right of the bar")
+                    XCTAssertLessThan(pixelAlpha(rep, view: view, x: bar.minX - 6, y: y), 0.02, "\(name): nothing left of the bar")
+                }
+            }
+        }
+    }
+
+    func testTheSkeletonShowsAGreyTrackAndThreePills() throws {
+        for width in widths {
+            let (rep, view, _) = render([], blocked: [], width: width, settings: HeaderSettings(reduceMotion: true), activity: .scanning, hasResult: false)
+            let y = view.legendDotRect(0).midY
+            var found = 0
+            var inPill = false
+            var x: CGFloat = 16
+            while x < width - 20 {
+                let on = pixelAlpha(rep, view: view, x: x, y: y) > 0.03
+                if on && !inPill { found += 1 }
+                inPill = on
+                x += 1
+            }
+            XCTAssertEqual(found, 3, "three pills at width \(width)")
+        }
+    }
+
+    /// With "Reduce motion" the skeleton is still: two pictures at different times are the same.
+    func testTheSkeletonIsStillWithReduceMotion() throws {
+        func picture() -> Data {
+            let (rep, _, _) = render([], blocked: [], settings: HeaderSettings(reduceMotion: true), activity: .scanning, hasResult: false)
+            return rep.representation(using: .png, properties: [:]) ?? Data()
+        }
+        let first = picture()
+        Thread.sleep(forTimeInterval: 0.4)
+        XCTAssertEqual(first, picture())
+    }
+
+    /// While the app checks again, the old bar stays and is drawn lighter. Cleaning does the same.
+    func testTheOldBarStaysAndIsLighterWhileRefreshing() throws {
+        let findings = [finding("a", .docker, 600, .safe), finding("b", .browsers, 300, .safe)]
+        let (idleRep, idleView, segments) = render(findings, blocked: [])
+        let bar = SplitBar.layout(segments, width: idleView.splitBarRect.width)
+        for activity in [MenuModel.Activity.scanning, .cleaning] {
+            let (rep, view, _) = render(findings, blocked: [], name: "refresh-\(activity)", activity: activity)
+            let x = view.splitBarRect.minX + bar[0].x + bar[0].width / 2
+            XCTAssertEqual(pixelAlpha(idleRep, view: idleView, x: x, y: idleView.splitBarRect.midY), 1, accuracy: 0.02)
+            XCTAssertEqual(pixelAlpha(rep, view: view, x: x, y: view.splitBarRect.midY), HeaderContent.refreshingAlpha, accuracy: 0.03,
+                           "\(activity): the bar is lighter")
+            // The legend is still there.
+            XCTAssertGreaterThan(pixelAlpha(rep, view: view, x: view.legendDotRect(0).midX, y: view.legendDotRect(0).midY), 0.9)
+        }
+    }
+
+    /// The timer runs only while the skeleton or the spinner is visible, only in a window, and never with "Reduce motion".
+    func testTheTimerRunsOnlyWhileSomethingMoves() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 372, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 372, height: 200))
+        window.contentView = host
+        let view = StorageHeaderView(frame: .zero)
+        view.settingsOverride = HeaderSettings()
+        func feed(_ activity: MenuModel.Activity, hasResult: Bool) {
+            view.update(disk: DiskUsage(total: 245_000_000_000, free: 137_000_000_000), totals: SplitTotals(free: 0, review: 0, waiting: 0),
+                        content: HeaderContent.make(activity: activity, hasResult: hasResult, hasParts: false), segments: [])
+        }
+        feed(.scanning, hasResult: false)
+        XCTAssertFalse(view.isAnimating, "not in a window")
+        host.addSubview(view)
+        XCTAssertTrue(view.isAnimating, "the skeleton is in a window")
+        feed(.idle, hasResult: true)
+        XCTAssertFalse(view.isAnimating, "idle")
+        feed(.scanning, hasResult: true)
+        XCTAssertTrue(view.isAnimating, "the spinner turns while it scans")
+        view.isHidden = true
+        XCTAssertFalse(view.isAnimating, "hidden")
+        view.isHidden = false
+        XCTAssertTrue(view.isAnimating)
+        view.removeFromSuperview()
+        XCTAssertFalse(view.isAnimating, "not in a window")
+        view.settingsOverride = HeaderSettings(reduceMotion: true)
+        host.addSubview(view)
+        feed(.scanning, hasResult: false)
+        XCTAssertFalse(view.isAnimating, "Reduce motion: no shimmer and no spinner")
+    }
+
+    /// The longest detail line, with all three totals: it must fit the narrow menu (short words) or end with an ellipsis, never run over the edge.
+    func testTheLongestDetailLineStaysInsideTheNarrowMenu() throws {
+        let findings = [finding("a", .docker, 23, .safe), finding("b", .javascript, 776, .review), finding("c", .browsers, 1100, .safe)]
+        for width in widths {
+            for dark in [false, true] {
+                let (rep, view, _) = render(findings, blocked: [.browsers], width: width, settings: HeaderSettings(darkMode: dark),
+                                            name: "long-detail-\(Int(width))-\(dark ? "dark" : "light")")
+                let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+                // The detail row is the line under the title: from 28 to 42 points under the top.
+                let rowTop = Int(28 * scale), rowBottom = Int(42 * scale)
+                var rightmost = 0
+                for y in rowTop..<rowBottom { for x in 0..<rep.pixelsWide where alpha(rep, x, y) > 0.1 { rightmost = max(rightmost, x) } }
+                XCTAssertGreaterThan(rightmost, 0, "the detail line is drawn")
+                XCTAssertLessThanOrEqual(CGFloat(rightmost) / scale, width - 20 + 1, "the detail line stays inside the right inset at \(width)")
+            }
+        }
+        _ = render(findings, blocked: [.browsers], width: 307, name: "hover-307-light", hover: 1)
+        _ = render(findings, blocked: [.browsers], width: 307, settings: HeaderSettings(darkMode: true), name: "hover-307-dark", hover: 2)
     }
 }

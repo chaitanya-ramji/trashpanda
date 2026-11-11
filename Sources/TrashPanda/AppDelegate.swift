@@ -187,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rebuildMenu()
         case .updateLiveRows:
             let model = MenuModel.make(menuInput())
-            header.update(disk: model.header.disk, totals: model.header.totals, activity: model.header.activity,
+            header.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content,
                           segments: model.header.segments)
             builder.updateLiveRows(model: model)
         }
@@ -195,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rebuildMenu() {
         let model = MenuModel.make(menuInput())
-        header.update(disk: model.header.disk, totals: model.header.totals, activity: model.header.activity,
+        header.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content,
                       segments: model.header.segments)
         header.onSelect = { [weak self] segment in self?.showGroup(segment) }
         builder.populate(menu, model: model, header: header)
