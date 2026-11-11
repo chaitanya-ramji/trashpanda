@@ -89,7 +89,7 @@ final class BrewLeavesTests: SimctlTestCase {
     func testEachPackageIsAReviewItemThatShowsItsAge() throws {
         let box = try Sandbox(), fake = try FakeBrew(box: box)
         try fake.install("wget", bytes: 3_000_000, daysAgo: 412)
-        try fake.install("tmux", daysAgo: 5, onRequest: false)
+        try fake.install("tmux", daysAgo: 45, onRequest: false)
         let items = scanner(box, fake).scanBrewLeaves()
         let wget = try XCTUnwrap(items.first { $0.title.hasSuffix("wget") })
         XCTAssertEqual(wget.tier, .review)
@@ -101,6 +101,27 @@ final class BrewLeavesTests: SimctlTestCase {
         let tmux = try XCTUnwrap(items.first { $0.title.hasSuffix("tmux") })
         XCTAssertTrue(tmux.location.contains("added only as a dependency"), tmux.location)
         XCTAssertFalse(items.contains { $0.title.lowercased().contains("unused") }, "Brew does not know if a tool is used")
+    }
+
+    func testAPackageYoungerThanTheStaleLimitIsHidden() throws {
+        let box = try Sandbox(), fake = try FakeBrew(box: box)
+        try fake.install("fresh", daysAgo: 3)
+        try fake.install("old", daysAgo: 90)
+        try fake.install("norecipt", daysAgo: 3)
+        try FileManager.default.removeItem(at: fake.root.appendingPathComponent("Cellar/norecipt/1.0/INSTALL_RECEIPT.json"))
+        let items = scanner(box, fake).scanBrewLeaves()
+        XCTAssertEqual(Set(items.map(\.title)), ["Package · old", "Package · norecipt"])
+        let old = try XCTUnwrap(items.first { $0.title.hasSuffix("old") })
+        let age = try XCTUnwrap(old.lastActivity).timeIntervalSinceNow
+        XCTAssertEqual(age, -90 * 86_400, accuracy: 3_600)
+        XCTAssertNil(items.first { $0.title.hasSuffix("norecipt") }?.lastActivity)
+    }
+
+    func testTheStaleLimitComesFromTheConfig() throws {
+        let box = try Sandbox(), fake = try FakeBrew(box: box)
+        try fake.install("fresh", daysAgo: 3)
+        let s = DiskScanner(home: box.home, config: Config(staleDays: 2), useOwnerTools: false, brewPath: fake.path)
+        XCTAssertEqual(s.scanBrewLeaves().count, 1)
     }
 
     func testNeverInTheOneClickTotal() throws {

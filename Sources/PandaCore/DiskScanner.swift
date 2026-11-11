@@ -742,11 +742,15 @@ public final class DiskScanner {
         let current = now()
         return leaves.compactMap { name in
             guard let p = brew.package(name, now: current), p.bytes > 0 else { return nil }
+            // A package that is younger than the stale limit is new, so we do not offer it.
+            // When the receipt has no date, we keep it in the list.
+            if let d = p.installedDaysAgo, d < config.staleDays { return nil }
             var place = "Nothing else needs it"
             if let d = p.installedDaysAgo { place += " · installed \(d) days ago" }
             if !p.onRequest { place += " · added only as a dependency" }
             return Finding(id: "brew.leaf:\(name)", ecosystem: .homebrew, title: "Package · \(name)", location: place,
-                           bytes: p.bytes, tier: .review, rebuild: .download, action: .brew(.uninstall(name: name)))
+                           bytes: p.bytes, tier: .review, rebuild: .download, action: .brew(.uninstall(name: name)),
+                           lastActivity: p.installedAt)
         }
     }
 
