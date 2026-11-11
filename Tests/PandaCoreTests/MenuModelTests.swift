@@ -129,7 +129,7 @@ final class MenuModelTests: XCTestCase {
             "Xcode & Swift | 10 GB",
             "  Free up 6.3 GB…",
             "  ---",
-            "  # Safe to clean",
+            "  # Safe to clean · they rebuild in a few minutes",
             "  Build data | 4.2 GB",
             "  Unavailable simulators | 2.1 GB",
             "  ---",
@@ -142,15 +142,14 @@ final class MenuModelTests: XCTestCase {
             "JavaScript & TypeScript | 1.8 GB",
             "  Free up 1.8 GB…",
             "  ---",
-            "  # Safe to clean",
+            "  # Safe to clean · they rebuild in a few minutes",
             "  node_modules · app-a | 1.3 GB",
             "  Show in Finder",
             "  node_modules · app-b | 500 MB",
             "  Show in Finder",
             "Smaller groups | 40 MB",
             "  Docker | 40 MB",
-            "    Engine: Test Engine · no container uses it (local) [off]",
-            "    ---",
+            "    # Docker · Test Engine (local)",
             "    # Review first",
             "    Unused volume · data | 40 MB",
             "---",
@@ -285,7 +284,7 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(group.size, "10 GB", "The group still counts the item of the open app")
         XCTAssertEqual(describe(group.submenu?.rows ?? []), [
             "Free up 2.1 GB…", "---",
-            "# Safe to clean", "Build data | 4.2 GB", "Unavailable simulators | 2.1 GB", "---",
+            "# Safe to clean · they rebuild in a few minutes", "Build data | 4.2 GB", "Unavailable simulators | 2.1 GB", "---",
             "# Review first", "Device support · example | 3.8 GB", "Show in Finder",
         ])
         let blocked = try XCTUnwrap(group.submenu?.rows.first { $0.title == "Build data" })
@@ -327,7 +326,7 @@ final class MenuModelTests: XCTestCase {
         let rows = try XCTUnwrap(group.submenu?.rows)
         // Free up, a separator, a label, 12 rows, and the "more" row.
         XCTAssertEqual(rows.count, 16)
-        XCTAssertEqual(rows[2].title, "Safe to clean")
+        XCTAssertEqual(rows[2].title, "Safe to clean · they rebuild in a few minutes")
         XCTAssertEqual(rows[3].title, "Env 40", "The largest first")
         XCTAssertEqual(rows[14].title, "Env 29")
         XCTAssertEqual(rows[15].title, "28 more… · 3.2 GB")
@@ -385,7 +384,7 @@ final class MenuModelTests: XCTestCase {
         let group = try XCTUnwrap(MenuModel.make(input(many)).rows.first { $0.title == "Python" })
         let rows = try XCTUnwrap(group.submenu?.rows)
         XCTAssertEqual(rows.count, 14)
-        XCTAssertEqual(rows[0].title, "Review first")
+        XCTAssertEqual(rows[0].title, "Review first · they rebuild in a few minutes")
         XCTAssertEqual(rows[0].kind, .sectionHeader)
         XCTAssertEqual(rows[13].title, "1 more… · 101 MB")
     }
@@ -537,11 +536,68 @@ final class MenuModelTests: XCTestCase {
         XCTAssertNil(volumePrompt.revealURL)
     }
 
-    func testEachItemRowHasTheRebuildLabelAsItsSubtitleAndKeepsThePathInTheTooltip() throws {
+    func testARowKeepsThePathAndTheLabelInTheTooltipAndHasNoRepeatedSubtitle() throws {
         let model = MenuModel.make(input(fixture()))
         let js = try XCTUnwrap(model.rows.first { $0.title == "JavaScript & TypeScript" }?.submenu?.rows)
         let row = try XCTUnwrap(js.first { $0.title == "node_modules · app-a" })
-        XCTAssertEqual(row.subtitle, "Rebuilds in a few minutes")
+        XCTAssertNil(row.subtitle, "Both rows say the same, so the header says it once")
         XCTAssertEqual(row.tooltip?.hasPrefix("~/Projects"), true)
+        XCTAssertEqual(row.tooltip?.contains("Rebuilds in a few minutes"), true)
+    }
+
+    func testARowThatDiffersFromItsSectionKeepsItsOwnSubtitle() throws {
+        let a = item("a", .python, "Env a", 900 * mb, .safe)
+        let b = item("b", .python, "Env b", 800 * mb, .safe)
+        let c = Finding(id: "c", ecosystem: .python, title: "Env c", location: "~/p", bytes: 700 * mb, tier: .safe,
+                        rebuild: .download, action: .owner(.brewCleanup))
+        let rows = try XCTUnwrap(MenuModel.make(input([a, b, c])).rows.first { $0.title == "Python" }?.submenu?.rows)
+        XCTAssertEqual(rows.first { $0.title == "Env c" }?.subtitle, "Downloads again when needed")
+        XCTAssertNil(rows.first { $0.title == "Env a" }?.subtitle)
+    }
+
+    // MARK: Docker group submenu
+
+    private func dockerItem(_ id: String, _ title: String, _ place: String, rebuild: Rebuild, bytes: Int64 = 900 * 1_000_000) -> Finding {
+        Finding(id: id, ecosystem: .docker, title: title, location: "Docker engine: Test Engine" + place, bytes: bytes, tier: .review,
+                rebuild: rebuild, action: .docker(.removeContainer(id: "abc")))
+    }
+
+    func testDockerEngineIsOneHeaderAndRowsHaveNoEngineNoImageAndNoVolumeId() throws {
+        let running = dockerItem("r", "Running container · web and 1 volume",
+                                 " · image app:1 · Up 22 hours · volumes: 5f0999b7b512… · will be stopped first", rebuild: .never)
+        let rows = try XCTUnwrap(MenuModel.make(input([running])).rows.first { $0.title == "Docker" }?.submenu?.rows)
+        XCTAssertEqual(rows[0].kind, .sectionHeader)
+        XCTAssertEqual(rows[0].title, "Docker · Test Engine (local)")
+        XCTAssertFalse(rows.contains { $0.kind == .text && !$0.enabled }, "No long info row")
+        let row = try XCTUnwrap(rows.first { $0.title == "Running container · web and 1 volume" })
+        XCTAssertEqual(row.subtitle, "Up 22 hours · will be stopped first · Cannot be recovered")
+        XCTAssertFalse((row.tooltip ?? "").contains("5f0999"), "A volume id never shows")
+        XCTAssertFalse((row.subtitle ?? "").contains("5f0999"))
+    }
+
+    func testDockerHeaderIsNotAGoodToKnowRow() {
+        let m = MenuModel.make(input([dockerItem("d", "Build cache", "", rebuild: .minutes)]))
+        XCTAssertFalse(describe(m.rows).contains("# Good to know"))
+    }
+
+    // MARK: Friendly titles and width
+
+    func testRowTitleIsFriendlyAndTheTooltipKeepsTheFullName() throws {
+        let f = Finding(id: "cache.explorer:x", ecosystem: .cacheExplorer, title: "com.example.tool.helperd · system cache",
+                        location: "~/Library/Caches/com.example.tool.helperd", bytes: 900 * mb, tier: .review, rebuild: .download,
+                        action: .removeCacheFolderContents(name: "com.example.tool.helperd"))
+        let rows = try XCTUnwrap(MenuModel.make(input([f])).rows.first { $0.kind == .columns }?.submenu?.rows)
+        let row = try XCTUnwrap(rows.first { $0.kind == .columns })
+        XCTAssertEqual(row.title, "helperd · system cache")
+        XCTAssertEqual(row.tooltip?.hasPrefix("com.example.tool.helperd · system cache\n"), true)
+    }
+
+    func testALongTitleIsCappedAndTheTooltipHasItAll() throws {
+        let long = String(repeating: "abcdefghij", count: 8)
+        let f = item("l", .python, long, 900 * mb, .safe)
+        let rows = try XCTUnwrap(MenuModel.make(input([f])).rows.first { $0.title == "Python" }?.submenu?.rows)
+        let row = try XCTUnwrap(rows.first { $0.kind == .columns })
+        XCTAssertLessThanOrEqual(row.title.count, MenuText.maxTitle)
+        XCTAssertTrue(row.tooltip?.hasPrefix(long) == true)
     }
 }

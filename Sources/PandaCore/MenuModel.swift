@@ -315,9 +315,9 @@ public struct MenuModel: Equatable, Sendable {
     private static func submenu(for ecosystem: Ecosystem, items: [Finding], _ input: MenuInput, nest: Bool = true) -> Submenu {
         if nest, ecosystem == .aiAgents, AgentMenu.shouldNest(items) { return nestedAgentSubmenu(items, input) }
         var rows: [Row] = []
-        if ecosystem == .docker, let engine = items.first?.location, engine.hasPrefix("Docker engine: ") {
-            rows.append(.note(engine.replacingOccurrences(of: "Docker engine: ", with: "Engine: ") + " (local)"))
-            rows.append(.separator)
+        if ecosystem == .docker, let engine = items.first.flatMap({ MenuText.dockerPlace($0.location).engine }) {
+            // The engine is said once, here. A row does not repeat it.
+            rows.append(.section(MenuText.capped("Docker · \(engine) (local)")))
         }
         let actionable = items.filter(\.isActionable)
         // The bulk "Free up" line takes only items that need no quit. It never quits an app.
@@ -334,22 +334,29 @@ public struct MenuModel: Equatable, Sendable {
         }
         if !safeAll.isEmpty {
             if !safe.isEmpty { rows.append(.separator) }
-            rows.append(.section("Safe to clean"))
-            rows += listRows(safeAll, input, groupBytes: groupBytes)
+            let notes = MenuText.rebuildNotes(safeAll.map(\.rebuild))
+            rows.append(.section(header("Safe to clean", notes)))
+            rows += listRows(safeAll, input, groupBytes: groupBytes, labels: notes.rowLabels)
         }
         if !review.isEmpty {
             if !safeAll.isEmpty { rows.append(.separator) }
-            rows.append(.section("Review first"))
-            rows += listRows(review, input, groupBytes: groupBytes)
+            let notes = MenuText.rebuildNotes(review.map(\.rebuild))
+            rows.append(.section(header("Review first", notes)))
+            rows += listRows(review, input, groupBytes: groupBytes, labels: notes.rowLabels)
         }
-        return Submenu(rows: rows, widthTitles: items.map(\.title), alignIcons: true)
+        return Submenu(rows: rows, widthTitles: items.map { MenuText.capped(MenuText.friendlyTitle($0.title)) }, alignIcons: true)
+    }
+
+    /// "Review first · they download again when needed"
+    private static func header(_ name: String, _ notes: MenuText.RebuildNotes) -> String {
+        notes.sectionSuffix.map { "\(name) · \($0)" } ?? name
     }
 
     /// The first rows of a list, and then the rest in a "N more… · size" submenu, so that no row is hidden.
     /// The first list has at most 12 rows. It stops earlier at the first row that is below 50 MB and below 1 percent of the group.
-    private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64) -> [Row] {
-        let titles = MenuText.distinct(titles: list.map(\.title), locations: list.map(\.location))
-        func row(_ i: Int) -> [Row] { findingRows(list[i], input, title: titles[i]) }
+    private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64, labels: [String?]) -> [Row] {
+        let titles = MenuText.distinct(titles: list.map { MenuText.friendlyTitle($0.title) }, locations: list.map(\.location))
+        func row(_ i: Int) -> [Row] { findingRows(list[i], input, title: titles[i], label: labels[i]) }
         var shown = 0
         while shown < min(12, list.count) {
             let f = list[shown]
@@ -367,14 +374,24 @@ public struct MenuModel: Equatable, Sendable {
     }
 
     /// The row of one item. When Finder can show it, an alternate row follows: "Show in Finder", while Option is held.
-    private static func findingRows(_ f: Finding, _ input: MenuInput, title: String) -> [Row] {
-        let row = findingRow(f, input, title: title)
+    private static func findingRows(_ f: Finding, _ input: MenuInput, title: String, label: String?) -> [Row] {
+        let row = findingRow(f, input, title: title, label: label)
         guard let url = f.revealURL else { return [row] }
         return [row, Row(title: "Show in Finder", action: .reveal(url), isOptionAlternate: true)]
     }
 
-    private static func findingRow(_ f: Finding, _ input: MenuInput, title: String) -> Row {
-        var row = Row(kind: .columns, title: title, size: f.sizeText, subtitle: f.rebuild.label,
+    private static func findingRow(_ f: Finding, _ input: MenuInput, title fullTitle: String, label: String?) -> Row {
+        let title = MenuText.capped(fullTitle)
+        var subtitle = label
+        var place = f.location
+        if f.ecosystem == .docker, f.location.hasPrefix("Docker engine: ") {
+            // The engine is in the header. The row says only what is new: its state, and that a running one is stopped first.
+            let docker = MenuText.dockerPlace(f.location)
+            place = docker.tooltip
+            let joined = [docker.subtitle, f.rebuild == .never ? f.rebuild.label : nil].compactMap { $0 }.joined(separator: " · ")
+            subtitle = joined.isEmpty ? label : joined
+        }
+        var row = Row(kind: .columns, title: title, size: f.sizeText, subtitle: subtitle,
                       icon: .item(owner: f.owner, agentTitle: f.ecosystem == .aiAgents ? f.title : nil))
         let open = input.blockers(f)
         let c = Confirmation.forOne(f, staleDays: input.staleDays, now: input.now)
@@ -391,7 +408,8 @@ public struct MenuModel: Equatable, Sendable {
                 footer: c.footer, confirmTitle: "Quit \(names) and free \(ByteText.string(f.bytes))",
                 cancelIsDefault: true, cancelTitle: "Not now", revealURL: f.revealURL))
         }
-        var tip = "\(f.location)\n\(f.rebuild.label)"
+        // The tooltip keeps the full name and the rebuild label, even when the row shows less.
+        var tip = (title == f.title ? "" : "\(f.title)\n") + "\(place)\n\(f.rebuild.label)"
         if isProject(f), let days = f.lastActivity.map({ max(0, Int(input.now.timeIntervalSince($0) / 86_400)) }) {
             tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")"
         }
