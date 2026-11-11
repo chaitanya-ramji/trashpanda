@@ -1,0 +1,96 @@
+import Foundation
+
+/// The system settings that change how the header is drawn. The app reads them from the system. The core only decides.
+public struct HeaderSettings: Equatable, Sendable {
+    public var reduceMotion = false
+    public var increaseContrast = false
+    public var reduceTransparency = false
+    public var differentiateWithoutColor = false
+    public var darkMode = false
+
+    public init(reduceMotion: Bool = false, increaseContrast: Bool = false, reduceTransparency: Bool = false,
+                differentiateWithoutColor: Bool = false, darkMode: Bool = false) {
+        self.reduceMotion = reduceMotion
+        self.increaseContrast = increaseContrast
+        self.reduceTransparency = reduceTransparency
+        self.differentiateWithoutColor = differentiateWithoutColor
+        self.darkMode = darkMode
+    }
+}
+
+/// How the header is drawn for some settings. The drawing code only reads these values.
+public struct HeaderStyle: Equatable, Sendable {
+    /// Alpha of the light fill under the stripes of a blocked part.
+    public let stripeFillAlpha: CGFloat
+    /// Alpha of the stripe lines.
+    public let stripeLineAlpha: CGFloat
+    /// A 1 point line between two parts.
+    public let separatorsBetweenParts: Bool
+    /// The review share of a part has a line pattern, not only a lighter color.
+    public let patternForReview: Bool
+    /// The parts that are not under the mouse get lighter.
+    public let dimOtherParts: Bool
+    /// The part under the mouse gets a line around it. It replaces the dimming when transparency is reduced.
+    public let outlineHoveredPart: Bool
+    /// With "Reduce motion" the spinner does not show. The text still says that the app is busy.
+    public let showSpinner: Bool
+
+    public init(_ settings: HeaderSettings) {
+        // "Increase contrast" gives 0.6. In dark mode the light fill needs a little more to be seen.
+        stripeFillAlpha = settings.increaseContrast ? 0.6 : (settings.darkMode ? 0.40 : 0.30)
+        stripeLineAlpha = settings.increaseContrast ? 1 : 0.85
+        separatorsBetweenParts = settings.increaseContrast
+        patternForReview = settings.differentiateWithoutColor
+        dimOtherParts = !settings.reduceTransparency
+        outlineHoveredPart = settings.reduceTransparency
+        showSpinner = !settings.reduceMotion
+    }
+}
+
+/// The rows of the header, from the bottom of the view. The numbers are points. The view is not flipped.
+public struct HeaderLayout: Equatable, Sendable {
+    public let height: CGFloat
+    public let titleY: CGFloat
+    public let detailY: CGFloat
+    /// The bottom of the bar. nil when there is no bar.
+    public let barY: CGFloat?
+    /// The bottom of the legend. nil when there is no bar.
+    public let legendY: CGFloat?
+}
+
+/// The widths of the three kinds of data in one part of the bar, from the left: safe, review, blocked.
+public struct PartWidths: Equatable, Sendable {
+    public let safe: CGFloat
+    public let review: CGFloat
+    public let blocked: CGFloat
+}
+
+extension SplitBar {
+    /// Places the rows of the header from the heights of the three fonts (title, detail line, legend).
+    /// With a bar, the legend is at the bottom, then the bar, then the detail line, then the title.
+    public static func headerLayout(titleHeight: CGFloat, detailHeight: CGFloat, legendHeight: CGFloat, barHeight: CGFloat,
+                                    hasBar: Bool, topPadding: CGFloat = 10, bottomPadding: CGFloat = 10,
+                                    rowGap: CGFloat = 2, barGap: CGFloat = 8, legendGap: CGFloat = 6) -> HeaderLayout {
+        var y = hasBar ? bottomPadding : 8
+        var legendY: CGFloat?, barY: CGFloat?
+        if hasBar {
+            legendY = y
+            y += legendHeight + legendGap
+            barY = y
+            y += barHeight + barGap
+        }
+        let detailY = y
+        let titleY = detailY + detailHeight + rowGap
+        return HeaderLayout(height: titleY + titleHeight + topPadding, titleY: titleY, detailY: detailY, barY: barY, legendY: legendY)
+    }
+
+    /// Splits the width of one part into safe, review and blocked. The blocked width is at the end. The three add up to `width`.
+    public static func partWidths(_ segment: SplitSegment, width: CGFloat) -> PartWidths {
+        guard segment.bytes > 0, width > 0 else { return PartWidths(safe: max(0, width), review: 0, blocked: 0) }
+        let total = CGFloat(segment.bytes)
+        let blocked = (width * CGFloat(min(segment.blockedBytes, segment.bytes)) / total).rounded()
+        let reviewBytes = max(0, segment.bytes - segment.blockedBytes - segment.safeBytes)
+        let review = min(width - blocked, (width * CGFloat(reviewBytes) / total).rounded())
+        return PartWidths(safe: width - blocked - review, review: review, blocked: blocked)
+    }
+}
