@@ -56,7 +56,7 @@ Only the latest release gets security fixes.
 
 Until a release is notarized by Apple, you must approve the app on first launch. Check the SHA-256 checksum of the DMG against the `.sha256` file on the Releases page. You can also build the app from source.
 
-The app is not sandboxed, because it must read developer folders. It runs with your user rights. It never asks for an administrator password. It never sends data over the network.
+The app is not sandboxed, because it must read developer folders. It runs with your user rights. It never asks for an administrator password. It makes one kind of network request. One time each day, it asks api.github.com for the list of releases, to find out if a newer one exists. The request holds no data about your files. You can turn it off in the menu ("Check for updates every day"). The app never downloads and never installs an update by itself.
 
 ## Safe harbor
 
