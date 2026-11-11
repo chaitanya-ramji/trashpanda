@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 // Every item in a list can be removed. A line that has no action is not an item: it goes to "Good to know".
                 self.result = ScanResult(findings: r.findings.filter(\.isActionable), disk: r.disk,
-                                         infoRows: StorageFacts.rows(from: r.findings))
+                                         infoRows: StorageFacts.rows(from: r.findings, disk: r.disk))
                 self.disk = r.disk
                 self.scanning = false
                 self.busyChanged()

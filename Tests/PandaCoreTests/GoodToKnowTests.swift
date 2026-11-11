@@ -43,6 +43,48 @@ final class GoodToKnowTests: XCTestCase {
         XCTAssertTrue(StorageFacts.rows(from: [noInside]).isEmpty, "We never guess the data inside")
     }
 
+    // MARK: Space that macOS frees, and snapshots
+
+    func testPurgeableRowIsHiddenAtOneGigabyteOrLess() {
+        XCTAssertNil(StorageFacts.purgeable(0))
+        XCTAssertNil(StorageFacts.purgeable(gb))
+        XCTAssertNotNil(StorageFacts.purgeable(gb + 1))
+    }
+
+    func testPurgeableRowSaysItIsAnEstimateAndWhatItMayInclude() {
+        let row = StorageFacts.purgeable(18 * gb)
+        XCTAssertEqual(row?.title, "macOS can free by itself: about 18 GB")
+        XCTAssertEqual(row?.detail, "An estimate. It may include snapshots and system files. Cannot be cleaned here.")
+    }
+
+    func testDiskUsageKeepsPurgeableAndNeverNegative() {
+        XCTAssertEqual(DiskUsage(total: 10, free: 5, purgeable: 3).purgeable, 3)
+        XCTAssertEqual(DiskUsage(total: 10, free: 5, purgeable: -3).purgeable, 0)
+        XCTAssertEqual(DiskUsage(total: 10, free: 5).purgeable, 0)
+    }
+
+    private func snapshot(_ n: Int) -> Finding {
+        Finding(id: "snapshots.local", ecosystem: .snapshots, title: n == 1 ? "Time Machine · 1 local snapshot" : "Time Machine · \(n) local snapshots",
+                location: "Read with tmutil, read only", bytes: 0, tier: .review, rebuild: .never, action: .inform, note: "A note.")
+    }
+
+    func testSnapshotRowTextForOneAndMany() {
+        XCTAssertEqual(StorageFacts.rows(from: [snapshot(1)]).map(\.title), ["Time Machine · 1 local snapshot"])
+        XCTAssertEqual(StorageFacts.rows(from: [snapshot(3)]).map(\.title), ["Time Machine · 3 local snapshots"])
+        XCTAssertEqual(StorageFacts.rows(from: [snapshot(3)]).first?.detail,
+                       "Cannot be cleaned here. macOS removes them when the disk needs space.")
+    }
+
+    func testAllThreeRowsInOrderAndNoMoreThanThree() {
+        let docker = Finding(id: "docker.vmdisk", ecosystem: .docker, title: "d", location: "x", bytes: 34 * gb, tier: .review,
+                             rebuild: .never, action: .inform, insideBytes: 12 * gb)
+        let rows = StorageFacts.rows(from: [snapshot(2), docker], disk: DiskUsage(total: 500 * gb, free: 100 * gb, purgeable: 18 * gb))
+        XCTAssertEqual(rows.map(\.title), ["Docker disk file: 34 GB on disk, 12 GB in use", "Time Machine · 2 local snapshots",
+                                           "macOS can free by itself: about 18 GB"])
+        XCTAssertTrue(rows.allSatisfy { $0.detail.contains("Cannot be cleaned here") })
+        XCTAssertLessThanOrEqual(rows.count, StorageFacts.maxRows)
+    }
+
     // MARK: The menu
 
     func testNoInfoRowsMeansNoSection() {

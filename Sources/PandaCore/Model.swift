@@ -368,11 +368,14 @@ public struct Finding: Identifiable, Sendable {
 public struct DiskUsage: Sendable, Equatable {
     public let total: Int64
     public let free: Int64
+    /// Space that macOS can free by itself when it needs it. `free` already counts it. 0 when unknown.
+    public let purgeable: Int64
     public var used: Int64 { max(0, total - free) }
 
-    public init(total: Int64, free: Int64) {
+    public init(total: Int64, free: Int64, purgeable: Int64 = 0) {
         self.total = total
         self.free = free
+        self.purgeable = max(0, purgeable)
     }
 
     /// Free bytes without purgeable space. This shows real change after a delete. It is for the log only.
@@ -382,11 +385,13 @@ public struct DiskUsage: Sendable, Equatable {
 
     /// Reads the capacity that Finder shows (includes purgeable space as free).
     public static func current(for url: URL = URL(fileURLWithPath: NSHomeDirectory())) -> DiskUsage {
-        let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
+        let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey]
         let values = try? url.resourceValues(forKeys: keys)
         let total = Int64(values?.volumeTotalCapacity ?? 0)
         let free = values?.volumeAvailableCapacityForImportantUsage ?? 0
-        return DiskUsage(total: total, free: free)
+        // Free space with purgeable space, minus free space without it. Both numbers come from the volume. Nothing is scanned.
+        let purgeable = values?.volumeAvailableCapacity.map { free - Int64($0) } ?? 0
+        return DiskUsage(total: total, free: free, purgeable: purgeable)
     }
 }
 
