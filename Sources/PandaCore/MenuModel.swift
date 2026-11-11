@@ -150,6 +150,11 @@ public struct MenuModel: Equatable, Sendable {
         min(520, max(defaultTab, widestTitle + 90))
     }
 
+    /// How much room a title has before the size column starts: the tab, minus the size and a minimum space.
+    public static func titleRoom(tab: Double, sizeWidth: Double, minGap: Double = 12) -> Double {
+        max(0, tab - sizeWidth - minGap)
+    }
+
     public static func make(_ input: MenuInput) -> MenuModel {
         let findings = input.findings
         let cleaning = input.cleaning, scanning = input.scanning

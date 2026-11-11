@@ -60,4 +60,32 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertFalse(menu.items[6].isEnabled)
         for i in before.indices where ![2, 6].contains(i) { XCTAssertEqual(after[i], before[i]) }
     }
+
+    /// A long title must never reach the size column. Before this, a title of 627 points had a tab of 520.
+    func testLongTitlesNeverReachTheSizeColumnAndTheSubmenuIsNotWider() throws {
+        let disk = DiskUsage(total: 500_000_000_000, free: 120_000_000_000)
+        let findings = (0..<8).map { j in
+            Finding(id: "a\(j)", ecosystem: .javascript, title: "node_modules · " + String(repeating: "long-title-", count: 1 + j),
+                    location: "~/P", bytes: 85_000_000, tier: .safe, rebuild: .minutes,
+                    action: .removeArtifact(URL(fileURLWithPath: "/tmp/a\(j)")))
+        }
+        let model = MenuModel.make(MenuInput(result: ScanResult(findings: findings, disk: disk), disk: disk, scanning: false,
+                                             cleaning: false, running: RunningSnapshot(apps: []), staleDays: 90))
+        let menu = NSMenu()
+        MenuBuilder { _ in }.populate(menu, model: model, header: NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 80)))
+        let sub = try XCTUnwrap(menu.items[4].submenu)
+        let font = NSFont.menuFont(ofSize: 0)
+        func w(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: [.font: font]).width }
+        let rows = sub.items.filter { $0.attributedTitle?.string.contains("\t") == true }
+        XCTAssertEqual(rows.count, 8)
+        for item in rows {
+            let parts = item.attributedTitle!.string.components(separatedBy: "\t")
+            let tab = (item.attributedTitle!.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as! NSParagraphStyle).tabStops[0].location
+            XCTAssertLessThanOrEqual(w(parts[0]) + 12 + w(parts[1]), tab + 0.5, parts[0])
+            XCTAssertLessThanOrEqual(item.attributedTitle!.size().width, 520.5)
+        }
+        // Measured before the change: 660 points. A tab of 520 and the margins of the rows make 552.
+        XCTAssertLessThanOrEqual(sub.size.width, 552.5)
+        print("MEASURE submenu width", sub.size.width)
+    }
 }
