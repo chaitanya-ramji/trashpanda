@@ -75,7 +75,7 @@ final class MenuModelTests: XCTestCase {
 
     func testAResultWithNoItemsSaysNothingToClean() {
         let model = MenuModel.make(input([]))
-        XCTAssertEqual(titles(model), ["<header>", "---", "Nothing to clean automatically [off]", "---"] + tail)
+        XCTAssertEqual(titles(model), ["<header>", "---", "Nothing to clean now [off]", "---"] + tail)
         XCTAssertEqual(model.header.activity, .idle)
     }
 
@@ -95,7 +95,7 @@ final class MenuModelTests: XCTestCase {
 
     func testOnlyReviewItemsSayNothingToCleanAutomatically() {
         let model = MenuModel.make(input([item("a", .trash, "Trash", 5_300 * mb, .review, action: .emptyTrash)]))
-        XCTAssertEqual(titles(model), ["<header>", "---", "Nothing to clean automatically [off]", "---",
+        XCTAssertEqual(titles(model), ["<header>", "---", "Nothing to clean now · 5.3 GB to review [off]", "---",
                                        "Trash | 5.3 GB", "  Take a look first [off]", "  Trash | 5.3 GB"] + tail)
     }
 
@@ -133,6 +133,33 @@ final class MenuModelTests: XCTestCase {
             "Scan again", "Show log in Finder", "Check for updates…", "Check for updates every day",
             "Open at login", "Quit Trash Panda",
         ])
+    }
+
+    // MARK: The main row says what it removes
+
+    func testPrimaryTextForSafeAndReview() {
+        let p = MenuText.primary(safeCount: 38, safeBytes: 4_500 * mb, reviewBytes: 41 * gb)
+        XCTAssertEqual(p, MenuText.Primary(title: "Free up 4.5 GB…", subtitle: "38 safe items. Review items stay.", enabled: true))
+    }
+
+    func testPrimaryTextForSafeOnly() {
+        let p = MenuText.primary(safeCount: 1, safeBytes: 300 * mb, reviewBytes: 0)
+        XCTAssertEqual(p, MenuText.Primary(title: "Free up 300 MB…", subtitle: "1 safe item.", enabled: true))
+    }
+
+    func testPrimaryTextForReviewOnly() {
+        let p = MenuText.primary(safeCount: 0, safeBytes: 0, reviewBytes: 41 * gb)
+        XCTAssertEqual(p, MenuText.Primary(title: "Nothing to clean now · 41 GB to review", subtitle: nil, enabled: false))
+    }
+
+    func testPrimaryTextForNothing() {
+        let p = MenuText.primary(safeCount: 0, safeBytes: 0, reviewBytes: 0)
+        XCTAssertEqual(p, MenuText.Primary(title: "Nothing to clean now", subtitle: nil, enabled: false))
+    }
+
+    func testTheMainRowCarriesTheSubtitle() {
+        let model = MenuModel.make(input(fixture()))
+        XCTAssertEqual(model.rows[2].subtitle, "4 safe items. Review items stay.")
     }
 
     func testTheMainRowAndItsDialog() throws {
@@ -191,10 +218,10 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(model.header.segments.first?.blockingApps, ["Xcode"])
     }
 
-    func testOnlyOpenAppItemsLeaveNothingToCleanAutomatically() {
+    func testOnlyOpenAppItemsLeaveNothingToCleanNow() {
         let only = [item("1", .swift, "Build data", 4_200 * mb, .safe, owner: xcode)]
         let model = MenuModel.make(input(only, running: xcodeRunning))
-        XCTAssertEqual(Array(titles(model).prefix(3)), ["<header>", "---", "Nothing to clean automatically [off]"])
+        XCTAssertEqual(Array(titles(model).prefix(3)), ["<header>", "---", "Nothing to clean now [off]"])
     }
 
     // MARK: Item rows

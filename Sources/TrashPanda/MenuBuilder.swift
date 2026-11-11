@@ -77,6 +77,9 @@ final class MenuBuilder: NSObject {
         if let checked = row.checked { item.state = checked ? .on : .off }
         if !row.enabled { item.isEnabled = false }
         if let tip = row.tooltip { item.toolTip = tip }
+        if let subtitle = row.subtitle {
+            if #available(macOS 14.4, *) { item.subtitle = subtitle } else { item.toolTip = subtitle }
+        }
         if let icon = row.icon { item.image = image(for: icon) }
         if let sub = row.submenu {
             let menu = NSMenu()

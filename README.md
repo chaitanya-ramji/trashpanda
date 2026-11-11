@@ -320,7 +320,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Move the demo code out of the production classes ([#148](https://github.com/chaitanya-ramji/trashpanda/issues/148))
 - [ ] Settings submenu with About, Help, and "Report a problem" ([#149](https://github.com/chaitanya-ramji/trashpanda/issues/149))
 - [ ] Fold small groups into one row ([#150](https://github.com/chaitanya-ramji/trashpanda/issues/150))
-- [ ] Say what the main action removes ([#151](https://github.com/chaitanya-ramji/trashpanda/issues/151))
+- [x] Say what the main action removes ([#151](https://github.com/chaitanya-ramji/trashpanda/issues/151))
 - [ ] Show the time of the last scan ([#152](https://github.com/chaitanya-ramji/trashpanda/issues/152))
 - [ ] "Show in Finder" for an item, and the rebuild label as a subtitle ([#153](https://github.com/chaitanya-ramji/trashpanda/issues/153))
 - [ ] Section headers in a group submenu ([#154](https://github.com/chaitanya-ramji/trashpanda/issues/154))
