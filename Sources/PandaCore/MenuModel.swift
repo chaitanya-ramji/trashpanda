@@ -86,6 +86,8 @@ public struct MenuModel: Equatable, Sendable {
         public var action: Action?
         public var submenu: Submenu?
         public var tooltip: String?
+        /// A second line under the title. An older system shows it as the tooltip.
+        public var subtitle: String?
         public var icon: Icon?
         /// A check mark in front of the row.
         public var checked: Bool?
@@ -94,7 +96,7 @@ public struct MenuModel: Equatable, Sendable {
         public var isOptionAlternate: Bool
 
         public init(kind: Kind = .text, title: String = "", size: String? = nil, enabled: Bool = true, action: Action? = nil,
-                    submenu: Submenu? = nil, tooltip: String? = nil, icon: Icon? = nil, checked: Bool? = nil,
+                    submenu: Submenu? = nil, tooltip: String? = nil, subtitle: String? = nil, icon: Icon? = nil, checked: Bool? = nil,
                     keyEquivalent: String = "", isOptionAlternate: Bool = false) {
             self.kind = kind
             self.title = title
@@ -103,6 +105,7 @@ public struct MenuModel: Equatable, Sendable {
             self.action = action
             self.submenu = submenu
             self.tooltip = tooltip
+            self.subtitle = subtitle
             self.icon = icon
             self.checked = checked
             self.keyEquivalent = keyEquivalent
@@ -148,12 +151,18 @@ public struct MenuModel: Equatable, Sendable {
         if cleaning {
             rows.append(.note("Cleaning…"))
         } else if input.hasResult {
-            if usableSafe.isEmpty {
-                rows.append(.note(scanning ? "Scanning…" : "Nothing to clean automatically"))
+            if usableSafe.isEmpty && scanning {
+                rows.append(.note("Scanning…"))
             } else {
-                rows.append(Row(title: "Free up \(ByteText.string(safeBytes))…", action: .clean(Prompt(
-                    findings: usableSafe, title: "Free up \(ByteText.string(safeBytes))?",
-                    body: "Trash Panda will clear old build files and caches from \(names(of: usableSafe))."))))
+                let main = MenuText.primary(safeCount: usableSafe.count, safeBytes: safeBytes, reviewBytes: header.totals.review)
+                if usableSafe.isEmpty {
+                    rows.append(.note(main.title))
+                } else {
+                    rows.append(Row(title: main.title, action: .clean(Prompt(
+                        findings: usableSafe, title: "Free up \(ByteText.string(safeBytes))?",
+                        body: "Trash Panda will clear old build files and caches from \(names(of: usableSafe)).")),
+                        subtitle: main.subtitle))
+                }
             }
             rows.append(.separator)
             rows += groupRows(findings, input)
