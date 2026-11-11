@@ -6,8 +6,6 @@ enum Format {
     static func bytes(_ value: Int64) -> String { ByteText.string(value) }
 }
 
-enum Activity { case idle, scanning, cleaning }
-
 /// One part of the split bar, for VoiceOver. It can be pressed like a button.
 final class SegmentElement: NSAccessibilityElement {
     var onPress: (() -> Void)?
@@ -21,7 +19,7 @@ final class SegmentElement: NSAccessibilityElement {
 final class StorageHeaderView: NSView {
     private var disk = DiskUsage(total: 0, free: 0)
     private var totals = SplitTotals(free: 0, review: 0, waiting: 0)
-    private var activity = Activity.scanning
+    private var activity = MenuModel.Activity.scanning
     private var segments: [SplitSegment] = []
     private var slots: [SplitSlot] = []
     private var hovered: Int?
@@ -65,7 +63,7 @@ final class StorageHeaderView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func update(disk: DiskUsage, totals: SplitTotals, activity: Activity, segments: [SplitSegment]) {
+    func update(disk: DiskUsage, totals: SplitTotals, activity: MenuModel.Activity, segments: [SplitSegment]) {
         self.disk = disk
         self.totals = totals
         self.activity = activity
