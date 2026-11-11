@@ -88,4 +88,78 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertLessThanOrEqual(sub.size.width, 552.5)
         print("MEASURE submenu width", sub.size.width)
     }
+
+    private func mainMenu(ecosystems: [Ecosystem], mb: Int64 = 679) -> NSMenu {
+        let disk = DiskUsage(total: 500_000_000_000, free: 120_000_000_000)
+        let findings = ecosystems.enumerated().map { i, eco in
+            Finding(id: "m\(i)", ecosystem: eco, title: "t", location: "~/P", bytes: mb * 1_000_000, tier: .safe, rebuild: .minutes,
+                    action: .removeArtifact(URL(fileURLWithPath: "/tmp/m\(i)")))
+        }
+        let model = MenuModel.make(MenuInput(result: ScanResult(findings: findings, disk: disk), disk: disk, scanning: false,
+                                             cleaning: false, running: RunningSnapshot(apps: []), staleDays: 90))
+        let menu = NSMenu()
+        MenuBuilder { _ in }.populate(menu, model: model, header: NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 80)))
+        return menu
+    }
+
+    private func tabOf(_ item: NSMenuItem) -> CGFloat? {
+        (item.attributedTitle?.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)?.tabStops.first?.location
+    }
+
+    /// Every row with a size, in the menu and in the submenus that follow its tab.
+    private func sizeRows(_ menu: NSMenu) -> [NSMenuItem] {
+        menu.items.flatMap { item -> [NSMenuItem] in
+            var found = item.attributedTitle?.string.contains("\t") == true ? [item] : []
+            if let sub = item.submenu, !(sub.items.first?.title.hasPrefix("Free up") ?? false) { found += sizeRows(sub) }
+            return found
+        }
+    }
+
+    /// No row of the main menu has a key equivalent: AppKit adds a shared column for it to every row (16 points,
+    /// measured: 371 against 355), and that pushes the chevrons away from the sizes.
+    func testNoRowOfTheMainMenuHasAKeyEquivalentAndTheMenuIsAsWideAsItsGroupRows() {
+        let menu = mainMenu(ecosystems: [.aiAgents, .browsers, .javascript, .swift, .docker])
+        for item in menu.items where !item.isSeparatorItem {
+            XCTAssertEqual(item.keyEquivalent, "", "\(item.title) has a key equivalent: it widens the whole menu by about 16 points")
+        }
+        // A group row is as wide as its tab plus the icon and chevron columns. Measure that overhead on a probe menu.
+        let probe = NSMenu()
+        let item = NSMenuItem(title: "x", action: nil, keyEquivalent: "")
+        item.attributedTitle = MenuBuilderTests.probeTitle(tab: 400)
+        item.image = NSImage(size: NSSize(width: 16, height: 16))
+        let sub = NSMenu(); sub.addItem(withTitle: "x", action: nil, keyEquivalent: ""); item.submenu = sub
+        probe.addItem(item)
+        let overhead = probe.size.width - 400
+        let rows = sizeRows(menu).filter { $0.submenu != nil }
+        XCTAssertEqual(rows.count, 5)
+        let tab = tabOf(rows[0])!
+        XCTAssertEqual(menu.size.width, tab + overhead, accuracy: 0.5, "Something other than the group rows decides the menu width")
+        print("MEASURE main width", menu.size.width, "tab", tab, "overhead", overhead)
+    }
+
+    private static func probeTitle(tab: CGFloat) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.tabStops = [NSTextTab(textAlignment: .right, location: tab)]
+        return NSAttributedString(string: "x\tx", attributes: [.font: NSFont.menuFont(ofSize: 0), .paragraphStyle: style])
+    }
+
+    /// Every ecosystem name, with the biggest size the menu can show, keeps its title whole and clear of its size.
+    func testEveryGroupTitleFitsBesideTheLargestSize() {
+        let menu = mainMenu(ecosystems: Ecosystem.allCases, mb: 999_900)
+        let font = NSFont.menuFont(ofSize: 0)
+        func w(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: [.font: font]).width }
+        let rows = sizeRows(menu)
+        XCTAssertGreaterThanOrEqual(rows.count, Ecosystem.allCases.count)
+        var seen = Set<String>()
+        for item in rows {
+            let parts = item.attributedTitle!.string.components(separatedBy: "\t")
+            let tab = tabOf(item)!
+            XCTAssertEqual(tab, tabOf(rows[0])!)
+            XCTAssertLessThanOrEqual(w(parts[0]) + 12 + w(parts[1]), tab + 0.5, parts[0])
+            XCTAssertFalse(parts[0].contains("…"), "\(parts[0]) was cut")
+            seen.insert(parts[0])
+        }
+        XCTAssertTrue(seen.contains("JavaScript & TypeScript"))
+        print("MEASURE all ecosystems at 999.9 GB: width", menu.size.width, "tab", tabOf(rows[0])!, "groups", seen.count)
+    }
 }

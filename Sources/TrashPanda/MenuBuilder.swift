@@ -23,7 +23,7 @@ final class MenuBuilder: NSObject {
     /// Fills `menu` with the rows of `model`. `header` is the view of the storage header.
     func populate(_ menu: NSMenu, model: MenuModel, header: NSView) {
         menu.removeAllItems()
-        for item in items(model.rows, tab: CGFloat(MenuModel.defaultTab), header: header) { menu.addItem(item) }
+        for item in items(model.rows, tab: mainTab(for: model), header: header) { menu.addItem(item) }
         // The group rows have a color dot. The "Smaller groups" row has a blank one, so that the texts line up.
         if model.rows.contains(where: { if case .groupColor = $0.icon { return true } else { return false } }) {
             let blank = NSImage(size: Self.iconSize)
@@ -31,6 +31,14 @@ final class MenuBuilder: NSObject {
         }
         mainItem = menu.items.indices.contains(Self.mainIndex) ? menu.items[Self.mainIndex] : nil
         rescanItem = Self.rescanIndex(in: model).flatMap { menu.items.indices.contains($0) ? menu.items[$0] : nil }
+    }
+
+    /// The tab of the main menu: the widest group row (title, the minimum gap, size) decides, within the limits of the model.
+    private func mainTab(for model: MenuModel) -> CGFloat {
+        let font = NSFont.menuFont(ofSize: 0)
+        func width(_ text: String) -> Double { Double((text as NSString).size(withAttributes: [.font: font]).width) }
+        let widest = model.sharedColumnRows.map { width($0.title) + MenuModel.minTitleGap + width($0.size ?? "") }.max() ?? 0
+        return CGFloat(MenuModel.mainTab(widestRow: widest))
     }
 
     /// The main action is the row after the header and the first separator.
@@ -106,7 +114,7 @@ final class MenuBuilder: NSObject {
         case .text, .columns:
             break
         }
-        let item = NSMenuItem(title: row.title, action: nil, keyEquivalent: row.keyEquivalent)
+        let item = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
         if row.kind == .columns { item.attributedTitle = line(row.title, row.size ?? "", tab: tab) }
         if let action = row.action {
             if action == .quit {
