@@ -36,6 +36,8 @@ public struct Brew: Sendable {
         public let bytes: Int64
         /// Days since the install. nil when the receipt has no date.
         public let installedDaysAgo: Int?
+        /// When it was installed. nil when the receipt has no date.
+        public let installedAt: Date?
         /// False when Homebrew installed it only because another formula needed it.
         public let onRequest: Bool
     }
@@ -53,14 +55,18 @@ public struct Brew: Sendable {
             return da < db
         }
         var days: Int?
+        var installedAt: Date?
         var onRequest = true
         if let newest,
            let data = try? Data(contentsOf: dir.appendingPathComponent(newest).appendingPathComponent("INSTALL_RECEIPT.json")),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if let time = (json["time"] as? NSNumber)?.doubleValue { days = max(0, Int((now.timeIntervalSince1970 - time) / 86_400)) }
+            if let time = (json["time"] as? NSNumber)?.doubleValue {
+                installedAt = Date(timeIntervalSince1970: time)
+                days = max(0, Int((now.timeIntervalSince1970 - time) / 86_400))
+            }
             if let flag = json["installed_on_request"] as? Bool { onRequest = flag }
         }
-        return Package(name: name, bytes: Sizer.size(of: dir), installedDaysAgo: days, onRequest: onRequest)
+        return Package(name: name, bytes: Sizer.size(of: dir), installedDaysAgo: days, installedAt: installedAt, onRequest: onRequest)
     }
 
     /// Bytes of one formula that are on the disk now. Zero when it is gone.
