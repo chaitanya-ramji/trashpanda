@@ -24,6 +24,11 @@ final class MenuBuilder: NSObject {
     func populate(_ menu: NSMenu, model: MenuModel, header: NSView) {
         menu.removeAllItems()
         for item in items(model.rows, tab: CGFloat(MenuModel.defaultTab), header: header) { menu.addItem(item) }
+        // The group rows have a color dot. The "Smaller groups" row has a blank one, so that the texts line up.
+        if model.rows.contains(where: { if case .groupColor = $0.icon { return true } else { return false } }) {
+            let blank = NSImage(size: Self.iconSize)
+            for (item, row) in zip(menu.items, model.rows) where row.kind == .columns && row.icon == nil { item.image = blank }
+        }
         mainItem = menu.items.indices.contains(Self.mainIndex) ? menu.items[Self.mainIndex] : nil
         rescanItem = Self.rescanIndex(in: model).flatMap { menu.items.indices.contains($0) ? menu.items[$0] : nil }
     }
@@ -155,6 +160,8 @@ final class MenuBuilder: NSObject {
             if let owner, let image = appIcon(owner) { return image }
             guard let agentTitle, let info = AgentProduct.info(forTitle: agentTitle) else { return nil }
             return productImage(info)
+        case .groupColor(let slot):
+            return GroupColors.dot(slot: slot, side: Self.iconSize.width)
         case .product(let name):
             let info = AgentProduct.all.first { $0.name == name }
             let image = info.flatMap(productImage) ?? NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: name)

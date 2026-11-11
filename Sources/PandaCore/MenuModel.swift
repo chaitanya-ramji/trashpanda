@@ -59,6 +59,8 @@ public struct MenuModel: Equatable, Sendable {
         case item(owner: AppOwner?, agentTitle: String?)
         /// The icon of an AI agent product. It has a symbol when the product is not in the table.
         case product(String)
+        /// A dot in the color of the group in the bar of the header. `slot` is the color slot.
+        case groupColor(slot: Int)
     }
 
     public enum Kind: Equatable, Sendable {
@@ -232,7 +234,13 @@ public struct MenuModel: Equatable, Sendable {
             let size = SplitBar.rowBytes(items)
             return size > 0 ? (eco, size) : nil
         })
-        var rows = main.map { groupRow($0.0, grouped[$0.0] ?? [], input) }
+        // The same slots as the named parts of the bar, so a row and its part have one color.
+        let slots = SplitBar.colorSlots(for: main.map { (ecosystem: $0.0, bytes: $0.1) })
+        var rows = main.enumerated().map { i, row in
+            var r = groupRow(row.0, grouped[row.0] ?? [], input)
+            r.icon = .groupColor(slot: slots[i])
+            return r
+        }
         if !folded.isEmpty {
             // The same groups as the "Other" part of the bar.
             let sum = folded.reduce(Int64(0)) { $0 + $1.1 }
