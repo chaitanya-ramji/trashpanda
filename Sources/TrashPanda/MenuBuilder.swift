@@ -142,12 +142,16 @@ final class MenuBuilder: NSObject {
         handler(box.action)
     }
 
+    /// The title, then the size at the tab. A long title loses its middle, so that it never reaches the size.
     private func line(_ left: String, _ right: String, tab: CGFloat) -> NSAttributedString {
+        let font = NSFont.menuFont(ofSize: 0)
+        func width(_ text: String) -> Double { Double((text as NSString).size(withAttributes: [.font: font]).width) }
+        let room = MenuModel.titleRoom(tab: Double(tab), sizeWidth: width(right))
         let style = NSMutableParagraphStyle()
         style.tabStops = [NSTextTab(textAlignment: .right, location: tab)]
         style.lineBreakMode = .byTruncatingTail
-        return NSAttributedString(string: "\(left)\t\(right)", attributes: [
-            .font: NSFont.menuFont(ofSize: 0),
+        return NSAttributedString(string: "\(MenuText.middleTruncated(left, toFit: room, measure: width))\t\(right)", attributes: [
+            .font: font,
             .paragraphStyle: style,
         ])
     }

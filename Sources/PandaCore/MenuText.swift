@@ -68,6 +68,24 @@ public enum MenuText {
         return out
     }
 
+    /// A title that fits in `room` points: the middle becomes "…" and the start and the end stay.
+    /// `measure` gives the width of a text in points. A title that fits is not changed.
+    public static func middleTruncated(_ title: String, toFit room: Double, measure: (String) -> Double) -> String {
+        if measure(title) <= room { return title }
+        let chars = Array(title)
+        func kept(_ n: Int) -> String {
+            let head = (n + 1) / 2, tail = n / 2
+            return String(chars.prefix(head)) + "…" + String(chars.suffix(tail))
+        }
+        // The widest text is the longest one that fits: look for it by halving.
+        var low = 0, high = chars.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if measure(kept(mid)) <= room { low = mid } else { high = mid - 1 }
+        }
+        return kept(low)
+    }
+
     public static let helpURL = URL(string: "https://github.com/chaitanya-ramji/trashpanda#readme")!
 
     /// The page for a new issue. The text holds only the two versions: no path, no log line.

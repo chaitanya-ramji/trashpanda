@@ -434,6 +434,12 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(MenuModel.tab(forWidestTitle: 900), 520)
     }
 
+    func testTheTitleRoomLeavesTheSizeAndAGap() {
+        XCTAssertEqual(MenuModel.titleRoom(tab: 268, sizeWidth: 50), 206)
+        XCTAssertEqual(MenuModel.titleRoom(tab: 40, sizeWidth: 50), 0)
+        XCTAssertEqual(MenuModel.titleRoom(tab: 268, sizeWidth: 50, minGap: 20), 198)
+    }
+
     // MARK: Bar clicks and the AI agents group
 
     func testAClickOnAPartOfTheBarOpensTheItemsOfThatGroup() throws {
