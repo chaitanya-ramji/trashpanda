@@ -257,30 +257,68 @@ final class HeaderRenderTests: XCTestCase {
         view.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content, segments: model.header.segments)
     }
 
-    /// The owner saw the whole header empty while the app scanned. The spinner was an NSProgressIndicator. When it animated,
-    /// AppKit made the header layer-backed in the middle of the open menu, and the menu showed it empty.
-    /// The menu hosts the header in its own item view (`NSMenu.size` does it without a window). In every state the header must
-    /// have no layer and no subview. (A bitmap render makes a layer by itself, so the layer is read before any render.)
-    func testTheHeaderIsNeverLayerBackedWhileTheAppIsBusy() throws {
-        let view = StorageHeaderView(frame: .zero)
-        view.settingsOverride = HeaderSettings()
+    /// The cause of the empty header: `populate` built a new menu item around the SAME header view, and the old item kept the view too.
+    /// When AppKit tore down the old item's viewer, it took the header out of the new one. Now the old items let go of their views.
+    func testAnOldMenuItemNeverKeepsAViewThatTheNewItemHolds() throws {
         let menu = NSMenu()
         let builder = MenuBuilder { _ in }
-        func step(_ label: String, scanning: Bool, cleaning: Bool, rebuild: Bool) throws {
-            let m = model(scanning: scanning, cleaning: cleaning)
-            feed(view, m)
-            if rebuild { builder.populate(menu, model: m, header: view) }
+        let m = model(scanning: true, cleaning: false)
+        let first = StorageHeaderView(frame: .zero)
+        feed(first, m)
+        builder.populate(menu, model: m, header: first)
+        _ = menu.size
+        XCTAssertNotNil(first.superview)
+        let oldItems = menu.items
+        // The same view again (the old way), and then a different one.
+        for header in [first, StorageHeaderView(frame: .zero)] {
+            let before = menu.items
+            feed(header, m)
+            builder.populate(menu, model: m, header: header)
             _ = menu.size
-            XCTAssertNotNil(view.superview, "\(label): the menu hosts the header")
-            XCTAssertNil(view.layer, "\(label): the header has no layer")
-            XCTAssertTrue(view.subviews.isEmpty, "\(label): the header has no subview")
+            XCTAssertTrue(before.allSatisfy { $0.view == nil }, "an old item still holds a view")
+            XCTAssertEqual(menu.items.filter { $0.view != nil }.count, 1, "only the header item has a view")
+            XCTAssertTrue(menu.items.first { $0.view != nil }?.view === header)
+            XCTAssertNotNil(header.superview, "the menu hosts the current header")
         }
-        try step("idle", scanning: false, cleaning: false, rebuild: true)
-        try step("scan starts", scanning: true, cleaning: false, rebuild: true)
-        try step("scan runs, menu open", scanning: true, cleaning: false, rebuild: false)
-        try step("scan ends", scanning: false, cleaning: false, rebuild: false)
-        try step("cleaning", scanning: false, cleaning: true, rebuild: true)
-        try step("idle again", scanning: false, cleaning: false, rebuild: true)
+        XCTAssertTrue(oldItems.allSatisfy { $0.view == nil })
+        XCTAssertNil(first.superview, "the previous header is out of the menu")
+    }
+
+    /// Each build gets a new header view. A model that equals the last build builds nothing.
+    func testTheMenuIsBuiltOncePerChangeWithANewHeaderEachTime() throws {
+        let menu = NSMenu()
+        let builder = MenuBuilder { _ in }
+        let a = model(scanning: false, cleaning: false)
+        let b = model(scanning: true, cleaning: false)
+        let h1 = try XCTUnwrap(builder.rebuild(menu, model: a, onSelect: { _ in }))
+        XCTAssertEqual(builder.populateCount, 1)
+        XCTAssertNil(builder.rebuild(menu, model: a, onSelect: { _ in }), "an equal model builds nothing")
+        XCTAssertEqual(builder.populateCount, 1)
+        let h2 = try XCTUnwrap(builder.rebuild(menu, model: b, onSelect: { _ in }))
+        XCTAssertFalse(h1 === h2, "a new view for each build")
+        XCTAssertEqual(builder.populateCount, 2)
+        XCTAssertTrue(menu.items.first?.view === h2)
+        // After a live row changed the open menu, the same model builds again.
+        builder.invalidate()
+        XCTAssertNotNil(builder.rebuild(menu, model: b, onSelect: { _ in }))
+        XCTAssertEqual(builder.populateCount, 3)
+    }
+
+    /// While the app cleans, the bar cannot be chosen: the clean actions of its groups would be refused.
+    func testThePartsCannotBeChosenWhileCleaning() throws {
+        for (activity, chosen) in [(MenuModel.Activity.idle, 1), (.scanning, 1), (.cleaning, 0)] {
+            let (_, view, segments) = render(ownerCase, blocked: [], activity: activity)
+            var picked = 0
+            view.onSelect = { _ in picked += 1 }
+            view.choose(0)
+            XCTAssertEqual(picked, chosen, "\(activity)")
+            let slots = SplitBar.layout(segments, width: view.splitBarRect.width)
+            let x = 16 + slots[0].x + 5
+            let event = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: x, y: view.splitBarRect.midY), modifierFlags: [], timestamp: 0,
+                                           windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)
+            view.mouseUp(with: try XCTUnwrap(event))
+            XCTAssertEqual(picked, chosen * 2, "\(activity): a click on the bar chooses the part only when the app is not cleaning")
+        }
     }
 
     /// What the menu item view draws, in each state: the title, and the bar and the legend below it.

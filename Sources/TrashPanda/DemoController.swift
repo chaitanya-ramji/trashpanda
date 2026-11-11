@@ -63,9 +63,8 @@ final class DemoController {
                     let t = Timer(timeInterval: seconds, repeats: false) { _ in work() }
                     RunLoop.main.add(t, forMode: .common)
                 }
-                let header = host.header
-                if let n = number(of: "--hover") { later(1.2) { header.simulateHover(n) } }
-                if let n = number(of: "--click") { later(1.6) { header.simulateClick(n) } }
+                if let n = number(of: "--hover") { later(1.2) { host.header.simulateHover(n) } }
+                if let n = number(of: "--click") { later(1.6) { host.header.simulateClick(n) } }
                 // A short wait, so that the backdrop is on screen before the menu opens over it.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { host.statusButton?.performClick(nil) }
             }

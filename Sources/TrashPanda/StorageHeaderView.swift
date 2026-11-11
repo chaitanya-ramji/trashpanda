@@ -276,7 +276,7 @@ final class StorageHeaderView: NSView {
     /// The part under a point in this view, or nil. The point must be on the bar, with a little room above and below.
     private func segment(at point: NSPoint) -> Int? {
         let bar = splitBarRect.insetBy(dx: 0, dy: -5)
-        guard !slots.isEmpty, bar.contains(NSPoint(x: bar.midX, y: point.y)) else { return nil }
+        guard content.isInteractive, !slots.isEmpty, bar.contains(NSPoint(x: bar.midX, y: point.y)) else { return nil }
         return SplitBar.hit(slots, x: point.x - Self.inset)
     }
 
@@ -296,7 +296,7 @@ final class StorageHeaderView: NSView {
     }
 
     func choose(_ index: Int) {
-        guard segments.indices.contains(index) else { return }
+        guard content.isInteractive, segments.indices.contains(index) else { return }
         onSelect?(segments[index])
     }
 

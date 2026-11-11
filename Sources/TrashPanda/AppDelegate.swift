@@ -5,7 +5,10 @@ import PandaCore
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let menu = NSMenu()
-    let header = StorageHeaderView(frame: .zero)
+    /// The header view of the menu that is built now. Each build makes a new one, so two menu items never hold one view.
+    private(set) var header = StorageHeaderView(frame: .zero)
+    /// True while `menuWillOpen` runs. It builds the menu once, so a change in it does not build a second time.
+    private var isOpening = false
     private let scanner = DiskScanner()
     private lazy var builder = MenuBuilder { [weak self] action in self?.handle(action) }
     private lazy var cleaner: CleanCoordinator = {
@@ -98,7 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard menu === self.menu else { settingsWillOpen(menu); return }
         if demo == nil { disk = DiskUsage.current() }
         refreshStatusItem()
+        isOpening = true
         if let last = result?.date, Date().timeIntervalSince(last) > 30 * 60 { scan() }
+        isOpening = false
         rebuildMenu()
         refreshGate.opened()
         refreshRunning()
@@ -182,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The state changed. A closed menu is built again. An open menu keeps its rows (a rebuild would close the
     /// submenu that the user reads): the header and two rows are updated, and the build waits for the close.
     private func menuChanged() {
+        if isOpening { return }   // `menuWillOpen` builds the menu once, after this
         switch refreshGate.changed() {
         case .rebuild:
             rebuildMenu()
@@ -190,15 +196,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             header.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content,
                           segments: model.header.segments)
             builder.updateLiveRows(model: model)
+            builder.invalidate()   // the open menu no longer shows the last build
         }
     }
 
     private func rebuildMenu() {
         let model = MenuModel.make(menuInput())
-        header.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content,
-                      segments: model.header.segments)
-        header.onSelect = { [weak self] segment in self?.showGroup(segment) }
-        builder.populate(menu, model: model, header: header)
+        // A new header view for each build. An equal model builds nothing.
+        guard let fresh = builder.rebuild(menu, model: model, onSelect: { [weak self] segment in self?.showGroup(segment) }) else { return }
+        header = fresh
         if let index = model.rows.firstIndex(where: { $0.title == "Settings" && $0.submenu != nil }),
            menu.items.indices.contains(index) {
             menu.items[index].submenu?.delegate = self
@@ -208,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The user clicked a part of the split bar. The menu closes, and the items of that group open under the icon.
     private func showGroup(_ segment: SplitSegment) {
-        guard result != nil else { return }
+        guard result != nil, !cleaning else { return }
         let popup = NSMenu()
         popup.appearance = menu.appearance
         builder.populate(popup, submenu: MenuModel.popup(for: segment, menuInput()))

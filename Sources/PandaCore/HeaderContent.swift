@@ -19,6 +19,8 @@ public struct HeaderContent: Equatable, Sendable {
     public let barAlpha: CGFloat
     /// True while the app scans or cleans. The header shows its spinner then.
     public let busy: Bool
+    /// False while the app cleans: the parts of the bar cannot be chosen then, because their clean actions would be refused.
+    public let isInteractive: Bool
 
     /// The alpha of the old bar while it is being refreshed.
     public static let refreshingAlpha: CGFloat = 0.6
@@ -36,15 +38,15 @@ public struct HeaderContent: Equatable, Sendable {
         let real: Bar = hasParts ? .parts : .emptyTrack
         switch activity {
         case .idle:
-            return HeaderContent(bar: real, detail: nil, barAlpha: 1, busy: false)
+            return HeaderContent(bar: real, detail: nil, barAlpha: 1, busy: false, isInteractive: true)
         case .scanning:
             if !hasResult {
-                return HeaderContent(bar: .skeleton, detail: "Looking for things to clean…", barAlpha: 1, busy: true)
+                return HeaderContent(bar: .skeleton, detail: "Looking for things to clean…", barAlpha: 1, busy: true, isInteractive: true)
             }
-            return HeaderContent(bar: real, detail: "Checking again…", barAlpha: refreshingAlpha, busy: true)
+            return HeaderContent(bar: real, detail: "Checking again…", barAlpha: refreshingAlpha, busy: true, isInteractive: true)
         case .cleaning:
             let text = progress.flatMap { $0.isEmpty ? nil : $0 } ?? "Cleaning up…"
-            return HeaderContent(bar: real, detail: text, barAlpha: refreshingAlpha, busy: true)
+            return HeaderContent(bar: real, detail: text, barAlpha: refreshingAlpha, busy: true, isInteractive: false)
         }
     }
 
