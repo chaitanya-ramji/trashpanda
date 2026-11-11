@@ -135,7 +135,6 @@ final class MenuModelTests: XCTestCase {
             "    ---",
             "    # Review first",
             "    Unused volume · data | 40 MB",
-            "  Python | info",
             "---",
             "Scan again",
             "Update available: 9.9.9…",
@@ -315,11 +314,54 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(rows[2].title, "Safe to clean")
         XCTAssertEqual(rows[3].title, "Env 40", "The largest first")
         XCTAssertEqual(rows[14].title, "Env 29")
-        XCTAssertEqual(rows[15].title, "28 more…")
+        XCTAssertEqual(rows[15].title, "28 more… · 3.2 GB")
         XCTAssertEqual(rows[15].submenu?.rows.count, 28)
         XCTAssertEqual(rows[15].submenu?.rows.first?.title, "Env 28")
         XCTAssertEqual(rows[15].submenu?.rows.last?.title, "Env 1")
         XCTAssertNil(rows[15].action)
+    }
+
+    func testTheFirstListStopsAtTheFirstSmallRow() throws {
+        // A group of 2 GB. Three rows are large. The others are below 50 MB and below 1 percent of the group.
+        var items = (1...3).map { item("b\($0)", .python, "Big \($0)", 600 * mb + Int64($0), .safe) }
+        items += (1...6).map { item("s\($0)", .python, "Small \($0)", Int64($0) * mb, .safe) }
+        let group = try XCTUnwrap(MenuModel.make(input(items)).rows.first { $0.title == "Python" })
+        let rows = try XCTUnwrap(group.submenu?.rows).filter { $0.kind == .columns || $0.title.contains("more…") }
+        XCTAssertEqual(rows.map(\.title), ["Big 3", "Big 2", "Big 1", "6 more… · 21 MB"])
+        XCTAssertEqual(rows.last?.submenu?.rows.count, 6)
+    }
+
+    func testASmallRowStaysWhenItIsAtLeastOnePercentOfTheGroup() throws {
+        // 40 MB is below 50 MB but it is more than 1 percent of 1 GB.
+        let items = [item("a", .python, "Large", 960 * mb, .safe), item("b", .python, "Medium", 40 * mb, .safe)]
+        let group = try XCTUnwrap(MenuModel.make(input(items)).rows.first { $0.title == "Python" })
+        XCTAssertEqual(try XCTUnwrap(group.submenu?.rows).filter { $0.kind == .columns }.map(\.title), ["Large", "Medium"])
+    }
+
+    func testTwoRowsWithTheSameTitleGetTheirFolder() throws {
+        let items = [item("a", .javascript, "pnpm store", 300 * mb, .safe, place: "~/Library/pnpm"),
+                     item("b", .javascript, "pnpm store", 200 * mb, .safe, place: "~/.local/share/pnpm")]
+        let group = try XCTUnwrap(MenuModel.make(input(items)).rows.first { $0.title == "JavaScript & TypeScript" })
+        XCTAssertEqual(try XCTUnwrap(group.submenu?.rows).filter { $0.kind == .columns }.map(\.title),
+                       ["pnpm store · Library", "pnpm store · .local"])
+    }
+
+    func testDistinctTitles() {
+        XCTAssertEqual(MenuText.distinct(titles: ["a", "b"], locations: ["~/x", "~/y"]), ["a", "b"])
+        XCTAssertEqual(MenuText.distinct(titles: ["pnpm store", "pnpm store", "other"],
+                                         locations: ["~/Library/pnpm", "~/.local/share/pnpm", "~/Library/other"]),
+                       ["pnpm store · Library", "pnpm store · .local", "other"])
+        // The paths share their first parts: the first part that is different is used.
+        XCTAssertEqual(MenuText.distinct(titles: ["x", "x"], locations: ["~/Library/A/x", "~/Library/B/x"]), ["x · A", "x · B"])
+        // The same path twice cannot be told apart. The titles stay.
+        XCTAssertEqual(MenuText.distinct(titles: ["x", "x"], locations: ["~/a", "~/a"]), ["x", "x"])
+        // Text after " · " is not a part of the path.
+        XCTAssertEqual(MenuText.distinct(titles: ["x", "x"], locations: ["~/a · older than 30 days", "~/b · older than 30 days"]), ["x · a", "x · b"])
+    }
+
+    func testAGroupWithNothingToCleanHasNoRow() {
+        let model = MenuModel.make(input([item("a", .python, "A note", 900 * mb, .review, action: .inform)]))
+        XCTAssertFalse(model.rows.contains { $0.kind == .columns })
     }
 
     func testReviewItemsAlsoFoldAfterTwelve() throws {
@@ -329,7 +371,7 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(rows.count, 14)
         XCTAssertEqual(rows[0].title, "Review first")
         XCTAssertEqual(rows[0].kind, .sectionHeader)
-        XCTAssertEqual(rows[13].title, "1 more…")
+        XCTAssertEqual(rows[13].title, "1 more… · 101 MB")
     }
 
     func testSectionLabelsShowOnlyForTheirList() throws {

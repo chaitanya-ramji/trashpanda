@@ -219,13 +219,16 @@ public struct MenuModel: Equatable, Sendable {
     private static func groupRows(_ findings: [Finding], _ input: MenuInput) -> [Row] {
         let grouped = Dictionary(grouping: findings, by: \.ecosystem)
         // The rows follow the number that each row shows, like the parts of the bar. A tie is broken by name.
-        // A row that only says "info" has no number, so it goes after the rows with a size.
-        let (main, folded) = SplitBar.fold(grouped.map { ($0.key, SplitBar.rowBytes($0.value)) })
+        // A group with no item that can be cleaned has no row.
+        let (main, folded) = SplitBar.fold(grouped.compactMap { eco, items in
+            let size = SplitBar.rowBytes(items)
+            return size > 0 ? (eco, size) : nil
+        })
         var rows = main.map { groupRow($0.0, grouped[$0.0] ?? [], input) }
         if !folded.isEmpty {
             // The same groups as the "Other" part of the bar.
             let sum = folded.reduce(Int64(0)) { $0 + $1.1 }
-            rows.append(Row(kind: .columns, title: "Smaller groups", size: sum > 0 ? ByteText.string(sum) : "info",
+            rows.append(Row(kind: .columns, title: "Smaller groups", size: ByteText.string(sum),
                             submenu: Submenu(rows: folded.map { groupRow($0.0, grouped[$0.0] ?? [], input) })))
         }
         return rows
@@ -235,7 +238,7 @@ public struct MenuModel: Equatable, Sendable {
     private static func groupRow(_ ecosystem: Ecosystem, _ items: [Finding], _ input: MenuInput) -> Row {
         // An item of an open app is still an item. Its size shows here, like any other.
         let amount = SplitBar.rowBytes(items)
-        return Row(kind: .columns, title: ecosystem.name, size: amount > 0 ? ByteText.string(amount) : "info",
+        return Row(kind: .columns, title: ecosystem.name, size: ByteText.string(amount),
                    submenu: submenu(for: ecosystem, items: items, input))
     }
 
@@ -250,8 +253,8 @@ public struct MenuModel: Equatable, Sendable {
                 body: "Trash Panda will clear old build files and caches."))))
             rows.append(.separator)
         }
-        for group in AgentMenu.groups(items) {
-            rows.append(Row(kind: .columns, title: group.product, size: group.bytes > 0 ? ByteText.string(group.bytes) : "info",
+        for group in AgentMenu.groups(items) where group.bytes > 0 {
+            rows.append(Row(kind: .columns, title: group.product, size: ByteText.string(group.bytes),
                             submenu: submenu(for: .aiAgents, items: group.items, input, nest: false),
                             icon: .product(group.product)))
         }
@@ -270,6 +273,7 @@ public struct MenuModel: Equatable, Sendable {
         let safeAll = actionable.filter { $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
         let safe = safeAll.filter { input.blockers($0).isEmpty }
         let review = actionable.filter { $0.tier == .review }.sorted { $0.bytes > $1.bytes }
+        let groupBytes = SplitBar.rowBytes(items)
 
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
@@ -280,29 +284,39 @@ public struct MenuModel: Equatable, Sendable {
         if !safeAll.isEmpty {
             if !safe.isEmpty { rows.append(.separator) }
             rows.append(.section("Safe to clean"))
-            rows += listRows(safeAll, input)
+            rows += listRows(safeAll, input, groupBytes: groupBytes)
         }
         if !review.isEmpty {
             if !safeAll.isEmpty { rows.append(.separator) }
             rows.append(.section("Review first"))
-            rows += listRows(review, input)
+            rows += listRows(review, input, groupBytes: groupBytes)
         }
         return Submenu(rows: rows, widthTitles: items.map(\.title), alignIcons: true)
     }
 
-    /// The first 12 rows of a list, and then the rest in a "N more…" submenu, so that no row is hidden.
-    private static func listRows(_ list: [Finding], _ input: MenuInput) -> [Row] {
-        var rows = list.prefix(12).map { findingRow($0, input) }
-        if list.count > 12 {
-            let rest = Array(list.dropFirst(12))
-            rows.append(Row(title: "\(rest.count) more…",
-                            submenu: Submenu(rows: rest.map { findingRow($0, input) }, alignIcons: true)))
+    /// The first rows of a list, and then the rest in a "N more… · size" submenu, so that no row is hidden.
+    /// The first list has at most 12 rows. It stops earlier at the first row that is below 50 MB and below 1 percent of the group.
+    private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64) -> [Row] {
+        let titles = MenuText.distinct(titles: list.map(\.title), locations: list.map(\.location))
+        func row(_ i: Int) -> Row { findingRow(list[i], input, title: titles[i]) }
+        var shown = 0
+        while shown < min(12, list.count) {
+            let f = list[shown]
+            if f.bytes < 50_000_000 && Double(f.bytes) < Double(groupBytes) / 100 { break }
+            shown += 1
+        }
+        var rows = (0..<shown).map(row)
+        if shown < list.count {
+            let rest = Array(shown..<list.count)
+            let size = rest.reduce(Int64(0)) { $0 + list[$1].countedBytes }
+            rows.append(Row(title: "\(rest.count) more… · \(ByteText.string(size))",
+                            submenu: Submenu(rows: rest.map(row), alignIcons: true)))
         }
         return rows
     }
 
-    private static func findingRow(_ f: Finding, _ input: MenuInput) -> Row {
-        var row = Row(kind: .columns, title: f.title, size: f.sizeText,
+    private static func findingRow(_ f: Finding, _ input: MenuInput, title: String) -> Row {
+        var row = Row(kind: .columns, title: title, size: f.sizeText,
                       icon: .item(owner: f.owner, agentTitle: f.ecosystem == .aiAgents ? f.title : nil))
         let open = input.blockers(f)
         let c = Confirmation.forOne(f, staleDays: input.staleDays, now: input.now)

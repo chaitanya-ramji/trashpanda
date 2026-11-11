@@ -50,6 +50,24 @@ public enum MenuText {
                        subtitle: reviewBytes > 0 ? items + " Review items stay." : items, enabled: true)
     }
 
+    /// The titles of one list. When two rows have the same title, each gets the first part of its path that is different:
+    /// "pnpm store · Library". `locations` has one path for each title.
+    public static func distinct(titles: [String], locations: [String]) -> [String] {
+        precondition(titles.count == locations.count)
+        func parts(_ location: String) -> [String] {
+            let path = location.components(separatedBy: " · ")[0]
+            return path.split(separator: "/").map(String.init).filter { $0 != "~" }
+        }
+        var out = titles
+        for indexes in Dictionary(grouping: titles.indices, by: { titles[$0] }).values where indexes.count > 1 {
+            let paths = indexes.map { parts(locations[$0]) }
+            let longest = paths.map(\.count).max() ?? 0
+            guard let at = (0..<longest).first(where: { p in Set(paths.map { p < $0.count ? $0[p] : "" }).count > 1 }) else { continue }
+            for (k, i) in indexes.enumerated() where at < paths[k].count { out[i] = titles[i] + " · " + paths[k][at] }
+        }
+        return out
+    }
+
     public static let helpURL = URL(string: "https://github.com/chaitanya-ramji/trashpanda#readme")!
 
     /// The page for a new issue. The text holds only the two versions: no path, no log line.

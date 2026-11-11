@@ -329,7 +329,8 @@ final class SplitBarTests: XCTestCase {
 
     func testTheSizeWordsAreOneThing() {
         XCTAssertEqual(ByteText.string(0), "0 KB")
-        XCTAssertEqual(ByteText.string(999), "0 KB")
+        XCTAssertEqual(ByteText.string(1), "Less than 1 KB")
+        XCTAssertEqual(ByteText.string(999), "Less than 1 KB")
         XCTAssertEqual(ByteText.string(1_500), "2 KB")
         XCTAssertEqual(ByteText.string(2_500_000), "2 MB")
         XCTAssertEqual(ByteText.string(1_500_000_000), "1.5 GB")
