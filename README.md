@@ -317,7 +317,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 
 ### Next: v0.8 Menu and dialogs
 - [x] Move the menu code into a tested menu model, with no change of behavior ([#147](https://github.com/chaitanya-ramji/trashpanda/issues/147))
-- [ ] Move the demo code out of the production classes ([#148](https://github.com/chaitanya-ramji/trashpanda/issues/148))
+- [x] Move the demo code out of the production classes ([#148](https://github.com/chaitanya-ramji/trashpanda/issues/148))
 - [ ] Settings submenu with About, Help, and "Report a problem" ([#149](https://github.com/chaitanya-ramji/trashpanda/issues/149))
 - [ ] Fold small groups into one row ([#150](https://github.com/chaitanya-ramji/trashpanda/issues/150))
 - [ ] Say what the main action removes ([#151](https://github.com/chaitanya-ramji/trashpanda/issues/151))
