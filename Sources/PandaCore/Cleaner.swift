@@ -34,6 +34,15 @@ public final class Cleaner {
     private let runtimeRequests: (() -> [RuntimeVersions.Request])?
     /// Reads the free space of the volume. Tests give a fake one.
     private let freeSpace: (URL) -> Int64
+    /// Measures an item right before it is deleted. A test can replace it.
+    var sizeOf: (URL) -> Int64 = { Sizer.size(of: $0) }
+    /// The one call that removes a folder or a file. A test can replace it.
+    var deleteItem: (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
+    /// The working folders of the running programs. A test can replace it.
+    var activeDirectories: () -> [String] = { Shell.activeDirectories() }
+    /// The newest list of working folders, and when we read it (`systemUptime`). A build folder is checked again after the measuring.
+    /// We read the list again if the last read is not newer than the start of that measuring, so the list is never older than the measuring.
+    private var activeSnapshot: (list: [String], at: TimeInterval) = ([], -.infinity)
 
     public init(guardian: PathGuard, remaining: ((Finding) -> Int64)? = nil,
                 dockerEngine: (() -> Result<DockerEngine, DockerRefusal>)? = nil,
@@ -74,7 +83,8 @@ public final class Cleaner {
         let before = freeSpace(URL(fileURLWithPath: guardian.home))
         Log.info("clean start: \(findings.count) items, estimate \(findings.reduce(0) { $0 + $1.bytes }) bytes")
         // Read the running processes again. The state can change after the scan.
-        let active = Shell.activeDirectories()
+        let active = activeDirectories()
+        activeSnapshot = (active, -.infinity)
 
         for finding in findings {
             progress?(finding.title)
@@ -361,18 +371,14 @@ public final class Cleaner {
 
     /// An archive is `Archives/<date>/<name>.xcarchive` in the home folder. Nothing else is accepted.
     private func removeArchive(_ url: URL, finding: Finding, into report: inout CleanReport) {
-        guard XcodeArchives.isArchive(url, home: URL(fileURLWithPath: guardian.home)) else {
-            skip(finding, "not an Xcode archive in the archives folder", &report); return
+        let home = URL(fileURLWithPath: guardian.home)
+        let before = report.freed
+        let done = removeEach([url], of: finding, into: &report, notTarget: "not an Xcode archive in the archives folder") {
+            XcodeArchives.isArchive($0, home: home) && UpdateDownloads.isPlainPath($0)
         }
-        if let reason = guardian.check(url) { skip(finding, "\(reason)", &report); return }
-        do {
-            try FileManager.default.removeItem(at: url)
-            report.freed += finding.bytes
+        if done.removed > 0 {
             report.removed += 1
-            Log.info("clean \(finding.id): removed archive \(finding.bytes) bytes — \(url.path)")
-        } catch {
-            Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            report.failed.append("\(url.path): \(error.localizedDescription)")
+            Log.info("clean \(finding.id): removed archive \(report.freed - before) bytes — \(url.path)")
         }
     }
 
@@ -492,88 +498,103 @@ public final class Cleaner {
         }
     }
 
+    /// What `removeEach` did, so that the caller can write its log line and count the item.
+    struct Removal: Equatable {
+        var removed = 0
+        var failures = 0
+    }
+
+    /// A path for a message: the home folder is written as `~`.
+    private func shown(_ url: URL) -> String {
+        let path = url.path
+        if path == guardian.home { return "~" }
+        return path.hasPrefix(guardian.home + "/") ? "~" + path.dropFirst(guardian.home.count) : path
+    }
+
+    /// The one place that deletes a folder or a file. The order is fixed: measure first, check last, then delete.
+    /// - `isTarget` is the shape check of the caller. It runs before the measuring and again after it.
+    /// - `keepReason` is a second check of the caller (for example "a program runs from it"). It runs after the measuring, before the guard.
+    ///   It gets the time when the measuring of this target began (`systemUptime`), so that it can read the state again
+    ///   if its last read is not newer than that time.
+    /// - `linkText` is the skip text when the shape check fails because a folder in the path is a link. Without it, `notTarget` is used.
+    /// - The guard runs last, right before the delete. The bytes count only after a delete that had no error.
+    @discardableResult
+    func removeEach(_ targets: [URL], of finding: Finding, into report: inout CleanReport, notTarget: String,
+                    isTarget: (URL) -> Bool, linkText: String? = nil,
+                    keepReason: ((URL, TimeInterval) -> String?)? = nil,
+                    allowingSystemCache: String? = nil) -> Removal {
+        var result = Removal()
+        func exists(_ url: URL) -> Bool { (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil }
+        func refuse(_ url: URL, _ reason: String) {
+            Log.warn("skip \(url.path): \(reason)")
+            report.skipped.append("\(shown(url)): \(reason)")
+        }
+        func shapeText(_ url: URL) -> String {
+            if let linkText, !UpdateDownloads.isPlainPath(url) { return linkText }
+            return notTarget
+        }
+        for url in targets {
+            guard exists(url) else { refuse(url, "It is not there now"); continue }
+            guard isTarget(url) else { refuse(url, shapeText(url)); continue }
+            let measureStart = ProcessInfo.processInfo.systemUptime
+            let bytes = sizeOf(url)                       // measure first, check last
+            guard exists(url) else { refuse(url, "It is not there now"); continue }
+            guard isTarget(url) else { refuse(url, shapeText(url)); continue }
+            if let reason = keepReason?(url, measureStart) { refuse(url, reason); continue }
+            if let reason = guardian.check(url, allowingSystemCache: allowingSystemCache) { refuse(url, "\(reason)"); continue }
+            do {
+                try deleteItem(url)
+                report.freed += bytes
+                result.removed += 1
+            } catch {
+                result.failures += 1
+                Log.error("remove failed \(url.path): \(error.localizedDescription)")
+                report.failed.append("\(shown(url)): \(error.localizedDescription)")
+            }
+        }
+        return result
+    }
+
     /// Removes folders that the caller found again just now. Each one must have an allowed shape, and passes the guard.
     /// We measure first, and check last: the check runs right before the delete, so a link that replaced a folder
     /// during the measuring is caught.
     private func removeFolders(_ entries: [ClaudeDesktop.Entry], finding: Finding, into report: inout CleanReport) {
         let home = URL(fileURLWithPath: guardian.home)
         let homePrefix = home.standardizedFileURL.path + "/"
-        var removed = 0, failures = 0
-        for entry in entries {
-            let path = entry.url.standardizedFileURL.path
-            let size = Sizer.size(of: entry.url)
-            guard path.hasPrefix(homePrefix),
-                  AgentCaches.isCleanableShape(relative: String(path.dropFirst(homePrefix.count))),
-                  UpdateDownloads.isPlainPath(entry.url) else {
-                report.skipped.append("\(entry.url.path): not a folder that we clean"); continue
-            }
-            if let reason = guardian.check(entry.url) {
-                report.skipped.append("\(entry.url.path): \(reason)"); continue
-            }
-            do {
-                try FileManager.default.removeItem(at: entry.url)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
-            }
+        let done = removeEach(entries.map(\.url), of: finding, into: &report, notTarget: "not a folder that we clean") { url in
+            let path = url.standardizedFileURL.path
+            return path.hasPrefix(homePrefix)
+                && AgentCaches.isCleanableShape(relative: String(path.dropFirst(homePrefix.count)))
+                && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) folders, failures \(done.failures)")
     }
 
     /// The transcripts of one agent that are older than the date of the preview. We list them again, read the age again,
     /// and check the shape, the path, and the guard of each file last.
     private func removeOldSessions(_ kind: AgentSessions.Kind, _ cutoff: Date, minimumAgeDays: Int, finding: Finding, into report: inout CleanReport) {
         let home = URL(fileURLWithPath: guardian.home)
-        var removed = 0, failures = 0
         // The date of the preview is a ceiling, not a promise. If the clock was wrong at the preview (days ahead), a date in the future
         // would make new sessions look old. So we also never go below the limit now.
         let effective = min(cutoff, Date().addingTimeInterval(-Double(max(minimumAgeDays, 1)) * 86_400))
-        for entry in AgentSessions.entries(kind, home: home, olderThan: effective) {
-            guard AgentSessions.isTranscriptPath(entry.url, kind: kind, home: home), UpdateDownloads.isPlainPath(entry.url) else {
-                report.skipped.append("\(entry.url.path): not a transcript"); continue
-            }
-            if let reason = guardian.check(entry.url) { report.skipped.append("\(entry.url.path): \(reason)"); continue }
-            do {
-                try FileManager.default.removeItem(at: entry.url)
-                report.freed += entry.bytes
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
-            }
+        let targets = AgentSessions.entries(kind, home: home, olderThan: effective).map(\.url)
+        let done = removeEach(targets, of: finding, into: &report, notTarget: "not a transcript") { url in
+            AgentSessions.isTranscriptPath(url, kind: kind, home: home) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) transcripts, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) files stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) transcripts, failures \(done.failures)")
     }
 
     /// The fixed folders of one app. We find them again now, from the table, and check each one last.
     private func removeFixedFolders(_ id: String, finding: Finding, into report: inout CleanReport) {
         guard let app = FixedFolders.app(id: id) else { skip(finding, "unknown app", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
-        var removed = 0, failures = 0
-        for url in FixedFolders.targets(of: app, home: home) {
-            let size = Sizer.size(of: url)           // measure first, check last (see removeFolders)
-            guard FixedFolders.isTarget(url, of: app, home: home), UpdateDownloads.isPlainPath(url) else {
-                report.skipped.append("\(url.path): not a folder of the app"); continue
-            }
-            if let reason = guardian.check(url) { report.skipped.append("\(url.path): \(reason)"); continue }
-            do {
-                try FileManager.default.removeItem(at: url)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            }
+        let done = removeEach(FixedFolders.targets(of: app, home: home), of: finding, into: &report, notTarget: "not a folder of the app") { url in
+            FixedFolders.isTarget(url, of: app, home: home) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) folders, failures \(done.failures)")
     }
 
     /// One model of a desktop app. We find it again now at the exact depth of the store, and check the path and the guard last.
@@ -665,81 +686,36 @@ public final class Cleaner {
     private func removeEditorCaches(_ id: String, finding: Finding, into report: inout CleanReport) {
         guard let app = EditorCaches.app(id: id) else { skip(finding, "unknown editor", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
-        var removed = 0, failures = 0
-        for url in EditorCaches.targets(of: app, home: home, now: Date()) {
-            let size = Sizer.size(of: url)           // measure first, check last (see removeFolders)
-            guard EditorCaches.isTarget(url, of: app, home: home), UpdateDownloads.isPlainPath(url) else {
-                report.skipped.append("\(url.path): not a cache folder of the editor"); continue
-            }
-            if let reason = guardian.check(url) {
-                report.skipped.append("\(url.path): \(reason)"); continue
-            }
-            do {
-                try FileManager.default.removeItem(at: url)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            }
+        let done = removeEach(EditorCaches.targets(of: app, home: home, now: Date()), of: finding, into: &report,
+                              notTarget: "not a cache folder of the editor") { url in
+            EditorCaches.isTarget(url, of: app, home: home) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) folders, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) folders, failures \(done.failures)")
     }
 
     /// The extension folders that the editor marks as obsolete. A folder that the editor lists as installed stays.
     private func removeObsoleteExtensions(_ id: String, finding: Finding, into report: inout CleanReport) {
         guard let app = EditorCaches.app(id: id) else { skip(finding, "unknown editor", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
-        var removed = 0, failures = 0
-        for url in EditorCaches.obsoleteExtensions(of: app, home: home) {
-            let size = Sizer.size(of: url)           // measure first, check last (see removeFolders)
-            guard EditorCaches.isExtensionTarget(url, of: app, home: home), UpdateDownloads.isPlainPath(url) else {
-                report.skipped.append("\(url.path): not an extension folder of the editor"); continue
-            }
-            if let reason = guardian.check(url) {
-                report.skipped.append("\(url.path): \(reason)"); continue
-            }
-            do {
-                try FileManager.default.removeItem(at: url)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            }
+        let done = removeEach(EditorCaches.obsoleteExtensions(of: app, home: home), of: finding, into: &report,
+                              notTarget: "not an extension folder of the editor") { url in
+            EditorCaches.isExtensionTarget(url, of: app, home: home) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) obsolete extensions, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) obsolete extensions, failures \(done.failures)")
     }
 
     /// The cache folders of one Electron app. We find them again now, from the table, and check each one.
     private func removeAgentCaches(_ id: String, finding: Finding, into report: inout CleanReport) {
         guard let app = AgentCaches.electronApp(id: id) else { skip(finding, "unknown app", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
-        var removed = 0, failures = 0
-        for url in AgentCaches.targets(of: app, home: home) {
-            let size = Sizer.size(of: url)           // measure first, check last (see removeFolders)
-            guard AgentCaches.isTarget(url, of: app, home: home), UpdateDownloads.isPlainPath(url) else {
-                report.skipped.append("\(url.path): not a cache folder of the app"); continue
-            }
-            if let reason = guardian.check(url) {
-                report.skipped.append("\(url.path): \(reason)"); continue
-            }
-            do {
-                try FileManager.default.removeItem(at: url)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            }
+        let done = removeEach(AgentCaches.targets(of: app, home: home), of: finding, into: &report,
+                              notTarget: "not a cache folder of the app") { url in
+            AgentCaches.isTarget(url, of: app, home: home) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) cache folders, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) cache folders, failures \(done.failures)")
     }
 
     /// The old versions of the Claude Code tool. We list them again now and ask which ones run. If we cannot ask, nothing is removed.
@@ -749,26 +725,12 @@ public final class Cleaner {
         guard let running = openClaudeBinaries(files) else {
             skip(finding, "could not tell which versions run", &report); return
         }
-        var removed = 0, failures = 0
-        for entry in ClaudeVersions.old(home: home, running: running).old where names.contains(entry.name) {
-            guard ClaudeVersions.isVersionName(entry.name), UpdateDownloads.isPlainPath(entry.url) else {
-                report.skipped.append("\(entry.url.path): not a version file"); continue
-            }
-            if let reason = guardian.check(entry.url) {
-                report.skipped.append("\(entry.url.path): \(reason)"); continue
-            }
-            do {
-                try FileManager.default.removeItem(at: entry.url)
-                report.freed += entry.bytes
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
-            }
+        let old = ClaudeVersions.old(home: home, running: running).old.filter { names.contains($0.name) }
+        let done = removeEach(old.map(\.url), of: finding, into: &report, notTarget: "not a version file") { url in
+            ClaudeVersions.isVersionName(url.lastPathComponent) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) old versions, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) files stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) old versions, failures \(done.failures)")
     }
 
     /// One folder of the Codex runtime cache. We read the kind and the age again now. A running program keeps it.
@@ -825,23 +787,12 @@ public final class Cleaner {
     /// The old files of one group in Logs. We find them again now. Each file passes the guard, and nothing else is touched.
     private func removeOldLogs(_ kind: OldLogs.Kind, finding: Finding, into report: inout CleanReport) {
         let home = URL(fileURLWithPath: guardian.home)
-        var removed = 0, failures = 0
-        for entry in OldLogs.entries(kind, home: home, now: Date()) {
-            if let reason = guardian.check(entry.url) {
-                report.skipped.append("\(entry.url.path): \(reason)"); continue
-            }
-            do {
-                try FileManager.default.removeItem(at: entry.url)
-                report.freed += entry.bytes
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(entry.url.path): \(error.localizedDescription)")
-            }
+        let targets = OldLogs.entries(kind, home: home, now: Date()).map(\.url)
+        let done = removeEach(targets, of: finding, into: &report, notTarget: "not an old log file") { url in
+            OldLogs.kind(of: url, home: home) == kind && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) old files, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.location): \(failures) files stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) old files, failures \(done.failures)")
     }
 
     /// One old installer. We check the path, the file type, the age, and the mounts again now.
@@ -894,61 +845,31 @@ public final class Cleaner {
     private func removeOldTestBrowsers(_ id: String, finding: Finding, into report: inout CleanReport) {
         guard let tool = TestBrowsers.tool(id: id) else { skip(finding, "unknown tool", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
-        let programs = programPaths()
-        var removed = 0, failures = 0
-        for url in TestBrowsers.oldVersions(of: tool, home: home) {
-            guard TestBrowsers.isVersionFolder(url, of: tool, home: home), UpdateDownloads.isPlainPath(url) else {
-                report.skipped.append("\(url.path): not a version folder of the tool"); continue
-            }
-            if TestBrowsers.isInUse(url, programs: programs) {
-                Log.warn("skip \(url.path): a program runs from it")
-                report.skipped.append("\(url.path): a program runs from it"); continue
-            }
-            if let reason = guardian.check(url) {
-                Log.warn("skip \(url.path): \(reason)")
-                report.skipped.append("\(url.path): \(reason)"); continue
-            }
-            let size = Sizer.size(of: url)
-            do {
-                try FileManager.default.removeItem(at: url)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            }
-        }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) old versions, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+        var programs: [String] = []
+        var readAt: TimeInterval = -.infinity
+        let done = removeEach(TestBrowsers.oldVersions(of: tool, home: home), of: finding, into: &report,
+                              notTarget: "not a version folder of the tool", isTarget: { url in
+            TestBrowsers.isVersionFolder(url, of: tool, home: home) && UpdateDownloads.isPlainPath(url)
+        }, keepReason: { url, measureStart in
+            // Ask again after the measuring: a program may have started from this version in the meantime.
+            // Read again if the last read is not newer than the start of this measuring.
+            if readAt <= measureStart { programs = self.programPaths(); readAt = ProcessInfo.processInfo.systemUptime }
+            return TestBrowsers.isInUse(url, programs: programs) ? "a program runs from it" : nil
+        })
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) old versions, failures \(done.failures)")
     }
 
     /// The `Service Worker/CacheStorage` folders of one browser. Nothing else of the profile is touched.
     private func removeServiceWorkerStorage(_ id: String, finding: Finding, into report: inout CleanReport) {
         guard let browser = BrowserCaches.browser(id: id) else { skip(finding, "unknown browser", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
-        var removed = 0, failures = 0
-        for url in BrowserCaches.serviceWorkerTargets(of: browser, home: home) {
-            guard BrowserCaches.isServiceWorkerTarget(url, of: browser, home: home), UpdateDownloads.isPlainPath(url) else {
-                report.skipped.append("\(url.path): not Service Worker storage of the browser"); continue
-            }
-            if let reason = guardian.check(url) {
-                Log.warn("skip \(url.path): \(reason)")
-                report.skipped.append("\(url.path): \(reason)"); continue
-            }
-            let size = Sizer.size(of: url)
-            do {
-                try FileManager.default.removeItem(at: url)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            }
+        let done = removeEach(BrowserCaches.serviceWorkerTargets(of: browser, home: home), of: finding, into: &report,
+                              notTarget: "not Service Worker storage of the browser") { url in
+            BrowserCaches.isServiceWorkerTarget(url, of: browser, home: home) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) Service Worker folders, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) Service Worker folders, failures \(done.failures)")
     }
 
     /// One website of the Service Worker storage. We find its folder again now, and remove that folder only.
@@ -979,72 +900,44 @@ public final class Cleaner {
     private func removeBrowserCaches(_ id: String, finding: Finding, into report: inout CleanReport) {
         guard let browser = BrowserCaches.browser(id: id) else { skip(finding, "unknown browser", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
-        var removed = 0, failures = 0
-        for url in BrowserCaches.targets(of: browser, home: home) {
-            guard BrowserCaches.isTarget(url, of: browser, home: home), UpdateDownloads.isPlainPath(url) else {
-                report.skipped.append("\(url.path): not a cache folder of the browser"); continue
-            }
-            if let reason = guardian.check(url) {
-                Log.warn("skip \(url.path): \(reason)")
-                report.skipped.append("\(url.path): \(reason)"); continue
-            }
-            let size = Sizer.size(of: url)
-            do {
-                try FileManager.default.removeItem(at: url)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            }
+        let done = removeEach(BrowserCaches.targets(of: browser, home: home), of: finding, into: &report,
+                              notTarget: "not a cache folder of the browser") { url in
+            BrowserCaches.isTarget(url, of: browser, home: home) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) cache folders, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.title): \(failures) folders stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) cache folders, failures \(done.failures)")
     }
 
     /// The old update files of one app. We look at the age again now, so that an update that started after the scan stays.
     /// Only the children of two folders can go. Nothing else in the cache of the app is touched.
     private func removeUpdateDownloads(_ sparkle: URL, finding: Finding, into report: inout CleanReport) {
-        guard UpdateDownloads.isSparkleFolder(sparkle, home: URL(fileURLWithPath: guardian.home)),
-              UpdateDownloads.isPlainPath(sparkle) else {
+        let home = URL(fileURLWithPath: guardian.home)
+        guard UpdateDownloads.isSparkleFolder(sparkle, home: home), UpdateDownloads.isPlainPath(sparkle) else {
             skip(finding, "not the update folder of an app", &report); return
         }
-        var removed = 0, failures = 0
-        for item in UpdateDownloads.staleItems(in: sparkle, now: Date()) {
-            if let reason = guardian.check(item) {
-                Log.warn("skip child \(item.path): \(reason)")
-                report.skipped.append("\(item.path): \(reason)"); continue
-            }
-            let size = Sizer.size(of: item)
-            do {
-                try FileManager.default.removeItem(at: item)
-                report.freed += size
-                removed += 1
-            } catch {
-                failures += 1
-                Log.error("remove failed \(item.path): \(error.localizedDescription)")
-            }
+        let sparklePrefix = sparkle.standardizedFileURL.path + "/"
+        let done = removeEach(UpdateDownloads.staleItems(in: sparkle, now: Date()), of: finding, into: &report,
+                              notTarget: "not an old update item of the app") { url in
+            // One of the cleaned folders, then one child of it. Nothing deeper, and no link on the way.
+            let path = url.standardizedFileURL.path
+            let parts = path.hasPrefix(sparklePrefix) ? path.dropFirst(sparklePrefix.count).split(separator: "/").map(String.init) : []
+            return UpdateDownloads.isSparkleFolder(sparkle, home: home) && parts.count == 2
+                && UpdateDownloads.cleanedFolders.contains(parts[0]) && UpdateDownloads.isPlainPath(url)
         }
-        if removed > 0 { report.removed += 1 }
-        Log.info("clean \(finding.id): removed \(removed) old update items, failures \(failures)")
-        if failures > 0 { report.failed.append("\(finding.location): \(failures) items stayed") }
+        if done.removed > 0 { report.removed += 1 }
+        Log.info("clean \(finding.id): removed \(done.removed) old update items, failures \(done.failures)")
     }
 
     /// One folder of device support files, `<platform> DeviceSupport/<name>` in the Xcode folder. Nothing else is accepted.
     private func removeDeviceSupport(_ url: URL, finding: Finding, into report: inout CleanReport) {
-        guard DeviceSupport.isDeviceSupport(url, home: URL(fileURLWithPath: guardian.home)) else {
-            skip(finding, "not a device support folder of Xcode", &report); return
+        let home = URL(fileURLWithPath: guardian.home)
+        let before = report.freed
+        let done = removeEach([url], of: finding, into: &report, notTarget: "not a device support folder of Xcode") {
+            DeviceSupport.isDeviceSupport($0, home: home) && UpdateDownloads.isPlainPath($0)
         }
-        if let reason = guardian.check(url) { skip(finding, "\(reason)", &report); return }
-        do {
-            try FileManager.default.removeItem(at: url)
-            report.freed += finding.bytes
+        if done.removed > 0 {
             report.removed += 1
-            Log.info("clean \(finding.id): removed \(finding.bytes) bytes — \(url.path)")
-        } catch {
-            Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            report.failed.append("\(url.path): \(error.localizedDescription)")
+            Log.info("clean \(finding.id): removed \(report.freed - before) bytes — \(url.path)")
         }
     }
 
@@ -1079,15 +972,22 @@ public final class Cleaner {
         if failures > 0 { report.failed.append("\(finding.location): \(failures) items stayed") }
     }
 
+    /// One build folder. `clean` has checked the name, the guard, and the active projects. The helper checks the name, the path,
+    /// the active projects, and the guard again, after it has measured the folder.
     private func removeArtifact(_ url: URL, finding: Finding, into report: inout CleanReport) {
-        do {
-            try FileManager.default.removeItem(at: url)
-            report.freed += finding.bytes
+        let before = report.freed
+        let done = removeEach([url], of: finding, into: &report, notTarget: "not a known build folder", isTarget: {
+            Catalog.isArtifactName($0.lastPathComponent) && UpdateDownloads.isPlainPath($0)
+        }, linkText: "a folder in the path is a link", keepReason: { url, measureStart in
+            if self.activeSnapshot.at <= measureStart {
+                self.activeSnapshot = (self.activeDirectories(), ProcessInfo.processInfo.systemUptime)
+            }
+            let project = url.deletingLastPathComponent().resolvingSymlinksInPath().path
+            return self.activeSnapshot.list.contains(where: { $0 == project || $0.hasPrefix(project + "/") }) ? "project is in use" : nil
+        })
+        if done.removed > 0 {
             report.removed += 1
-            Log.info("clean \(finding.id): removed \(finding.bytes) bytes — \(url.path)")
-        } catch {
-            Log.error("remove failed \(url.path): \(error.localizedDescription)")
-            report.failed.append("\(url.path): \(error.localizedDescription)")
+            Log.info("clean \(finding.id): removed \(report.freed - before) bytes — \(url.path)")
         }
     }
 
