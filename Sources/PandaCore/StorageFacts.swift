@@ -4,7 +4,7 @@ import Foundation
 /// and no total, bar or "Free up" set counts it.
 public struct InfoRow: Equatable, Sendable {
     public let title: String
-    /// The second line. It says that the row cannot be cleaned here.
+    /// The second line: one short fact. The header of the section says that nothing here can be cleaned.
     public let detail: String
     public let tooltip: String?
 
@@ -25,19 +25,18 @@ public enum StorageFacts {
     static let purgeableMinimum: Int64 = 1_000_000_000
 
     /// "Docker disk file: 34 GB on disk, 12 GB in use". nil when the file is less than 5 GB larger than its data.
-    public static func dockerDisk(onDisk: Int64, inside: Int64, note: String?) -> InfoRow? {
+    public static func dockerDisk(onDisk: Int64, inside: Int64) -> InfoRow? {
         guard onDisk - inside >= dockerGap else { return nil }
-        return InfoRow(title: "Docker disk file: \(ByteText.string(onDisk)) on disk, \(ByteText.string(inside)) in use",
+        return InfoRow(title: "Docker disk file: \(ByteText.string(onDisk)), \(ByteText.string(inside)) in use",
                        detail: "Stays large after a clean",
-                       tooltip: ["Cannot be cleaned here. Docker keeps its disk file large after you clean inside it.", note]
-                           .compactMap { $0 }.joined(separator: "\n"))
+                       tooltip: "Cannot be cleaned here. Docker does not shrink this file when you delete images or containers inside it.")
     }
 
-    /// "About 18 GB of the free space is purgeable". nil at 1 GB or less. The number is free space with purgeable space,
+    /// "18 GB of free space is purgeable". nil at 1 GB or less. The number is free space with purgeable space,
     /// minus free space without it, so it is already part of the free number at the top. It is an estimate, so the row says so.
     public static func purgeable(_ bytes: Int64) -> InfoRow? {
         guard bytes > purgeableMinimum else { return nil }
-        return InfoRow(title: "About \(ByteText.string(bytes)) of the free space is purgeable", detail: "An estimate",
+        return InfoRow(title: "\(ByteText.string(bytes)) of free space is purgeable", detail: "An estimate",
                        tooltip: "Cannot be cleaned here. This is an estimate, taken when the scan ran. macOS counts this space as free "
                            + "and takes it back when an app needs it. It may include snapshots and system files.")
     }
@@ -52,7 +51,7 @@ public enum StorageFacts {
     public static func rows(from findings: [Finding], disk: DiskUsage = DiskUsage(total: 0, free: 0)) -> [InfoRow] {
         var rows: [InfoRow] = []
         if let f = findings.first(where: { $0.id == "docker.vmdisk" && !$0.isActionable }), let inside = f.insideBytes,
-           let row = dockerDisk(onDisk: f.bytes, inside: inside, note: f.note) {
+           let row = dockerDisk(onDisk: f.bytes, inside: inside) {
             rows.append(row)
         }
         if let f = findings.first(where: { $0.id == "snapshots.local" && !$0.isActionable }) { rows.append(snapshots(f)) }

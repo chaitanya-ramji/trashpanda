@@ -130,15 +130,15 @@ public enum MenuText {
                                                     "common", "mobile", "macos", "osx", "electron", "browser", "ui", "shared", "default"]
 
     /// The title of an item as a row shows it. The first part (before " · ") gets a friendly name. In the cache folders list the
-    /// kind ("system cache", "cache folder") is dropped, because the list says it; a system cache that is not named
-    /// `com.apple.` gets "(system)", because it can be iCloud. The full title stays in the tooltip.
+    /// kind ("system cache", "cache folder") and "(macOS)" are dropped, because the section header says it.
+    /// A Docker title is short: "Running · web + 1 volume". The full title stays in the tooltip.
     public static func rowTitle(_ title: String, ecosystem: Ecosystem) -> String {
         if title.hasPrefix("Unused anonymous volume · ") { return "Unused anonymous volume" }
+        if ecosystem == .docker { return dockerTitle(title) }
         var parts = title.components(separatedBy: " · ")
         let friendly = friendlyName(parts[0])
         if ecosystem == .cacheExplorer, parts.count == 2, ["system cache", "cache folder"].contains(parts[1]) {
-            let system = parts[1] == "system cache"
-            return friendly + (system && !friendly.hasSuffix("(macOS)") && !friendly.contains("(") ? " (system)" : "")
+            return friendly.hasSuffix(" (macOS)") ? String(friendly.dropLast(" (macOS)".count)) : friendly
         }
         parts[0] = friendly
         return parts.joined(separator: " · ")
@@ -160,9 +160,10 @@ public enum MenuText {
     /// A label shows on a row only when it adds information. When most rows have the same label, it goes once into the header.
     /// "Cannot be recovered" is never moved: each row that has it keeps it. One row alone keeps its label.
     public static func rebuildNotes(_ list: [Rebuild]) -> RebuildNotes {
-        let own = list.map { Optional($0.label) }
+        let own = list.map { Optional(rowLabel($0)) }
         let alone = RebuildNotes(sectionSuffix: nil, rowLabels: own)
-        guard list.count >= 2 else { return alone }
+        // A section with an item that cannot be recovered has a plain header. Each row says its own label.
+        guard list.count >= 2, !list.contains(.never) else { return alone }
         let counts = Dictionary(grouping: list.filter { $0 != .never }, by: { $0 }).mapValues(\.count)
         guard let top = counts.max(by: { $0.value < $1.value }), top.value * 2 > list.count else { return alone }
         let suffix: String
@@ -173,13 +174,16 @@ public enum MenuText {
         case .recreate: suffix = "must be recreated"
         case .never: return alone
         }
-        return RebuildNotes(sectionSuffix: suffix, rowLabels: list.map { $0 == top.key ? nil : $0.label })
+        return RebuildNotes(sectionSuffix: suffix, rowLabels: list.map { $0 == top.key ? nil : rowLabel($0) })
     }
+
+    /// The label on a row. The tooltip and the dialogs keep the longer `Rebuild.label`.
+    private static func rowLabel(_ r: Rebuild) -> String { r == .recreate ? "Must be recreated" : r.label }
 
     /// The parts of the place line of a Docker item. The row shows a short second line. The tooltip has the engine first,
     /// then the image and the state, then the volumes that a person named. An id of an anonymous volume (it ends with "…") never shows:
     /// the title says "1 volume". A running container says "Stopped first"; "Up 22 hours" is in the tooltip.
-    public static func dockerPlace(_ location: String) -> (engine: String?, tooltip: String, subtitle: String?) {
+    public static func dockerPlace(_ location: String) -> (tooltip: String, subtitle: String?) {
         var parts = location.components(separatedBy: " · ")
         var engine: String?
         if let first = parts.first, first.hasPrefix("Docker engine: ") {
@@ -192,10 +196,36 @@ public enum MenuText {
             return named.isEmpty ? nil : "volumes: " + named.joined(separator: ", ")
         }
         if let engine { tip.insert(engine, at: 0) }
+        // "Exited (0) 3 days ago" is shown as "Exited 3 days ago". The exit code stays in the tooltip.
         let shown = parts.filter { !$0.hasPrefix("image ") && !$0.hasPrefix("volumes: ") }
-        let stopped = shown.contains("will be stopped first")
-        let sub = stopped ? "Stopped first" : shown.joined(separator: " · ")
-        return (engine, tip.joined(separator: " · "), sub.isEmpty ? nil : sub.prefix(1).uppercased() + sub.dropFirst())
+            .map { $0.replacingOccurrences(of: #" \(\d+\)"#, with: "", options: .regularExpression) }
+        let sub = shown.contains("will be stopped first") ? "Will be stopped first" : shown.joined(separator: " · ")
+        return (tip.joined(separator: " · "), sub.isEmpty ? nil : sub.prefix(1).uppercased() + sub.dropFirst())
+    }
+
+    /// The first part of a Docker title says what it is. A row says it in one word: "Running · web + 1 volume".
+    private static func dockerTitle(_ title: String) -> String {
+        var t = title
+        for (long, short) in [("Running container · ", "Running · "), ("Stopped container · ", "Stopped · ")] where t.hasPrefix(long) {
+            t = short + t.dropFirst(long.count)
+        }
+        return t.replacingOccurrences(of: #" and (\d+ volumes?)$"#, with: " + $1", options: .regularExpression)
+    }
+
+    /// Cuts a row title to `maxTitle`. In a Docker title the name of a container is not cut while a shorter form fits:
+    /// the part that gets the ellipsis is the long image reference, or else the name itself.
+    public static func capTitle(_ title: String, ecosystem: Ecosystem) -> String {
+        guard title.count > maxTitle, ecosystem == .docker, let dot = title.range(of: " · ") else { return capped(title) }
+        let head = String(title[..<dot.upperBound])
+        var name = String(title[dot.upperBound...])
+        var tail = ""
+        if let plus = name.range(of: #" \+ \d+ volumes?$"#, options: .regularExpression) {
+            tail = String(name[plus.lowerBound...])
+            name = String(name[..<plus.lowerBound])
+        }
+        let room = maxTitle - head.count - tail.count
+        guard room >= 8 else { return capped(title) }
+        return head + capped(name, max: room) + tail
     }
 
     public static let helpURL = URL(string: "https://github.com/chaitanya-ramji/trashpanda#readme")!
