@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 DEST="${INSTALL_DIR:-/Applications}/TrashPanda.app"
 pkill -x trashpanda 2>/dev/null || true
 mkdir -p "$(dirname "$DEST")"
-rm -rf "$DEST"
+rm -rf "${DEST:?}"
 cp -R build/TrashPanda.app "$DEST"
 echo "Installed $DEST"
 open "$DEST"
