@@ -60,22 +60,48 @@ final class StorageHeaderView: NSView {
     private static let inset: CGFloat = 16
     /// The chevrons of the rows below end about 20 points from the right edge of the menu. The bar ends there too.
     private static let rightInset: CGFloat = 20
-    private static let plainHeight: CGFloat = 54
-    private static let splitHeight: CGFloat = 96
     private static let splitBarHeight: CGFloat = 14
 
     /// The menu is wider than the first size of this view, so the bar follows the real width.
     private var barWidth: CGFloat { max(40, bounds.width - Self.inset - Self.rightInset) }
 
-    var preferredHeight: CGFloat { segments.isEmpty ? Self.plainHeight : Self.splitHeight }
+    // The fonts follow the text styles of the system. The rows of the header follow the heights of the fonts.
+    private static var titleFont: NSFont { .preferredFont(forTextStyle: .headline) }
+    private static var detailFont: NSFont { .preferredFont(forTextStyle: .subheadline) }
+    private static var legendFont: NSFont { .preferredFont(forTextStyle: .caption1) }
+
+    private static func lineHeight(_ font: NSFont) -> CGFloat { ceil(font.ascender - font.descender + font.leading) }
+
+    private static func layout(hasBar: Bool) -> HeaderLayout {
+        SplitBar.headerLayout(titleHeight: lineHeight(titleFont), detailHeight: lineHeight(detailFont),
+                              legendHeight: lineHeight(legendFont), barHeight: splitBarHeight, hasBar: hasBar)
+    }
+
+    private var rows: HeaderLayout { Self.layout(hasBar: !segments.isEmpty) }
+    var preferredHeight: CGFloat { rows.height }
 
     private var splitBarRect: NSRect {
-        NSRect(x: Self.inset, y: bounds.height - 68, width: barWidth, height: Self.splitBarHeight)
+        NSRect(x: Self.inset, y: rows.barY ?? 0, width: barWidth, height: Self.splitBarHeight)
+    }
+
+    /// What the system settings say now. The core decides how to draw for them.
+    private var style: HeaderStyle {
+        let workspace = NSWorkspace.shared
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return HeaderStyle(HeaderSettings(
+            reduceMotion: workspace.accessibilityDisplayShouldReduceMotion,
+            increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast,
+            reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency,
+            differentiateWithoutColor: workspace.accessibilityDisplayShouldDifferentiateWithoutColor,
+            darkMode: dark))
     }
 
     override init(frame: NSRect) {
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: Self.plainHeight))
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: Self.layout(hasBar: false).height))
         autoresizingMask = [.width]
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(accessibilityOptionsChanged), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil)
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isIndeterminate = true
@@ -83,7 +109,19 @@ final class StorageHeaderView: NSView {
         addSubview(spinner)
         setAccessibilityElement(false)
     }
-    required init?(coder: NSCoder) { fatalError("not used") }
+    required init?(coder: NSCoder) { return nil }
+
+    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+
+    /// The user changed "Increase contrast", "Reduce motion" or a similar setting: draw again.
+    @objc private func accessibilityOptionsChanged() {
+        applyActivity()
+        needsDisplay = true
+    }
+
+    private func applyActivity() {
+        if activity == .idle || !style.showSpinner { spinner.stopAnimation(nil) } else { spinner.startAnimation(nil) }
+    }
 
     func update(disk: DiskUsage, totals: SplitTotals, activity: MenuModel.Activity, segments: [SplitSegment]) {
         self.disk = disk
@@ -94,13 +132,13 @@ final class StorageHeaderView: NSView {
         self.hovered = nil
         setFrameSize(NSSize(width: max(bounds.width, Self.width), height: preferredHeight))
         relayout()
-        if activity == .idle { spinner.stopAnimation(nil) } else { spinner.startAnimation(nil) }
+        applyActivity()
     }
 
     /// Called when the width changes: the bar, the hit areas, and the spinner follow the menu width.
     private func relayout() {
         slots = SplitBar.layout(segments, width: barWidth)
-        spinner.frame = NSRect(x: bounds.width - Self.rightInset - 16, y: bounds.height - 30, width: 16, height: 16)
+        spinner.frame = NSRect(x: bounds.width - Self.rightInset - 16, y: rows.titleY, width: 16, height: 16)
         rebuildAccessibility()
         needsDisplay = true
     }
@@ -112,8 +150,6 @@ final class StorageHeaderView: NSView {
     }
 
     // MARK: Words
-
-    private static let detailFont = NSFont.systemFont(ofSize: 11)
 
     /// The line under the title. When the long words do not fit the menu, it uses the short words.
     private var detail: String {
@@ -163,7 +199,6 @@ final class StorageHeaderView: NSView {
     override func mouseMoved(with event: NSEvent) { setHovered(segment(at: convert(event.locationInWindow, from: nil))) }
     override func mouseEntered(with event: NSEvent) { mouseMoved(with: event) }
     override func mouseExited(with event: NSEvent) { setHovered(nil) }
-    override func mouseDown(with event: NSEvent) {}
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseUp(with event: NSEvent) {
@@ -201,12 +236,13 @@ final class StorageHeaderView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let inset = Self.inset
+        let layout = rows
         "\(Format.bytes(disk.free)) free of \(Format.bytes(disk.total))"
-            .draw(at: NSPoint(x: inset, y: bounds.height - 28), withAttributes: [
-                .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+            .draw(at: NSPoint(x: inset, y: layout.titleY), withAttributes: [
+                .font: Self.titleFont,
                 .foregroundColor: NSColor.labelColor,
             ])
-        detail.draw(at: NSPoint(x: inset, y: bounds.height - 46), withAttributes: [
+        detail.draw(at: NSPoint(x: inset, y: layout.detailY), withAttributes: [
             .font: Self.detailFont,
             .foregroundColor: hovered == nil ? NSColor.secondaryLabelColor : NSColor.labelColor,
         ])
@@ -220,27 +256,48 @@ final class StorageHeaderView: NSView {
     private func drawSplitBar() {
         guard !segments.isEmpty else { return }
         let bar = splitBarRect
+        let style = self.style
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(roundedRect: bar, xRadius: 5, yRadius: 5).addClip()
         for (i, slot) in slots.enumerated() {
             let s = segments[i]
-            let alpha: CGFloat = hovered != nil && hovered != i ? 0.30 : 1
+            let alpha: CGFloat = style.dimOtherParts && hovered != nil && hovered != i ? 0.30 : 1
             let rect = NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height)
-            let blockedShare = s.bytes > 0 ? CGFloat(min(s.blockedBytes, s.bytes)) / CGFloat(s.bytes) : 0
-            let blockedWidth = (rect.width * blockedShare).rounded()
-            let (open, solid) = rect.divided(atDistance: blockedWidth, from: .maxXEdge)
+            let widths = SplitBar.partWidths(s, width: rect.width)
+            let (rest, open) = rect.divided(atDistance: widths.blocked, from: .maxXEdge)
+            let (review, solid) = rest.divided(atDistance: widths.review, from: .maxXEdge)
             color(i).withAlphaComponent(alpha).setFill()
             solid.fill()
-            if blockedWidth > 0 { drawStripes(in: open, color: color(i), alpha: alpha) }
+            if widths.review > 0 {
+                if style.patternForReview {
+                    drawLines(in: review, color: color(i), alpha: alpha, style: style)
+                } else {
+                    color(i).withAlphaComponent(alpha).setFill()
+                    review.fill()
+                }
+            }
+            if widths.blocked > 0 { drawStripes(in: open, color: color(i), alpha: alpha, style: style) }
+            // With "Increase contrast", a thin line sets two parts apart.
+            if style.separatorsBetweenParts, i > 0 {
+                NSColor.separatorColor.setFill()
+                NSRect(x: rect.minX - 0.5, y: rect.minY, width: 1, height: rect.height).fill()
+            }
         }
         NSGraphicsContext.restoreGraphicsState()
+        if style.outlineHoveredPart, let i = hovered, slots.indices.contains(i) {
+            let rect = NSRect(x: bar.minX + slots[i].x, y: bar.minY, width: slots[i].width, height: bar.height).insetBy(dx: 0.5, dy: 0.5)
+            NSColor.labelColor.setStroke()
+            let outline = NSBezierPath(rect: rect)
+            outline.lineWidth = 1
+            outline.stroke()
+        }
     }
 
     /// A light fill with diagonal stripes. It marks data that waits for an app to quit.
-    private func drawStripes(in rect: NSRect, color: NSColor, alpha: CGFloat) {
+    private func drawStripes(in rect: NSRect, color: NSColor, alpha: CGFloat, style: HeaderStyle) {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: rect).addClip()
-        color.withAlphaComponent(0.30 * alpha).setFill()
+        color.withAlphaComponent(style.stripeFillAlpha * alpha).setFill()
         rect.fill()
         let path = NSBezierPath()
         path.lineWidth = 1.5
@@ -250,7 +307,27 @@ final class StorageHeaderView: NSView {
             path.line(to: NSPoint(x: x + rect.height, y: rect.maxY))
             x += 4
         }
-        color.withAlphaComponent(0.85 * alpha).setStroke()
+        color.withAlphaComponent(style.stripeLineAlpha * alpha).setStroke()
+        path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// A light fill with horizontal lines. It marks data that you should look at first, without a change of color.
+    /// The lines are not the stripes of data that waits for an app.
+    private func drawLines(in rect: NSRect, color: NSColor, alpha: CGFloat, style: HeaderStyle) {
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: rect).addClip()
+        color.withAlphaComponent(style.stripeFillAlpha * alpha).setFill()
+        rect.fill()
+        let path = NSBezierPath()
+        path.lineWidth = 1
+        var y = rect.minY + 1.5
+        while y < rect.maxY {
+            path.move(to: NSPoint(x: rect.minX, y: y))
+            path.line(to: NSPoint(x: rect.maxX, y: y))
+            y += 3
+        }
+        color.withAlphaComponent(style.stripeLineAlpha * alpha).setStroke()
         path.stroke()
         NSGraphicsContext.restoreGraphicsState()
     }
@@ -259,9 +336,9 @@ final class StorageHeaderView: NSView {
     /// A group that does not fit is left out, and the "more" count tells how many parts are not named.
     private func drawLegend() {
         guard !segments.isEmpty else { return }
-        let font = NSFont.systemFont(ofSize: 10)
+        let font = Self.legendFont
         var x = Self.inset
-        let y: CGFloat = 10
+        let y = rows.legendY ?? 10
         var shown = 0
         for (i, s) in segments.prefix(3).enumerated() {
             let text = "\(s.shortName) \(Format.bytes(s.bytes))"
@@ -273,7 +350,7 @@ final class StorageHeaderView: NSView {
             let dotSize = GroupColors.dotSize
             guard x + dotSize + 5 + size.width <= bounds.width - Self.rightInset else { break }
             // A part that waits for an app to quit has a ring, not a dot, like its light part in the bar.
-            let dot = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: y + 2, width: dotSize, height: dotSize))
+            let dot = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: y + (Self.lineHeight(font) - dotSize) / 2, width: dotSize, height: dotSize))
             if s.isBlockedOnly {
                 color(i).setStroke()
                 dot.lineWidth = 1
