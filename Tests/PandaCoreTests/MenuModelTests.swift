@@ -157,6 +157,27 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(p, MenuText.Primary(title: "Nothing to clean now", subtitle: nil, enabled: false))
     }
 
+    // MARK: The time of the last scan
+
+    func testLastScanText() {
+        XCTAssertEqual(MenuText.lastScan(now.addingTimeInterval(-12 * 60), now: now), "Last scan: 12 minutes ago")
+        XCTAssertEqual(MenuText.lastScan(now.addingTimeInterval(-60), now: now), "Last scan: 1 minute ago")
+        XCTAssertEqual(MenuText.lastScan(now.addingTimeInterval(-3 * 3600), now: now), "Last scan: 3 hours ago")
+        XCTAssertEqual(MenuText.lastScan(now.addingTimeInterval(-2 * 86_400), now: now), "Last scan: 2 days ago")
+        XCTAssertEqual(MenuText.lastScan(now.addingTimeInterval(-20), now: now), "Last scan: just now")
+        XCTAssertEqual(MenuText.lastScan(now.addingTimeInterval(30), now: now), "Last scan: just now")
+    }
+
+    func testScanAgainRowShowsTheLastScanExceptWhileScanning() {
+        func rescan(_ model: MenuModel) -> MenuModel.Row? { model.rows.first { $0.action == .rescan } }
+        let idle = MenuModel.make(input(fixture()))
+        XCTAssertEqual(rescan(idle)?.subtitle, "Last scan: just now")
+        XCTAssertEqual(rescan(idle)?.title, "Scan again")
+        XCTAssertEqual(rescan(MenuModel.make(input(fixture(), scanning: true)))?.title, "Scanning…")
+        XCTAssertNil(rescan(MenuModel.make(input(fixture(), scanning: true)))?.subtitle)
+        XCTAssertNil(rescan(MenuModel.make(input(nil, scanning: true)))?.subtitle)
+    }
+
     func testTheMainRowCarriesTheSubtitle() {
         let model = MenuModel.make(input(fixture()))
         XCTAssertEqual(model.rows[2].subtitle, "4 safe items. Review items stay.")
