@@ -86,6 +86,89 @@ public enum MenuText {
         return kept(low)
     }
 
+    // MARK: Rows of a group submenu
+
+    /// The longest title that a row shows. A longer one gets a middle ellipsis. The tooltip has the full text.
+    public static let maxTitle = 44
+
+    /// "abcdefghij…vwxyz": the start and the end stay, the middle goes. A short text is not changed.
+    public static func capped(_ text: String, max limit: Int = maxTitle) -> String {
+        guard text.count > limit, limit >= 3 else { return text }
+        let keep = limit - 1
+        return String(text.prefix((keep + 1) / 2)) + "…" + String(text.suffix(keep / 2))
+    }
+
+    private static let domainStarts: Set<String> = ["com", "org", "net", "io", "dev", "app", "co", "me", "edu"]
+    /// The last parts of a name that tell nothing about its owner.
+    private static let emptyParts: Set<String> = ["helper", "cache", "caches", "shipit", "updater", "agent", "service", "services", "daemon", "xpc"]
+
+    /// A folder name that is a reverse domain name, such as `com.example.tool`. Plain names and file names are not.
+    private static func domainParts(_ name: String) -> [String]? {
+        let parts = name.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count >= 3, domainStarts.contains(parts[0]) else { return nil }
+        let ok = parts.allSatisfy { part in
+            !part.isEmpty && part.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+        }
+        return ok ? parts : nil
+    }
+
+    /// A short name for a folder that is named like a reverse domain: the last part that says something.
+    /// `com.apple.<x>` is a macOS name, so it gets "(macOS)". Any other name is not changed. No product name is made up.
+    public static func friendlyName(_ name: String) -> String {
+        guard let parts = domainParts(name) else { return name }
+        let meaningful = parts.dropFirst(2).last { !emptyParts.contains($0.lowercased()) } ?? parts[parts.count - 1]
+        return parts[1] == "apple" ? "\(meaningful) (macOS)" : meaningful
+    }
+
+    /// The title of an item as a row shows it. The first part (before " · ") gets a friendly name, and the id of an
+    /// anonymous Docker volume is hidden. The full title stays in the tooltip.
+    public static func friendlyTitle(_ title: String) -> String {
+        if title.hasPrefix("Unused anonymous volume · ") { return "Unused anonymous volume" }
+        let parts = title.components(separatedBy: " · ")
+        let friendly = friendlyName(parts[0])
+        return friendly == parts[0] ? title : ([friendly] + parts.dropFirst()).joined(separator: " · ")
+    }
+
+    /// What the rebuild labels of one section say. `sectionSuffix` goes once into the section header.
+    /// `rowLabels` is the label that a row keeps for itself: nil when the header already says it.
+    public struct RebuildNotes: Equatable, Sendable {
+        public let sectionSuffix: String?
+        public let rowLabels: [String?]
+    }
+
+    /// A label shows on a row only when it adds information. When most rows have the same label, it goes once into the header.
+    /// "Cannot be recovered" is never moved: each row that has it keeps it. One row alone keeps its label.
+    public static func rebuildNotes(_ list: [Rebuild]) -> RebuildNotes {
+        let own = list.map { Optional($0.label) }
+        let alone = RebuildNotes(sectionSuffix: nil, rowLabels: own)
+        guard list.count >= 2 else { return alone }
+        let counts = Dictionary(grouping: list.filter { $0 != .never }, by: { $0 }).mapValues(\.count)
+        guard let top = counts.max(by: { $0.value < $1.value }), top.value * 2 > list.count else { return alone }
+        let suffix: String
+        switch top.key {
+        case .seconds: suffix = "they come back in seconds"
+        case .minutes: suffix = "they rebuild in a few minutes"
+        case .download: suffix = "they download again when needed"
+        case .recreate: suffix = "you would need to recreate them"
+        case .never: return alone
+        }
+        return RebuildNotes(sectionSuffix: suffix, rowLabels: list.map { $0 == top.key ? nil : $0.label })
+    }
+
+    /// The parts of the place line of a Docker item. The engine goes into the header, so it is not repeated on a row.
+    /// An image name stays in the tooltip only. A volume id never shows: the title says "1 volume".
+    public static func dockerPlace(_ location: String) -> (engine: String?, tooltip: String, subtitle: String?) {
+        var parts = location.components(separatedBy: " · ")
+        var engine: String?
+        if let first = parts.first, first.hasPrefix("Docker engine: ") {
+            engine = String(first.dropFirst("Docker engine: ".count))
+            parts.removeFirst()
+        }
+        parts.removeAll { $0.hasPrefix("volumes: ") }
+        let sub = parts.filter { !$0.hasPrefix("image ") }.joined(separator: " · ")
+        return (engine, parts.joined(separator: " · "), sub.isEmpty ? nil : sub)
+    }
+
     public static let helpURL = URL(string: "https://github.com/chaitanya-ramji/trashpanda#readme")!
 
     /// The page for a new issue. The text holds only the two versions: no path, no log line.
