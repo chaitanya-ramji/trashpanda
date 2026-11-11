@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Log.info("launch Trash Panda \(version), log at \(Log.fileURL.path)")
         statusItem.button?.imagePosition = .imageLeading
         menu.delegate = self
+        Dialogs.keepListChanged = { [weak self] in self?.scan() }
         statusItem.menu = menu
         if let demo { demo.start(self); return }
         updates.onChange = { [weak self] in self?.menuChanged() }
