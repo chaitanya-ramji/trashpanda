@@ -57,6 +57,8 @@ final class StorageHeaderView: NSView {
     // MARK: Layout
 
     private static let width: CGFloat = 300
+    /// The width of the header in a menu that is closed. It grows with the menu, so a rebuild starts from this width.
+    static let minimumWidth: CGFloat = width
     private static let inset: CGFloat = 16
     /// The chevrons of the rows below end about 20 points from the right edge of the menu. The bar ends there too.
     private static let rightInset: CGFloat = 20

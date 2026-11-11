@@ -34,7 +34,7 @@ final class MenuBuilder: NSObject {
     }
 
     /// The tab of the main menu: the widest group row (title, the minimum gap, size) decides, within the limits of the model.
-    private func mainTab(for model: MenuModel) -> CGFloat {
+    func mainTab(for model: MenuModel) -> CGFloat {
         let font = NSFont.menuFont(ofSize: 0)
         func width(_ text: String) -> Double { Double((text as NSString).size(withAttributes: [.font: font]).width) }
         let widest = model.sharedColumnRows.map { width($0.title) + MenuModel.minTitleGap + width($0.size ?? "") }.max() ?? 0

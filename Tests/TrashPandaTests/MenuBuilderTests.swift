@@ -84,8 +84,12 @@ final class MenuBuilderTests: XCTestCase {
             XCTAssertLessThanOrEqual(w(parts[0]) + 12 + w(parts[1]), tab + 0.5, parts[0])
             XCTAssertLessThanOrEqual(item.attributedTitle!.size().width, 520.5)
         }
-        // Measured before the change: 660 points. A tab of 520 and the margins of the rows make 552.
-        XCTAssertLessThanOrEqual(sub.size.width, 552.5)
+        // Measured before the change: 660 points. The tab is at most 520, and each row adds its margins and icon column.
+        let probe = NSMenu()
+        let probeItem = NSMenuItem(title: "x", action: nil, keyEquivalent: "")
+        probeItem.attributedTitle = MenuBuilderTests.probeTitle(tab: 400)
+        probe.addItem(probeItem)
+        XCTAssertLessThanOrEqual(sub.size.width, 520 + (probe.size.width - 400) + 0.5)
         print("MEASURE submenu width", sub.size.width)
     }
 
@@ -161,5 +165,31 @@ final class MenuBuilderTests: XCTestCase {
         }
         XCTAssertTrue(seen.contains("JavaScript & TypeScript"))
         print("MEASURE all ecosystems at 999.9 GB: width", menu.size.width, "tab", tabOf(rows[0])!, "groups", seen.count)
+    }
+
+    /// The header grows with the menu. A rebuild of the closed menu starts again from the minimum width.
+    func testARebuildAfterAWideMomentGivesTheNarrowMenuAgain() {
+        let disk = DiskUsage(total: 500_000_000_000, free: 120_000_000_000)
+        let findings = [Finding(id: "h", ecosystem: .javascript, title: "t", location: "~/P", bytes: 300_000_000, tier: .safe,
+                                rebuild: .minutes, action: .removeArtifact(URL(fileURLWithPath: "/tmp/h")))]
+        let model = MenuModel.make(MenuInput(result: ScanResult(findings: findings, disk: disk), disk: disk, scanning: false,
+                                             cleaning: false, running: RunningSnapshot(apps: []), staleDays: 90))
+        let header = StorageHeaderView(frame: .zero)
+        func rebuild() -> NSMenu {
+            // The same steps as `AppDelegate.rebuildMenu`.
+            header.setFrameSize(NSSize(width: StorageHeaderView.minimumWidth, height: header.frame.height))
+            header.update(disk: model.header.disk, totals: model.header.totals, activity: model.header.activity,
+                          segments: model.header.segments)
+            let menu = NSMenu()
+            MenuBuilder { _ in }.populate(menu, model: model, header: header)
+            return menu
+        }
+        let narrow = rebuild().size.width
+        header.setFrameSize(NSSize(width: 371, height: header.frame.height))   // a wide moment
+        XCTAssertEqual(header.frame.width, 371)
+        let again = rebuild()
+        XCTAssertEqual(header.frame.width, StorageHeaderView.minimumWidth)
+        XCTAssertEqual(again.size.width, narrow, "The menu stayed wide after the wide moment")
+        print("MEASURE rebuilt width", narrow, again.size.width)
     }
 }
