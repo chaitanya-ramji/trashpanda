@@ -593,6 +593,9 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(rows.first { $0.title == "helpd" }?.tooltip?.hasPrefix("com.apple.helpd · system cache\n"), true)
         let tip = rows.first { $0.title == "helpd" }?.tooltip ?? ""
         XCTAssertTrue(tip.contains("An Apple system cache. macOS manages it."), "The reason that the dialog shows")
+        XCTAssertTrue(tip.contains("not synced"), "and the warning of the dialog: never a text that sounds harmless")
+        let geo = rows.first { $0.title == "GeoServices" }?.tooltip ?? ""
+        XCTAssertTrue(geo.contains("not synced"), geo)
         XCTAssertFalse(tip.contains("Downloads again"), "A system cache never says that it is safe to remove")
         XCTAssertNil(rows.first { $0.title == "helpd" }?.subtitle)
     }
@@ -626,6 +629,38 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(rows.first { $0.title == "app1" }?.subtitle, "On this Mac for 90 days", "No Image prefix, no repeated label")
         XCTAssertNil(rows.first { $0.title == "Image · app1" })
         XCTAssertEqual(rows.first { $0.title == "app1" }?.tooltip?.hasPrefix("Image · app1\n"), true, "The full title is in the tooltip")
+    }
+
+    func testAnImageThatDoesNotComeBackByDownloadKeepsItsOwnLabelAndNoImagesSection() throws {
+        var list = (1...3).map { dockerItem("docker.image:i\($0)", "Image · app\($0)", " · on this Mac for 90 days", rebuild: .download, bytes: Int64(900 + $0) * 1_000_000) }
+        list.append(dockerItem("docker.image:slow", "Image · slow", " · on this Mac for 90 days", rebuild: .minutes))
+        let rows = try XCTUnwrap(MenuModel.make(input(list)).rows.first { $0.title == "Docker" }?.submenu?.rows)
+        // No separate Images section: the images do not all come back by download. The majority label is in the header, as in any list.
+        XCTAssertFalse(rows.contains { $0.title == "Images · re-download when needed" })
+        let slow = try XCTUnwrap(rows.first { $0.title == "Image · slow" }, "the prefix stays in the plain layout")
+        XCTAssertTrue(slow.subtitle?.contains("Rebuilds in a few minutes") == true, "the odd row keeps its own label: \(String(describing: slow.subtitle))")
+    }
+
+    func testTheImagesSectionHasNoLeadingSeparatorAndOneSeparatorAfterSafeItems() throws {
+        let images = (1...3).map { dockerItem("docker.image:i\($0)", "Image · app\($0)", " · on this Mac for 90 days", rebuild: .download, bytes: Int64(900 + $0) * 1_000_000) }
+        let only = try XCTUnwrap(MenuModel.make(input(images)).rows.first { $0.title == "Docker" }?.submenu?.rows)
+        XCTAssertEqual(only.filter { $0.kind == .sectionHeader }.map(\.title), ["Images · re-download when needed"])
+        XCTAssertNotEqual(only.first?.kind, .separator)
+        XCTAssertEqual(only.filter { $0.kind == .separator }.count, 0)
+        let safe = dockerItem("docker.buildcache", "Build cache", " · safe", rebuild: .minutes)
+        let withSafe = try XCTUnwrap(MenuModel.make(input(images + [safe])).rows.first { $0.title == "Docker" }?.submenu?.rows)
+        XCTAssertEqual(withSafe.filter { $0.kind == .separator }.count, 1, "exactly one separator between the sections")
+    }
+
+    func testALongImageReferenceInTheImagesSectionIsCappedWithoutThePrefix() throws {
+        let long = "ghcr.io/example-org/platform/api-gateway:2024.11.3"
+        let list = [dockerItem("docker.image:a", "Image · " + long, " · on this Mac for 120 days", rebuild: .download),
+                    dockerItem("docker.image:b", "Image · app2", " · on this Mac for 100 days", rebuild: .download),
+                    dockerItem("docker.image:c", "Image · app3", " · on this Mac for 90 days", rebuild: .download)]
+        let rows = try XCTUnwrap(MenuModel.make(input(list)).rows.first { $0.title == "Docker" }?.submenu?.rows)
+        let row = try XCTUnwrap(rows.first { $0.tooltip?.hasPrefix("Image · " + long) == true })
+        XCTAssertEqual(row.title, "ghcr.io/example-org/pl…api-gateway:2024.11.3")
+        XCTAssertLessThanOrEqual(row.title.count, MenuText.maxTitle)
     }
 
     func testSectionHeadersAreShort() {

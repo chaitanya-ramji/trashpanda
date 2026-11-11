@@ -442,7 +442,10 @@ public struct MenuModel: Equatable, Sendable {
         // A system cache does not say that it comes back: its dialog warns that data that is not synced yet can be lost.
         let system = f.ecosystem == .cacheExplorer && f.title.hasSuffix(" · system cache")
         var reason = "Empty with care. Data that is not synced yet can be lost."
-        if system, case .removeCacheFolderContents(let name) = f.action, let why = CacheExplorer.keepReason(name) { reason = why }
+        if system, case .removeCacheFolderContents(let name) = f.action, let why = CacheExplorer.keepReason(name) {
+            // The reason of the dialog, and the warning that the dialog also gives: never a text that sounds harmless.
+            reason = why.contains("not synced") ? why : why + " Data that is not synced yet can be lost."
+        }
         let rebuild = system ? reason : f.rebuild.label
         var tip = (title == f.title ? "" : "\(f.title)\n") + "\(place)\n\(rebuild)"
         // (the full title above is the original one; the dialogs use it too)
