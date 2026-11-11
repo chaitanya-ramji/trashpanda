@@ -157,9 +157,9 @@ final class MenuTextTests: XCTestCase {
         let short = MenuText.rowTitle(long, ecosystem: .docker)
         XCTAssertEqual(MenuText.capTitle(short, ecosystem: .docker), "Running · postgres-dev + 1 volume")
         // An image reference is cut, and the kind stays.
-        let image = "Image · " + String(repeating: "registry.example/", count: 4) + "app:1"
-        let cut = MenuText.capTitle(image, ecosystem: .docker)
-        XCTAssertTrue(cut.hasPrefix("Image · ") && cut.contains("…") && cut.count <= MenuText.maxTitle)
+        let cut = MenuText.capTitle("Image · ghcr.io/example-org/platform/api-gateway:2024.11.3", ecosystem: .docker)
+        XCTAssertEqual(cut, "Image · ghcr.io/example-or…gateway:2024.11.3")
+        XCTAssertNotEqual(cut, MenuText.capped("Image · ghcr.io/example-org/platform/api-gateway:2024.11.3"), "The kind is not cut")
         // A very long container name is cut inside, and "+ 1 volume" stays.
         let name = MenuText.capTitle("Running · " + String(repeating: "n", count: 60) + " + 1 volume", ecosystem: .docker)
         XCTAssertTrue(name.hasPrefix("Running · ") && name.hasSuffix(" + 1 volume") && name.count <= MenuText.maxTitle, name)

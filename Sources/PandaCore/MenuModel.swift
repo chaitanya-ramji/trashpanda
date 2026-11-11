@@ -344,10 +344,19 @@ public struct MenuModel: Equatable, Sendable {
             if !other.isEmpty { section(other, "Review first", safeAll.isEmpty) }
             if !system.isEmpty {
                 if !safeAll.isEmpty || !other.isEmpty { rows.append(.separator) }
-                rows.append(.section("macOS caches · empty with care"))
+                rows.append(.section("Apple caches · empty with care"))
                 rows += listRows(system, input, groupBytes: groupBytes, labels: system.map { _ in nil },
-                                 header: "macOS caches · empty with care", widths: &widths)
+                                 header: "Apple caches · empty with care", widths: &widths)
             }
+        } else if ecosystem == .docker, case let images = review.filter({ $0.id.hasPrefix("docker.image:") }),
+                  !images.isEmpty, images.allSatisfy({ $0.rebuild == .download }) {
+            // Images come back by download, so they have their own section. The other items keep their own labels.
+            let other = review.filter { !$0.id.hasPrefix("docker.image:") }
+            if !other.isEmpty { section(other, "Review first", safeAll.isEmpty) }
+            if !safeAll.isEmpty || !other.isEmpty { rows.append(.separator) }
+            rows.append(.section("Images · re-download when needed"))
+            rows += listRows(images, input, groupBytes: groupBytes, labels: images.map { _ in nil },
+                             header: "Images · re-download when needed", widths: &widths, dropImagePrefix: true)
         } else if !review.isEmpty {
             section(review, "Review first", safeAll.isEmpty)
         }
@@ -362,8 +371,10 @@ public struct MenuModel: Equatable, Sendable {
     /// The first rows of a list, and then the rest in a "N more… · size" submenu, so that no row is hidden.
     /// The first list has at most 12 rows. It stops earlier at the first row that is below 50 MB and below 1 percent of the group.
     private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64, labels: [String?],
-                                 header: String, widths: inout [String]) -> [Row] {
+                                 header: String, widths: inout [String], dropImagePrefix: Bool = false) -> [Row] {
         var friendly = list.map { MenuText.rowTitle($0.title, ecosystem: $0.ecosystem) }
+        // In a list of images only, the section header says "Images", so a row does not repeat it.
+        if dropImagePrefix { friendly = friendly.map { $0.hasPrefix("Image · ") ? String($0.dropFirst("Image · ".count)) : $0 } }
         // Two anonymous volumes would look the same. Then each one shows the start of its id.
         let anonymous = "Unused anonymous volume · "
         for indexes in Dictionary(grouping: friendly.indices, by: { friendly[$0] }).values where indexes.count > 1 {
@@ -430,7 +441,9 @@ public struct MenuModel: Equatable, Sendable {
         // The tooltip keeps the full name and the rebuild label, even when the row shows less.
         // A system cache does not say that it comes back: its dialog warns that data that is not synced yet can be lost.
         let system = f.ecosystem == .cacheExplorer && f.title.hasSuffix(" · system cache")
-        let rebuild = system ? "Empty with care. Data that is not synced yet can be lost." : f.rebuild.label
+        var reason = "Empty with care. Data that is not synced yet can be lost."
+        if system, case .removeCacheFolderContents(let name) = f.action, let why = CacheExplorer.keepReason(name) { reason = why }
+        let rebuild = system ? reason : f.rebuild.label
         var tip = (title == f.title ? "" : "\(f.title)\n") + "\(place)\n\(rebuild)"
         // (the full title above is the original one; the dialogs use it too)
         if isProject(f), let days = f.lastActivity.map({ max(0, Int(input.now.timeIntervalSince($0) / 86_400)) }) {
