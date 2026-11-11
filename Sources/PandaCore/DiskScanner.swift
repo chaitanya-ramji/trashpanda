@@ -45,6 +45,41 @@ public struct Config: Sendable {
         return file
     }
 
+    public enum KeepResult: Equatable, Sendable {
+        /// The path was added as a new line.
+        case added
+        /// The path was already in the file. Nothing was written.
+        case alreadyKept
+        /// The path is not absolute, is not below the home folder, or has a character that is not allowed. Nothing was written.
+        case refused
+        /// The file could not be written.
+        case failed
+    }
+
+    /// Adds one path to the keep file, as one new line. The old lines stay. A path that is already there is not added again.
+    /// A path that is not absolute, not below the home folder, or has a line break is refused. A longer keep list can only make the app delete less.
+    @discardableResult
+    public static func appendKeep(_ path: String, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> KeepResult {
+        guard path.hasPrefix("/"), !path.contains("\n"), !path.contains("\r"), !path.contains("\0") else { return .refused }
+        let clean = URL(fileURLWithPath: path).standardizedFileURL.path
+        let homePath = home.standardizedFileURL.path
+        guard clean.hasPrefix(homePath + "/"), clean.count > homePath.count + 1 else { return .refused }
+        let file = ensureFile("keep", home: home)
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return .failed }
+        let known = text.split(separator: "\n").map { raw -> String in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            return line.hasPrefix("~") ? homePath + line.dropFirst() : line
+        }
+        if known.contains(clean) || known.contains(clean + "/") { return .alreadyKept }
+        let separator = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
+        do {
+            try (text + separator + clean + "\n").write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            return .failed
+        }
+        return .added
+    }
+
     /// Reads `key = value` lines. A bad value gives a warning and the default.
     static func parseSettings(_ text: String) -> (staleDays: Int, fromFile: Bool, warnings: [String]) {
         var staleDays = defaultStaleDays

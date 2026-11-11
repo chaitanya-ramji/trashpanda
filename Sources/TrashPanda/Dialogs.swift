@@ -40,6 +40,10 @@ final class FindingBox: NSObject {
 enum Dialogs {
     /// The third button. It shows the folder in Finder and does not delete.
     static let showInFinderTitle = "Show in Finder"
+    /// The check box of an item that has a folder. When it is on and the user keeps the item, the folder goes in the keep list.
+    static let alwaysKeepTitle = "Always keep this item"
+    /// Called after a path was added to the keep list. The app scans again.
+    static var keepListChanged: () -> Void = {}
 
     /// One short dialog. It says what happens and that it cannot be undone. Nothing more.
     /// `confirmed` is the button response that means "yes, delete". It is not always the first button.
@@ -52,6 +56,10 @@ enum Dialogs {
         let footer = box.footer
             ?? "Your code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
         alert.informativeText = box.body + "\n\n" + footer
+        if box.revealURL != nil {
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = alwaysKeepTitle
+        }
         let confirmTitle = box.confirmTitle ?? "Free up \(Format.bytes(total))"
         if box.cancelIsDefault {
             // "Keep it" is first, so it is the default button. The Return key keeps the item.
@@ -77,6 +85,16 @@ enum Dialogs {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
                 NSApp.bringToFront()
                 continue
+            }
+            if response != confirmed, alert.suppressionButton?.state == .on, let url = box.revealURL {
+                // The user chose to keep it, and to keep it for good. This can only make the app delete less.
+                switch Config.appendKeep(url.path) {
+                case .added:
+                    Log.info("user: added an item to the keep list")
+                    keepListChanged()
+                case .alreadyKept, .refused, .failed:
+                    break
+                }
             }
             return response == confirmed
         }
