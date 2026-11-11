@@ -315,6 +315,26 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Harden the CI job and the release job ([#143](https://github.com/chaitanya-ramji/trashpanda/issues/143))
 - [ ] Valid bundle version and complete package data ([#144](https://github.com/chaitanya-ramji/trashpanda/issues/144))
 
+### Next: v0.8 Menu and dialogs
+- [ ] Move the menu code into a tested menu model, with no change of behavior ([#147](https://github.com/chaitanya-ramji/trashpanda/issues/147))
+- [ ] Move the demo code out of the production classes ([#148](https://github.com/chaitanya-ramji/trashpanda/issues/148))
+- [ ] Settings submenu with About, Help, and "Report a problem" ([#149](https://github.com/chaitanya-ramji/trashpanda/issues/149))
+- [ ] Fold small groups into one row ([#150](https://github.com/chaitanya-ramji/trashpanda/issues/150))
+- [ ] Say what the main action removes ([#151](https://github.com/chaitanya-ramji/trashpanda/issues/151))
+- [ ] Show the time of the last scan ([#152](https://github.com/chaitanya-ramji/trashpanda/issues/152))
+- [ ] "Show in Finder" for an item, and the rebuild label as a subtitle ([#153](https://github.com/chaitanya-ramji/trashpanda/issues/153))
+- [ ] Section headers in a group submenu ([#154](https://github.com/chaitanya-ramji/trashpanda/issues/154))
+- [ ] Do not build the menu again while it is open ([#155](https://github.com/chaitanya-ramji/trashpanda/issues/155))
+- [ ] Progress and a stop during a clean ([#156](https://github.com/chaitanya-ramji/trashpanda/issues/156))
+- [ ] One summary dialog after a clean, with the check of the real free space ([#157](https://github.com/chaitanya-ramji/trashpanda/issues/157))
+- [ ] A fixed color for each group ([#158](https://github.com/chaitanya-ramji/trashpanda/issues/158))
+- [ ] The header follows the accessibility settings ([#159](https://github.com/chaitanya-ramji/trashpanda/issues/159))
+- [ ] Label and tooltip for the menu bar item ([#160](https://github.com/chaitanya-ramji/trashpanda/issues/160))
+- [ ] Small text and list defects ([#161](https://github.com/chaitanya-ramji/trashpanda/issues/161))
+- [ ] "Always keep this item" in the dialog ([#162](https://github.com/chaitanya-ramji/trashpanda/issues/162))
+- [ ] Remove dead code and code that is written two times ([#163](https://github.com/chaitanya-ramji/trashpanda/issues/163))
+- [ ] Own version type, and a failed update check is not a check ([#164](https://github.com/chaitanya-ramji/trashpanda/issues/164))
+
 ### Later: v1.0 Signed and stable
 - [ ] Notarize the app and publish signed releases ([#30](https://github.com/chaitanya-ramji/trashpanda/issues/30))
 - [ ] Homebrew cask and tap ([#31](https://github.com/chaitanya-ramji/trashpanda/issues/31))
