@@ -224,4 +224,48 @@ final class RunningAppTests: XCTestCase {
         }
         wait(for: [done], timeout: 10)
     }
+
+    // MARK: The cache
+
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0
+        func bump() { lock.lock(); n += 1; lock.unlock() }
+        var value: Int { lock.lock(); defer { lock.unlock() }; return n }
+    }
+
+    func testReadingTheCacheNeverRunsTheReader() {
+        let runs = Counter()
+        let apps = RunningApps { runs.bump(); return RunningSnapshot(apps: [RunningApp(bundleID: "com.example.a", name: "A")]) }
+        for _ in 0..<10 { _ = apps.cached.running(AppOwner(name: "x", bundleIDs: ["com.example.a"])) }
+        XCTAssertEqual(runs.value, 0, "The menu reads the cache only. It starts no process")
+        XCTAssertTrue(apps.cached.apps.isEmpty, "The cache is empty before the first refresh")
+    }
+
+    func testRefreshRunsTheReaderOnceAndFillsTheCache() {
+        let runs = Counter()
+        let apps = RunningApps {
+            runs.bump()
+            return RunningSnapshot(apps: [RunningApp(bundleID: "com.example.a", name: "A")], processes: ["tool"])
+        }
+        let done = expectation(description: "refresh")
+        apps.refresh {
+            XCTAssertTrue(Thread.isMainThread, "The callback runs on the main queue")
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 10)
+        XCTAssertEqual(runs.value, 1)
+        XCTAssertEqual(apps.cached.running(AppOwner(name: "x", bundleIDs: ["com.example.a"], processNames: ["tool"])), ["A", "tool"])
+        for _ in 0..<10 { _ = apps.cached }
+        XCTAssertEqual(runs.value, 1, "Reading the cache again starts nothing")
+    }
+
+    func testRefreshDoesNotReadOnTheMainThread() {
+        let onMain = Counter()
+        let apps = RunningApps { if Thread.isMainThread { onMain.bump() }; return RunningSnapshot(apps: []) }
+        let done = expectation(description: "refresh")
+        apps.refresh { done.fulfill() }
+        wait(for: [done], timeout: 10)
+        XCTAssertEqual(onMain.value, 0)
+    }
 }

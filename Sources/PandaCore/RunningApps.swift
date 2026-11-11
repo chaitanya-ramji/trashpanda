@@ -54,10 +54,33 @@ public struct RunningSnapshot: Sendable {
 
 /// Reads what runs. Tests give a fake one.
 public struct RunningApps: Sendable {
+    /// Reads what runs now. It can start a process and wait for it, so never call it on the main thread.
     public let take: @Sendable () -> RunningSnapshot
+    private let store = Store()
 
     public init(_ take: @escaping @Sendable () -> RunningSnapshot) {
         self.take = take
+    }
+
+    /// The result of the last `refresh`. It is empty until the first one ends. Reading it is quick and starts nothing,
+    /// so the menu can use it on the main thread.
+    public var cached: RunningSnapshot { store.get() }
+
+    /// Reads what runs on a background queue, keeps the result in `cached`, and then calls `then` on the main queue.
+    public func refresh(then: @escaping @Sendable () -> Void) {
+        let take = take, store = store
+        DispatchQueue.global(qos: .userInitiated).async {
+            store.set(take())
+            DispatchQueue.main.async(execute: then)
+        }
+    }
+
+    /// Holds the last result. A lock protects it, because `refresh` writes it on another thread.
+    private final class Store: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = RunningSnapshot(apps: [])
+        func get() -> RunningSnapshot { lock.lock(); defer { lock.unlock() }; return value }
+        func set(_ new: RunningSnapshot) { lock.lock(); value = new; lock.unlock() }
     }
 
     public static let system = RunningApps {

@@ -112,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             disk = result!.disk
             refreshStatusItem()
             rebuildMenu()
+            refreshRunning()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
                 guard let self else { return }
                 // The status item has its place by now, so the backdrop can go right under it.
@@ -143,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         refreshStatusItem()
         rebuildMenu()
+        refreshRunning()
         scan()
         timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.scan() }
         // An app that opens or quits changes which items are blocked. The bar and the rows must follow, also while
@@ -159,14 +161,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appsChangedTimer?.invalidate()
         // The common modes, so that the timer also fires while the menu is open.
         let t = Timer(timeInterval: 1.0, repeats: false) { [weak self] _ in
-            guard let self, let result = self.result, !self.cleaning else { return }
-            let before = result.findings.map(self.blockers)
-            self.running = self.runningApps.take()
-            // Rebuild only when it changes something. A rebuild closes a submenu that the user has open.
-            if result.findings.map(self.blockers) != before { self.rebuildMenu() }
+            guard let self, self.result != nil, !self.cleaning else { return }
+            self.refreshRunning()
         }
         RunLoop.main.add(t, forMode: .common)
         appsChangedTimer = t
+    }
+
+    /// Reads the running apps in the background. The menu is rebuilt only when it changes which items are blocked,
+    /// because a rebuild closes a submenu that the user has open. Nothing here waits for a process.
+    private func refreshRunning() {
+        runningApps.refresh { [weak self] in
+            guard let self, !self.cleaning else { return }
+            let before = (self.result?.findings ?? []).map(self.blockers)
+            self.running = self.runningApps.cached
+            if (self.result?.findings ?? []).map(self.blockers) != before { self.rebuildMenu() }
+        }
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -174,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshStatusItem()
         if let last = result?.date, Date().timeIntervalSince(last) > 30 * 60 { scan() }
         rebuildMenu()
+        refreshRunning()
     }
 
     // MARK: Scan
@@ -191,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.disk = r.disk
                 self.scanning = false
                 self.busyChanged()
+                self.refreshRunning()
             }
         }
     }
@@ -231,7 +243,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rebuildMenu() {
         menu.removeAllItems()
-        running = runningApps.take()
 
         // "Free up" takes only safe items that need no quit.
         let usableSafe = (result?.findings ?? []).filter { $0.isActionable && $0.tier == .safe && blockers($0).isEmpty }
