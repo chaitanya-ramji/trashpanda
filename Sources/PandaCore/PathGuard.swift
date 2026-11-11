@@ -73,6 +73,12 @@ public struct PathGuard: Sendable {
         "/Library/Keychains", "/Applications/Finder.app", "/Applications/Safari.app",
     ]
 
+    /// The form of a name that is used to compare names. The usual disk ignores letter case, and one name can be written in two Unicode forms.
+    /// The original text stays in the messages. The Unicode step is a safeguard that Swift string comparison already gives.
+    private static func key(_ text: String) -> String {
+        text.precomposedStringWithCanonicalMapping.lowercased()
+    }
+
     public init(home: URL, keep: [String] = []) {
         self.home = home.resolvingSymlinksInPath().path
         self.keep = keep.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
@@ -100,36 +106,38 @@ public struct PathGuard: Sendable {
         }
 
         let relative = String(resolved.dropFirst(home.count + 1))
+        let relativeKey = Self.key(relative)
         if relative.split(separator: "/").count < 2 { return .tooShallow }
 
         // `Library/Caches` itself, and the folders in it that are not ours to empty. They hold iCloud data, or they belong to macOS.
         // The cache explorer (#20) offers them as review items with the strongest dialog, and only through `removeCacheFolderContents`, which names the folder.
-        if relative == "Library/Caches" { return .protectedData("Library/Caches") }
-        let cachePieces = relative.split(separator: "/").map { $0.lowercased() }
-        if cachePieces.count >= 3, cachePieces[2] != allowingSystemCache?.lowercased(), cachePieces[0] == "library", cachePieces[1] == "caches",
+        if relativeKey == Self.key("Library/Caches") { return .protectedData("Library/Caches") }
+        let cachePieces = relativeKey.split(separator: "/").map(String.init)
+        if cachePieces.count >= 3, cachePieces[2] != allowingSystemCache.map(Self.key), cachePieces[0] == "library", cachePieces[1] == "caches",
            Self.protectedCacheFolders.contains(cachePieces[2]) || cachePieces[2].hasPrefix("com.apple.") {
             return .protectedData("Library/Caches/\(cachePieces[2])")
         }
 
-        for tree in Self.protectedHomeTrees where relative == tree || relative.hasPrefix(tree + "/") {
+        for tree in Self.protectedHomeTrees where relativeKey == Self.key(tree) || relativeKey.hasPrefix(Self.key(tree) + "/") {
             // The one exception: a cache folder of a browser, in the exact shape <root>/<profile>/<cache name>.
             // Cookies, logins, history, and every other folder of the profile stay protected.
             // Service Worker storage is the second one. It is only offered as a review item.
-            if BrowserCaches.isCleanableShape(relative: relative) || AgentCaches.isCleanableShape(relative: relative) { break }
+            if BrowserCaches.isCleanableShape(relative: relative) || AgentCaches.isCleanableShape(relative: relative) { continue }
             return .protectedData(tree)
         }
 
         // The auto memory of Claude Code: `.claude/projects/<project>/memory` and everything in it.
-        let pieces = relative.split(separator: "/")
+        let pieces = relativeKey.split(separator: "/")
         if pieces.count >= 4, pieces[0] == ".claude", pieces[1] == "projects", pieces[3] == "memory" { return .protectedData(".claude/projects/*/memory") }
         // The folders that hold those memory folders: deleting one of them would delete the memory with it.
         if pieces.count == 2 || pieces.count == 3, pieces[0] == ".claude", pieces[1] == "projects" { return .protectedData(".claude/projects") }
 
-        for file in Self.protectedFiles where relative == file || relative.hasPrefix(file + "/") || file.hasPrefix(relative + "/") {
+        for file in Self.protectedFiles where relativeKey == Self.key(file) || relativeKey.hasPrefix(Self.key(file) + "/") || Self.key(file).hasPrefix(relativeKey + "/") {
             return .protectedData(file)
         }
 
-        for entry in keep where resolved == entry || resolved.hasPrefix(entry + "/") || entry.hasPrefix(resolved + "/") {
+        let resolvedKey = Self.key(resolved)
+        for entry in keep.map(Self.key) where resolvedKey == entry || resolvedKey.hasPrefix(entry + "/") || entry.hasPrefix(resolvedKey + "/") {
             return .kept
         }
         return nil
