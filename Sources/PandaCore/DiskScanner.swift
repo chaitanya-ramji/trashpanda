@@ -932,7 +932,7 @@ public final class DiskScanner {
                 location: "\(place) · \(disk.url.path)\(finder)", bytes: disk.allocatedBytes, tier: .review,
                 rebuild: .never, action: .inform,
                 note: "Holds \(ByteText.string(inside)) of data. The file can stay large after a clean.",
-                helpURL: DockerDesktopDisk.helpURL))
+                helpURL: DockerDesktopDisk.helpURL, insideBytes: inside))
         }
 
         // Volumes. They can hold databases, so a removable one is offered one by one, with a strong warning.

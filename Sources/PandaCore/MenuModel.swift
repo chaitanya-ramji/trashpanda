@@ -208,6 +208,7 @@ public struct MenuModel: Equatable, Sendable {
             }
             rows.append(.separator)
             rows += groupRows(findings, input)
+            rows += goodToKnowRows(input.infoRows)
         } else {
             rows.append(.note("Scanning…"))
         }
@@ -248,6 +249,14 @@ public struct MenuModel: Equatable, Sendable {
             return submenu(for: only, items: findings.filter { $0.ecosystem == only }, input)
         }
         return Submenu(rows: segment.ecosystems.map { eco in groupRow(eco, findings.filter { $0.ecosystem == eco }, input) })
+    }
+
+    /// The short section at the bottom: facts that cannot be cleaned here. At most 3 rows. Each one is off and has no action.
+    private static func goodToKnowRows(_ info: [InfoRow]) -> [Row] {
+        guard !info.isEmpty else { return [] }
+        return [.separator, .section("Good to know")] + info.prefix(StorageFacts.maxRows).map {
+            Row(title: $0.title, enabled: false, tooltip: $0.tooltip, subtitle: $0.detail)
+        }
     }
 
     // MARK: Groups
@@ -447,6 +456,7 @@ public struct MenuInput: Sendable {
     }
 
     public var findings: [Finding] { result?.findings ?? [] }
+    public var infoRows: [InfoRow] { result?.infoRows ?? [] }
     public var hasResult: Bool { result != nil }
     public var activity: MenuModel.Activity { cleaning ? .cleaning : (scanning ? .scanning : .idle) }
 
