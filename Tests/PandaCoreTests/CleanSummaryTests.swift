@@ -65,6 +65,23 @@ final class CleanSummaryTests: XCTestCase {
         XCTAssertEqual(s.lines[1], "7 items left alone: reason 1; reason 2; reason 3 and 4 more.")
     }
 
+    func testStoppedItemsHaveTheirOwnLine() {
+        let r = report(skipped: ["/a: Stopped by you", "/b: Stopped by you"])
+        let s = CleanSummary.make(r, dockerDiskNote: false)
+        XCTAssertEqual(s.lines[1], "Stopped: 2 items not started.")
+        XCTAssertFalse(s.lines.contains { $0.contains("left alone") }, "\(s.lines)")
+        XCTAssertTrue(CleanSummary.needsDialog(r, dockerDiskNote: false))
+        XCTAssertEqual(CleanSummary.make(report(skipped: ["/a: Stopped by you"]), dockerDiskNote: false).lines[1],
+                       "Stopped: 1 item not started.")
+    }
+
+    func testStoppedItemsStayVisibleWithThreeOtherReasons() {
+        let skipped = ["/a: reason 1.", "/b: reason 2.", "/c: reason 3.", "/d: reason 4.", "/e: Stopped by you", "/f: Stopped by you"]
+        let s = CleanSummary.make(report(skipped: skipped), dockerDiskNote: false)
+        XCTAssertEqual(s.lines[1], "Stopped: 2 items not started.")
+        XCTAssertEqual(s.lines[2], "4 items left alone: reason 1; reason 2; reason 3 and 1 more.")
+    }
+
     func testNothingFreed() {
         let s = CleanSummary.make(report(freed: 0, removed: 0, skipped: ["x: Stopped by you"], change: 0), dockerDiskNote: false)
         XCTAssertEqual(s.title, "Nothing freed")

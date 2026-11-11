@@ -163,9 +163,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Menu
 
     private func menuInput() -> MenuInput {
-        MenuInput(result: result, disk: disk, scanning: scanning, cleaning: cleaning, running: running,
-                  staleDays: scanner.config.staleDays, updateVersion: updates.available?.version,
-                  updateCheckEnabled: updates.isEnabled, loginEnabled: loginEnabled)
+        var input = MenuInput(result: result, disk: disk, scanning: scanning, cleaning: cleaning, running: running,
+                              staleDays: scanner.config.staleDays, updateVersion: updates.available?.version,
+                              updateCheckEnabled: updates.isEnabled, loginEnabled: loginEnabled)
+        input.cleaningTitle = cleaner.progressText
+        input.stopRequested = cleaner.stopRequested
+        return input
     }
 
     /// The programs that block this item right now. An empty list means that it can be cleaned.
@@ -225,6 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .rescan:
             Log.info("user: scan again")
             scan()
+        case .stopClean:
+            cleaner.requestStop()
         case .showLog:
             NSWorkspace.shared.activateFileViewerSelecting([Log.fileURL])
         case .openUpdate:
