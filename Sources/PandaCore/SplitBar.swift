@@ -103,7 +103,7 @@ public struct SplitTotals: Equatable, Sendable {
     /// compact "Free 1.5 GB now · 1.4 GB to review · 491 MB in open apps",
     /// short "Free 1.5 GB · 1.4 GB review · 491 MB in apps". The short one keeps all three numbers.
     public func summary(_ wording: Wording) -> String {
-        guard all > 0 else { return "All tidy. Nothing to clean." }
+        guard all > 0 else { return "All tidy." }
         var parts: [String] = []
         if free > 0 {
             switch wording {

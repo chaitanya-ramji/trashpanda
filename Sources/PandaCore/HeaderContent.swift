@@ -48,6 +48,9 @@ public struct HeaderContent: Equatable, Sendable {
     /// `built` is what the open menu shows. `now` is what the model says now.
     public static func liveUpdate(built: HeaderContent, now: HeaderContent) -> LiveUpdate {
         if built.showsSkeleton && !now.showsSkeleton { return .rebuildMenu }
+        // A scan or a clean has ended while the menu is open: the old numbers are no longer true, and the live rows already follow the
+        // new state. Build the whole menu again (each build has a fresh header, so this is safe).
+        if built.busy && !now.busy { return .rebuildMenu }
         return .detailOnly(now.keepingBar(of: built))
     }
 
@@ -65,6 +68,10 @@ public struct HeaderContent: Equatable, Sendable {
         let real: Bar = hasParts ? .parts : .emptyTrack
         switch activity {
         case .idle:
+            // No scan has finished yet (the first build at launch): never the "done" look, the skeleton.
+            if !hasResult {
+                return HeaderContent(bar: .skeleton, detail: "Looking for things to clean…", barAlpha: 1, busy: false, isInteractive: true)
+            }
             return HeaderContent(bar: real, detail: nil, barAlpha: 1, busy: false, isInteractive: true)
         case .scanning:
             if !hasResult {

@@ -437,10 +437,10 @@ final class StorageHeaderView: NSView {
             // A part that is not under the mouse gets lighter. The floor is on the final alpha of each fill,
             // so a pale part (a review share, or stripes) stays visible.
             let dimmed = style.dimOtherParts && hovered != nil && hovered != i
-            // While the old data is checked again, the fills are lighter. The lines of a pattern keep their alpha, so they stay sharp.
+            // While the old data is checked again, the fills are lighter. The lines of a pattern fade less, so they stay sharp.
             let refresh = content.isRefreshing ? style.refreshingAlpha : 1
             let fade: (CGFloat) -> CGFloat = dimmed ? { SplitBar.dimmedAlpha($0 * SplitBar.hoverDimFactor * refresh) } : { $0 * refresh }
-            let lineFade: (CGFloat) -> CGFloat = dimmed ? { SplitBar.dimmedAlpha($0 * SplitBar.hoverDimFactor) } : { $0 }
+            let lineFade: (CGFloat) -> CGFloat = dimmed ? { SplitBar.dimmedAlpha($0 * SplitBar.hoverDimFactor * refresh) } : { $0 * max(refresh, 0.85) }
             let rect = NSRect(x: bar.minX + slot.x, y: bar.minY, width: slot.width, height: bar.height)
             let widths = SplitBar.partWidths(s, width: rect.width)
             // `divided` returns the slice first and the remainder second.

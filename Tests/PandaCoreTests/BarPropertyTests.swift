@@ -155,7 +155,7 @@ final class BarPropertyTests: XCTestCase {
             for compact in [false, true] {
                 let text = totals.summary(compact: compact)
                 if totals.all == 0 {
-                    XCTAssertEqual(text, "All tidy. Nothing to clean.")
+                    XCTAssertEqual(text, "All tidy.")
                     continue
                 }
                 for (value, word) in [(totals.free, "free"), (totals.review, "review"), (totals.waiting, "open")] {

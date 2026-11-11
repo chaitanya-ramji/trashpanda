@@ -40,9 +40,9 @@ public struct HeaderStyle: Equatable, Sendable {
     /// With "Reduce motion" the spinner does not show. The text still says that the app is busy.
     public let showSpinner: Bool
 
-    /// The skeleton: the alpha of the grey track and pills (of the label color), and of the white shimmer band.
     /// How strong the bar is drawn while the old data is checked again. Dark mode needs more than light mode.
     public let refreshingAlpha: CGFloat
+    /// The skeleton: the alpha of the grey track and pills (of the label color), and of the white shimmer band.
     public let skeletonAlpha: CGFloat
     public let shimmerAlpha: CGFloat
     /// The shimmer moves only when motion is allowed. With "Reduce motion" the skeleton is still.

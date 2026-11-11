@@ -37,7 +37,7 @@ final class SplitBarTests: XCTestCase {
     func testNothingToCleanGivesNoBar() {
         XCTAssertTrue(SplitBar.segments(from: []).isEmpty)
         XCTAssertTrue(SplitBar.segments(from: [item(.swift, 100, action: .inform)]).isEmpty)
-        XCTAssertTrue(SplitBar.totals(from: [item(.swift, 100, action: .inform)]).summary() == "All tidy. Nothing to clean.")
+        XCTAssertTrue(SplitBar.totals(from: [item(.swift, 100, action: .inform)]).summary() == "All tidy.")
     }
 
     // MARK: The bar matches the rows of the menu

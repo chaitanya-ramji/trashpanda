@@ -64,4 +64,37 @@ final class HeaderContentTests: XCTestCase {
         XCTAssertEqual(HeaderContent.shimmerPhase(at: 0.45 + 1.8, period: 1.8), 0.25, accuracy: 1e-9)
         XCTAssertEqual(HeaderContent.shimmerPhase(at: 5, period: 0), 0)
     }
+
+    func testBeforeTheFirstScanTheHeaderIsASkeletonAndNeverTheDoneLook() {
+        let c = HeaderContent.make(activity: .idle, hasResult: false, hasParts: false)
+        XCTAssertTrue(c.showsSkeleton)
+        XCTAssertFalse(c.isDone)
+    }
+
+    /// What an open menu does for each pair of states: only the end of a busy state, or the first result, builds the whole menu.
+    func testTheLiveUpdateRuleForEveryPairOfStates() {
+        func content(_ s: String) -> HeaderContent {
+            switch s {
+            case "skeleton": return HeaderContent.make(activity: .scanning, hasResult: false, hasParts: false)
+            case "rescan": return HeaderContent.make(activity: .scanning, hasResult: true, hasParts: true)
+            case "cleaning": return HeaderContent.make(activity: .cleaning, hasResult: true, hasParts: true, progress: "Cleaning 1 of 3")
+            default: return HeaderContent.make(activity: .idle, hasResult: true, hasParts: true)
+            }
+        }
+        let states = ["skeleton", "rescan", "cleaning", "idle"]
+        for built in states {
+            for now in states {
+                let result = HeaderContent.liveUpdate(built: content(built), now: content(now))
+                let rebuild = (built == "skeleton" && now != "skeleton") || ((built == "rescan" || built == "cleaning") && now == "idle")
+                if rebuild {
+                    XCTAssertEqual(result, .rebuildMenu, "\(built) to \(now) builds the whole menu")
+                } else if case .detailOnly(let c) = result {
+                    // The parts and the numbers of the built menu stay.
+                    if built != "skeleton" && now != "skeleton" { XCTAssertEqual(c.bar, content(built).bar, "\(built) to \(now)") }
+                } else {
+                    XCTFail("\(built) to \(now) must be a detail-only update")
+                }
+            }
+        }
+    }
 }
