@@ -131,6 +131,8 @@ public final class DiskScanner {
     private let isSocket: (String) -> Bool
     /// Path of `xcrun`. Tests set it to a fake tool. The default finds the real one.
     private let xcrunOverride: String?
+    /// The developer folder of Xcode. `xcode-select -p` runs once for each scan, not once for each call.
+    private let developerFolder = ScanValue<String>()
     private let brewOverride: String?
     private let ollamaOverride: String?
     /// The programs that run now, with their full paths. A runtime that a program starts from stays.
@@ -172,6 +174,7 @@ public final class DiskScanner {
     public func scan() -> ScanResult {
         let started = Date()
         Log.info("scan start (owner tools: \(useOwnerTools))")
+        developerFolder.reset()
         var findings: [Finding] = []
         let lock = NSLock()
         func add(_ f: [Finding]) { lock.lock(); findings.append(contentsOf: f); lock.unlock() }
@@ -351,8 +354,9 @@ public final class DiskScanner {
     /// and calling `xcrun` there can open an install window.
     func simctl() -> Simctl? {
         if let xcrunOverride { return Simctl(xcrun: xcrunOverride) }
-        let developer = Shell.run("/usr/bin/xcode-select", ["-p"], timeout: 5, quiet: true).stdout
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let developer = developerFolder.value {
+            Shell.run("/usr/bin/xcode-select", ["-p"], timeout: 5, quiet: true).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard developer.contains(".app/Contents/Developer"), let xcrun = Shell.resolve("xcrun") else { return nil }
         return Simctl(xcrun: xcrun)
     }
@@ -511,8 +515,9 @@ public final class DiskScanner {
     /// The host name is shown only when it is proven by the name of the folder. Otherwise the item says that the name is not known, and the folder name is in the tooltip.
     func scanServiceWorkerStorage() -> [Finding] {
         BrowserCaches.browsers.filter { $0.kind == .chromium }.flatMap { b -> [Finding] in
-            let profiles = Set(ServiceWorkerSites.sites(of: b, home: home).map(\.profile)).count
-            return ServiceWorkerSites.sites(of: b, home: home).compactMap { s in
+            let sites = ServiceWorkerSites.sites(of: b, home: home)
+            let profiles = Set(sites.map(\.profile)).count
+            return sites.compactMap { s in
                 guard s.bytes > 0, guardian.check(s.url) == nil else { return nil }
                 let where_ = profiles > 1 ? " · profile \(s.profile)" : ""
                 let folder = s.host == nil ? " · folder \(s.folder)" : ""
@@ -819,7 +824,7 @@ public final class DiskScanner {
         guard let line = output.split(separator: "\n").last(where: { $0.contains("would free approximately") }),
               let range = line.range(of: "approximately ") else { return 0 }
         let token = line[range.upperBound...].split(separator: " ").first.map(String.init) ?? ""
-        return parseDockerSize(token) ?? 0
+        return ByteText.parse(token) ?? 0
     }
 
     func scanDocker() -> [Finding] {
@@ -858,8 +863,7 @@ public final class DiskScanner {
         // so each one is a review item. A running container never appears.
         for c in inventory.stoppedContainers where DockerAction.isHexID(c.id) {
             let label = c.name.isEmpty ? String(c.id.prefix(12)) : c.name
-            let own = (mounts[c.id] ?? []).compactMap { name in inventory.volumes.first { $0.name == name } }
-                .filter { $0.driver == "local" && $0.links == 1 && users[$0.name] == [c.id] && DockerAction.isVolumeName($0.name) }
+            let own = DockerVolumes.ownedOnly(by: c.id, mounts: mounts, in: inventory.volumes)
             if own.isEmpty {
                 out.append(Finding(id: "docker.container:\(c.id.prefix(12))", ecosystem: .docker,
                                    title: "Stopped container · \(label)",
@@ -882,8 +886,7 @@ public final class DiskScanner {
         // so this is a review item with the strongest dialog, and its default button keeps everything.
         for c in inventory.containers where c.state == "running" && DockerAction.isHexID(c.id) {
             let label = c.name.isEmpty ? String(c.id.prefix(12)) : c.name
-            let own = (mounts[c.id] ?? []).compactMap { name in inventory.volumes.first { $0.name == name } }
-                .filter { $0.driver == "local" && $0.links == 1 && users[$0.name] == [c.id] && DockerAction.isVolumeName($0.name) }
+            let own = DockerVolumes.ownedOnly(by: c.id, mounts: mounts, in: inventory.volumes)
             own.forEach { handled.insert($0.name) }
             let vols = own.isEmpty ? "" : " · volumes: " + own.map { $0.anonymousShort }.joined(separator: ", ")
             out.append(Finding(id: "docker.running:\(c.id.prefix(12))", ecosystem: .docker,
@@ -923,12 +926,12 @@ public final class DiskScanner {
                 .values.reduce(Int64(0)) { $0 + $1.size }
             // Finder shows the full size of a sparse file. We say so in the tooltip, to avoid confusion.
             let finder = disk.logicalBytes > disk.allocatedBytes * 2
-                ? " · Finder may show \(Self.megabytesText(disk.logicalBytes))" : ""
+                ? " · Finder may show \(ByteText.string(disk.logicalBytes))" : ""
             out.append(Finding(
                 id: "docker.vmdisk", ecosystem: .docker, title: "Docker Desktop disk image",
                 location: "\(place) · \(disk.url.path)\(finder)", bytes: disk.allocatedBytes, tier: .review,
                 rebuild: .never, action: .inform,
-                note: "Holds \(Self.megabytesText(inside)) of data. The file can stay large after a clean.",
+                note: "Holds \(ByteText.string(inside)) of data. The file can stay large after a clean.",
                 helpURL: DockerDesktopDisk.helpURL))
         }
 
@@ -979,7 +982,7 @@ public final class DiskScanner {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   obj["Type"] as? String == "Build Cache",
                   let text = obj["Reclaimable"] as? String else { continue }
-            return Self.parseDockerSize(text) ?? 0
+            return ByteText.parse(text) ?? 0
         }
         return 0
     }
@@ -1185,9 +1188,7 @@ public final class DiskScanner {
     }
 
     func scanProjects() -> [Finding] {
-        var roots: [URL] = projectRoots()
-        let fm = FileManager.default
-
+        let roots = projectRoots()
         let scanner = ProjectScanner(home: home, roots: roots, guardian: guardian,
                                      activeDirectories: Shell.activeDirectories(),
                                      now: now(), staleDays: config.staleDays)
@@ -1195,31 +1196,25 @@ public final class DiskScanner {
     }
 
     // MARK: Helpers
+}
 
-    /// "4.1 GB". The same words as the menu uses.
-    static func megabytesText(_ bytes: Int64) -> String {
-        let v = Double(max(0, bytes))
-        if v >= 1e10 { return String(format: "%.0f GB", v / 1e9) }
-        if v >= 1e9 { return String(format: "%.1f GB", v / 1e9) }
-        if v >= 1e6 { return String(format: "%.0f MB", v / 1e6) }
-        return String(format: "%.0f KB", v / 1e3)
+/// A value that is found once and kept until `reset()`. Several threads can ask for it.
+final class ScanValue<T> {
+    private let lock = NSLock()
+    private var stored: T?
+
+    func value(_ find: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        if let stored { return stored }
+        let found = find()
+        stored = found
+        return found
     }
 
-    /// Parses "1.2GB (100%)" or "512kB" from Docker output. Docker uses decimal units.
-    static func parseDockerSize(_ text: String) -> Int64? {
-        let head = text.split(separator: " ").first.map(String.init) ?? text
-        guard let range = head.range(of: "^[0-9.]+", options: .regularExpression),
-              let value = Double(head[range]) else { return nil }
-        let unit = head[range.upperBound...].lowercased()
-        let scale: Double
-        switch unit {
-        case "b", "": scale = 1
-        case "kb": scale = 1_000
-        case "mb": scale = 1_000_000
-        case "gb": scale = 1_000_000_000
-        case "tb": scale = 1_000_000_000_000
-        default: return nil
-        }
-        return Int64(value * scale)
+    func reset() {
+        lock.lock()
+        stored = nil
+        lock.unlock()
     }
 }

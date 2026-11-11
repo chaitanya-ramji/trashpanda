@@ -140,6 +140,17 @@ public struct DockerInventory: Sendable {
     }
 
     static func bytes(_ value: Any?) -> Int64 {
-        DiskScanner.parseDockerSize(string(value)) ?? 0
+        ByteText.parse(string(value)) ?? 0
+    }
+}
+
+enum DockerVolumes {
+    /// The volumes of one container that no other container uses. Each one is local, has one link, and has a name that is safe
+    /// to give to `docker volume rm`. `mounts` says which volumes each container mounts.
+    static func ownedOnly(by containerID: String, mounts: [String: [String]], in volumes: [DockerInventory.Volume]) -> [DockerInventory.Volume] {
+        (mounts[containerID] ?? []).compactMap { name in volumes.first { $0.name == name } }.filter { v in
+            v.driver == "local" && v.links == 1 && DockerAction.isVolumeName(v.name)
+                && mounts.filter { $0.value.contains(v.name) }.map(\.key) == [containerID]
+        }
     }
 }

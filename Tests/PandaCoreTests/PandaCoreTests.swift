@@ -241,10 +241,10 @@ final class CleanerTests: XCTestCase {
 
 final class MiscTests: XCTestCase {
     func testDockerSizeParsing() {
-        XCTAssertEqual(DiskScanner.parseDockerSize("1.5GB (100%)"), 1_500_000_000)
-        XCTAssertEqual(DiskScanner.parseDockerSize("512kB"), 512_000)
-        XCTAssertEqual(DiskScanner.parseDockerSize("0B"), 0)
-        XCTAssertNil(DiskScanner.parseDockerSize("lots"))
+        XCTAssertEqual(ByteText.parse("1.5GB (100%)"), 1_500_000_000)
+        XCTAssertEqual(ByteText.parse("512kB"), 512_000)
+        XCTAssertEqual(ByteText.parse("0B"), 0)
+        XCTAssertNil(ByteText.parse("lots"))
     }
 
     func testOwnerCommandsAreFixed() {
@@ -308,6 +308,7 @@ final class EndToEndTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: thesis.path), "Personal files stay")
         XCTAssertTrue(FileManager.default.fileExists(atPath: box.home.appendingPathComponent("Developer/old/package.json").path))
 
+        Log.flush()
         let log = try String(contentsOf: Log.fileURL, encoding: .utf8)
         XCTAssertTrue(log.contains("scan start"))
         XCTAssertTrue(log.contains("found [safe]"))
@@ -624,6 +625,7 @@ final class StaleLimitTests: XCTestCase {
                                           atomically: true, encoding: .utf8)
         XCTAssertEqual(Config.load(home: box.home).staleDays, 30)
 
+        Log.flush()
         let log = try String(contentsOf: Log.fileURL, encoding: .utf8)
         XCTAssertTrue(log.contains("stale limit: 12 days (from settings file)"))
         XCTAssertTrue(log.contains("WARN  settings: stale_days \"banana\""))

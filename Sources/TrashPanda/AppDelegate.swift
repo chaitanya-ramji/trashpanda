@@ -43,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Lifecycle
 
+    func applicationWillTerminate(_ notification: Notification) {
+        Log.flush()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let version = UpdateController.currentVersion
         Log.info("launch Trash Panda \(version), log at \(Log.fileURL.path)")
