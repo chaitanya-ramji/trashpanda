@@ -49,4 +49,13 @@ public enum MenuText {
         return Primary(title: "Free up \(ByteText.string(safeBytes))…",
                        subtitle: reviewBytes > 0 ? items + " Review items stay." : items, enabled: true)
     }
+
+    /// "Last scan: 12 minutes ago". A scan less than one minute old is "Last scan: just now".
+    public static func lastScan(_ date: Date, now: Date) -> String {
+        guard now.timeIntervalSince(date) >= 60 else { return "Last scan: just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.unitsStyle = .full
+        return "Last scan: " + formatter.localizedString(for: date, relativeTo: now)
+    }
 }

@@ -175,6 +175,7 @@ public struct MenuModel: Equatable, Sendable {
             rows.append(Row(title: "Update available: \(version)…", action: .openUpdate))
         }
         rows.append(Row(title: scanning ? "Scanning…" : "Scan again", enabled: !scanning && !cleaning, action: .rescan,
+                        subtitle: scanning ? nil : input.result.map { MenuText.lastScan($0.date, now: input.now) },
                         keyEquivalent: "r"))
         // Hold Option to see the log item. It is for support, so it stays out of the way.
         rows.append(Row(title: "Show log in Finder", action: .showLog, keyEquivalent: "r", isOptionAlternate: true))
