@@ -56,16 +56,50 @@ final class AppQuitterTests: XCTestCase {
         XCTAssertFalse(asked, "A command line program cannot be asked, and is not killed")
     }
 
-    /// The source must never force a quit or kill a process.
+    /// The source must never force a quit or kill a process. One exception: `Sources/PandaCore/Shell.swift` sends
+    /// SIGKILL to the child process that it started itself, after the time limit and a SIGTERM (decision D-8, issue 186).
     func testNoForcedQuitAnywhereInTheSource() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources")
         let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)!.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
         XCTAssertGreaterThan(files.count, 20)
-        let banned = ["forceTerminate", "SIGKILL", "kill(", "killall", "pkill", "NSRunningApplication.forceTerminate", "/bin/kill"]
+        var problems: [String] = []
         for f in files {
-            let text = try String(contentsOf: f, encoding: .utf8)
-            for word in banned { XCTAssertFalse(text.contains(word), "\(f.lastPathComponent) contains \(word)") }
+            let relative = String(f.path.dropFirst(root.path.count + 1))
+            problems += Self.forcedKillProblems(in: try String(contentsOf: f, encoding: .utf8), name: relative, relativePath: relative)
         }
+        XCTAssertEqual(problems, [])
+    }
+
+    func testScannerFlagsAKillInAnotherShellSwift() {
+        let bad = "func f() { kill(0, SIGKILL) }\n"
+        XCTAssertFalse(Self.forcedKillProblems(in: bad, name: "Shell.swift", relativePath: "Other/Shell.swift").isEmpty)
+        XCTAssertFalse(Self.forcedKillProblems(in: "kill (1, 9)", name: "A.swift", relativePath: "A.swift").isEmpty)
+        XCTAssertFalse(Self.forcedKillProblems(in: "killpg(1, 9)", name: "A.swift", relativePath: "A.swift").isEmpty)
+        // The exact allowed file may have the one call, but not a second one.
+        let one = "        _ = kill(pid, SIGKILL)\n"
+        XCTAssertEqual(Self.forcedKillProblems(in: one, name: "Shell.swift", relativePath: "PandaCore/Shell.swift"), [])
+        XCTAssertFalse(Self.forcedKillProblems(in: one + one, name: "Shell.swift", relativePath: "PandaCore/Shell.swift").isEmpty)
+        XCTAssertFalse(Self.forcedKillProblems(in: "kill(0, SIGKILL)", name: "Shell.swift", relativePath: "PandaCore/Shell.swift").isEmpty)
+    }
+
+    static func forcedKillProblems(in text: String, name: String, relativePath: String) -> [String] {
+        var problems: [String] = []
+        let banned = ["forceTerminate", "killall", "pkill", "killpg", "kill -9", "SIGSTOP", "/bin/kill"]
+        for word in banned where text.contains(word) { problems.append("\(relativePath) contains \(word)") }
+        let killCall = try! NSRegularExpression(pattern: #"\bkill\s*\("#)
+        let calls = killCall.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+        let sigkillLines = text.split(separator: "\n", omittingEmptySubsequences: false).filter { $0.contains("SIGKILL") }
+        if relativePath == "PandaCore/Shell.swift" {
+            if calls != 1 || !text.contains("kill(pid, SIGKILL)") { problems.append("\(relativePath) must have exactly one kill(pid, SIGKILL)") }
+            for line in sigkillLines {
+                let t = line.trimmingCharacters(in: .whitespaces)
+                if !(t.hasPrefix("//") || t.contains("Log.") || t.contains("kill(pid, SIGKILL)")) { problems.append("\(relativePath) has SIGKILL in: \(t)") }
+            }
+        } else {
+            if calls > 0 { problems.append("\(relativePath) contains kill(") }
+            if !sigkillLines.isEmpty { problems.append("\(relativePath) contains SIGKILL") }
+        }
+        return problems
     }
 }
