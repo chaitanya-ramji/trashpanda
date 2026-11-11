@@ -129,12 +129,13 @@ final class MenuModelTests: XCTestCase {
             "  # Safe to clean",
             "  node_modules · app-a | 1.3 GB",
             "  node_modules · app-b | 500 MB",
-            "Docker | 40 MB",
-            "  Engine: Test Engine · no container uses it (local) [off]",
-            "  ---",
-            "  # Review first",
-            "  Unused volume · data | 40 MB",
-            "Python | info",
+            "Smaller groups | 40 MB",
+            "  Docker | 40 MB",
+            "    Engine: Test Engine · no container uses it (local) [off]",
+            "    ---",
+            "    # Review first",
+            "    Unused volume · data | 40 MB",
+            "  Python | info",
             "---",
             "Scan again",
             "Update available: 9.9.9…",
@@ -343,21 +344,29 @@ final class MenuModelTests: XCTestCase {
         XCTAssertFalse(MenuModel.Row.section("x").enabled)
     }
 
-    func testEveryGroupGetsARow() {
+    func testEveryGroupGetsARowOrIsInSmallerGroups() throws {
         let findings = Ecosystem.allCases.enumerated().map { i, eco in
             item("g\(i)", eco, "Item \(i)", Int64(i + 1) * mb, .review)
         }
         let model = MenuModel.make(input(findings))
         let groups = model.rows.filter { $0.kind == .columns }
-        XCTAssertEqual(groups.count, Ecosystem.allCases.count)
-        XCTAssertEqual(Set(groups.map(\.title)).count, Ecosystem.allCases.count)
+        let smaller = try XCTUnwrap(groups.last)
+        XCTAssertEqual(smaller.title, "Smaller groups")
+        let main = groups.dropLast()
+        XCTAssertEqual(main.count, 8)
+        let folded = try XCTUnwrap(smaller.submenu?.rows)
+        XCTAssertEqual(main.count + folded.count, Ecosystem.allCases.count)
+        XCTAssertEqual(Set((main.map(\.title) + folded.map(\.title))).count, Ecosystem.allCases.count)
         // The largest first.
         XCTAssertEqual(groups.first?.title, Ecosystem.allCases.last?.name)
+        // The size of the row is the sum of the folded rows: 1 MB to 26 MB.
+        XCTAssertEqual(smaller.size, "351 MB")
     }
 
     func testTheColumnOfSizesFollowsTheTitlesOfTheGroup() throws {
         let model = MenuModel.make(input(fixture()))
-        let group = try XCTUnwrap(model.rows.first { $0.title == "Docker" })
+        let smaller = try XCTUnwrap(model.rows.first { $0.title == "Smaller groups" })
+        let group = try XCTUnwrap(smaller.submenu?.rows.first { $0.title == "Docker" })
         XCTAssertEqual(group.submenu?.widthTitles, ["Unused volume · data"])
         XCTAssertEqual(group.submenu?.alignIcons, true)
         XCTAssertEqual(MenuModel.tab(forWidestTitle: 10), 268)
@@ -374,15 +383,19 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(describe(MenuModel.popup(for: trashPart, inp).rows), ["# Review first", "Trash | 5.3 GB"])
     }
 
-    func testAClickOnOtherOpensOneRowForEachGroup() throws {
-        let many = Ecosystem.allCases.prefix(8).enumerated().map { i, eco in
+    func testAClickOnOtherOpensTheSameGroupsAsSmallerGroups() throws {
+        let many = Ecosystem.allCases.prefix(10).enumerated().map { i, eco in
             item("o\(i)", eco, "Item \(i)", Int64(i + 1) * 100 * mb, .review)
         }
         let inp = input(many)
-        let other = try XCTUnwrap(MenuModel.make(inp).header.segments.first { $0.isOther })
+        let model = MenuModel.make(inp)
+        let other = try XCTUnwrap(model.header.segments.first { $0.isOther })
         let popup = MenuModel.popup(for: other, inp)
         XCTAssertEqual(popup.rows.count, other.ecosystems.count)
         XCTAssertTrue(popup.rows.allSatisfy { $0.kind == .columns && $0.submenu != nil })
+        let smaller = try XCTUnwrap(model.rows.first { $0.title == "Smaller groups" })
+        XCTAssertEqual(popup, smaller.submenu)
+        XCTAssertEqual(smaller.size, ByteText.string(other.bytes))
     }
 
     func testAManyItemAgentsGroupIsSplitByProduct() throws {
