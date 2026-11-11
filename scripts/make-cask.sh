@@ -27,6 +27,7 @@ cask "trashpanda" do
   zap trash: [
     "~/.config/trashpanda",
     "~/Library/Logs/TrashPanda",
+    "~/Library/Preferences/dev.trashpanda.app.plist",
   ]
 end
 EOF

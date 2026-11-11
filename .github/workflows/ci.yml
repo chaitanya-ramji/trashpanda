@@ -21,6 +21,15 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Check the app bundle
+        run: |
+          VERSION=0.7.0-beta.1 scripts/build-app.sh
+          plist=build/TrashPanda.app/Contents/Info.plist
+          plutil -lint "$plist"
+          build_number=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$plist")
+          echo "$build_number" | grep -Eq '^[0-9]+(\.[0-9]+){0,2}$'
+          full=$(/usr/libexec/PlistBuddy -c "Print :TPFullVersion" "$plist")
+          test "$full" = "0.7.0-beta.1"
       - name: Test the roadmap script
         run: python3 -m unittest discover -s scripts -p "test_*.py"
       - name: Check the workflow files

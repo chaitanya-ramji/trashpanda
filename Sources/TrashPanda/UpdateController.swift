@@ -12,7 +12,7 @@ final class UpdateController: NSObject {
     private var timer: Timer?
     private var running = false
 
-    static var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev" }
+    static var currentVersion: String { Bundle.main.infoDictionary?["TPFullVersion"] as? String ?? Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev" }
 
     /// Starts the daily check. The first check waits a little, so that the launch stays quiet.
     func start() {

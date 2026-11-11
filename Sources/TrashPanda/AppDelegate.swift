@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let version = UpdateController.currentVersion
         Log.info("launch Trash Panda \(version), log at \(Log.fileURL.path)")
         statusItem.button?.imagePosition = .imageLeading
         menu.delegate = self

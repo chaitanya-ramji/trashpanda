@@ -20,9 +20,14 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/trashpanda"
 cp scripts/Info.plist "$APP/Contents/Info.plist"
 
+# CFBundleVersion must be plain numbers with periods, so it is the commit count.
+# CFBundleShortVersionString drops any "-beta.N" tail. TPFullVersion keeps the full text,
+# and the app reads it for the log and for the update check.
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
 if [[ -n "${VERSION:-}" ]]; then
-    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION%%-*}" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :TPFullVersion $VERSION" "$APP/Contents/Info.plist"
 fi
 
 # The app draws its own icon. We write the sizes, then pack them.
