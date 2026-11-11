@@ -15,8 +15,12 @@ jobs:
     runs-on: macos-15
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Test
         run: swift test
@@ -27,6 +31,7 @@ jobs:
           CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
           KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          echo "RELEASE_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
           KEYCHAIN_PASSWORD="$(uuidgen)"
           echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
@@ -55,18 +60,34 @@ jobs:
             "build/TrashPanda-$VERSION.dmg" "build/TrashPanda-$VERSION.dmg.sha256" \
             --title "Trash Panda $VERSION" --generate-notes
 
+      - name: Prove where the disk image was built
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: build/TrashPanda-*.dmg
+
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: chaitanya-ramji/homebrew-tap
+          token: ${{ secrets.TAP_TOKEN }}
+          path: tap
+
       - name: Update the Homebrew cask
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           SHA="$(cut -d' ' -f1 "build/TrashPanda-$VERSION.dmg.sha256")"
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/chaitanya-ramji/homebrew-tap.git" "$RUNNER_TEMP/tap"
-          mkdir -p "$RUNNER_TEMP/tap/Casks"
-          ./scripts/make-cask.sh "$VERSION" "$SHA" > "$RUNNER_TEMP/tap/Casks/trashpanda.rb"
-          cd "$RUNNER_TEMP/tap"
+          mkdir -p tap/Casks
+          ./scripts/make-cask.sh "$VERSION" "$SHA" > tap/Casks/trashpanda.rb
+          cd tap
           git config user.name "chaitanya-ramji"
           git config user.email "9416558+chaitanya-ramji@users.noreply.github.com"
           git add Casks/trashpanda.rb
           git commit -m "trashpanda $VERSION"
           git push
+
+      - name: Delete the temporary keychain
+        if: always()
+        run: |
+          if [ -n "$RELEASE_KEYCHAIN" ]; then
+            security delete-keychain "$RELEASE_KEYCHAIN" || true
+          fi

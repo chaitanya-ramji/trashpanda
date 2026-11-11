@@ -312,7 +312,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Keep paths out of the system log, and protect the log file ([#140](https://github.com/chaitanya-ramji/trashpanda/issues/140))
 - [x] Count a file with hard links one time ([#141](https://github.com/chaitanya-ramji/trashpanda/issues/141))
 - [x] Do not offer a Homebrew package that is younger than the stale limit ([#142](https://github.com/chaitanya-ramji/trashpanda/issues/142))
-- [ ] Harden the CI job and the release job ([#143](https://github.com/chaitanya-ramji/trashpanda/issues/143))
+- [x] Harden the CI job and the release job ([#143](https://github.com/chaitanya-ramji/trashpanda/issues/143))
 - [ ] Valid bundle version and complete package data ([#144](https://github.com/chaitanya-ramji/trashpanda/issues/144))
 
 ### Next: v0.8 Menu and dialogs

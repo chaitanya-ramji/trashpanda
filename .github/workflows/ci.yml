@@ -5,14 +5,25 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Build
         run: swift build
       - name: Test
         run: swift test
       - name: Test the roadmap script
         run: python3 -m unittest discover -s scripts -p "test_*.py"
+      - name: Check the workflow files
+        run: |
+          brew install actionlint
+          actionlint .github/workflows/ci.yml .github/workflows/release.yml
