@@ -4,8 +4,8 @@ import PandaCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let menu = NSMenu()
-    private let header = StorageHeaderView(frame: .zero)
+    let menu = NSMenu()
+    let header = StorageHeaderView(frame: .zero)
     private let scanner = DiskScanner()
     private lazy var builder = MenuBuilder { [weak self] action in self?.handle(action) }
     private lazy var cleaner: CleanCoordinator = {
@@ -29,50 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var spinnerTimer: Timer?
     private var spinnerStep = 0
     private let panda = PandaArt.menuBarIcon()
-    /// Demo mode with `--backdrop` puts a plain window behind the menu, so that a screenshot does not show other windows.
-    private var backdrop: NSWindow?
     /// What runs now. The menu reads it each time it is built, so that "quit Xcode" is always up to date.
     private var running = RunningSnapshot(apps: [])
-    private lazy var runningApps: RunningApps = {
-        // Demo mode pretends that Xcode runs, so that a screenshot can show a blocked item.
-        guard demoStyle != nil else { return .system }
-        return RunningApps { RunningSnapshot(apps: [RunningApp(bundleID: "com.apple.dt.Xcode", name: "Xcode")]) }
-    }()
-    /// `--demo light` or `--demo dark` shows made-up data and opens the menu. It never scans or deletes.
-    private let demoDialog: String? = {
-        let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: "--dialog"), i + 1 < args.count else { return nil }
-        return args[i + 1]
-    }()
-    /// `--submenu docker` pops that submenu open in demo mode, for screenshots.
-    private let demoSubmenu: String? = {
-        let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: "--submenu"), i + 1 < args.count else { return nil }
-        return args[i + 1].lowercased()
-    }()
-    private func showBackdrop(dark: Bool) {
-        guard let frame = statusItem.button?.window?.frame, let screen = NSScreen.main else { return }
-        let area = NSRect(x: frame.minX - 60, y: screen.frame.maxY - 24 - 520, width: 460, height: 520)
-        let window = NSWindow(contentRect: area, styleMask: .borderless, backing: .buffered, defer: false)
-        window.backgroundColor = dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.91, alpha: 1)
-        window.level = .floating
-        window.ignoresMouseEvents = true
-        window.hasShadow = false
-        window.orderFrontRegardless()
-        backdrop = window
-    }
-
-    /// `--hover N` and `--click N` act on the Nth part of the split bar in demo mode.
-    private func demoNumber(_ flag: String) -> Int? {
-        let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
-        return Int(args[i + 1])
-    }
-    private let demoStyle: String? = {
-        let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: "--demo") else { return nil }
-        return i + 1 < args.count ? args[i + 1] : "light"
-    }()
+    private lazy var runningApps: RunningApps = demo?.runningApps ?? .system
+    /// Not nil when the app was started with `--demo`. Then nothing is scanned and nothing is deleted.
+    private let demo = DemoController(arguments: CommandLine.arguments)
 
     private var activity: MenuModel.Activity { cleaning ? .cleaning : (scanning ? .scanning : .idle) }
 
@@ -84,48 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.imagePosition = .imageLeading
         menu.delegate = self
         statusItem.menu = menu
-        if demoStyle == nil {
-            updates.onChange = { [weak self] in self?.rebuildMenu() }
-            updates.start()
-        }
-        if let style = demoStyle {
-            menu.appearance = NSAppearance(named: style == "dark" ? .darkAqua : .aqua)
-
-            let demo = DemoData.result()
-            result = ScanResult(findings: demo.findings.filter(\.isActionable), disk: demo.disk)
-            disk = result!.disk
-            refreshStatusItem()
-            rebuildMenu()
-            refreshRunning()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                guard let self else { return }
-                // The status item has its place by now, so the backdrop can go right under it.
-                if CommandLine.arguments.contains("--backdrop") { self.showBackdrop(dark: style == "dark") }
-                // `--dialog volume|container|safe` shows that dialog. It deletes nothing, even if you confirm.
-                if let kind = self.demoDialog, let item = DemoData.dialogFinding(kind) {
-                    NSApp.activate(ignoringOtherApps: true)
-                    _ = Dialogs.makeAlert(for: self.dialog(for: item)).alert.runModal()
-                    NSApp.terminate(nil)
-                } else if let name = self.demoSubmenu,
-                          let item = self.menu.items.first(where: { $0.attributedTitle?.string.lowercased().hasPrefix(name) == true }),
-                          let sub = item.submenu {
-                    sub.appearance = self.menu.appearance
-                    sub.popUp(positioning: nil, at: NSPoint(x: 700, y: 800), in: nil)
-                } else {
-                    // While a menu is open, the run loop is in tracking mode. Plain dispatch blocks do not run then,
-                    // so these timers use the common modes. Opening the menu resets the header, so they wait for it.
-                    func later(_ seconds: Double, _ work: @escaping () -> Void) {
-                        let t = Timer(timeInterval: seconds, repeats: false) { _ in work() }
-                        RunLoop.main.add(t, forMode: .common)
-                    }
-                    if let n = self.demoNumber("--hover") { later(1.2) { self.header.simulateHover(n) } }
-                    if let n = self.demoNumber("--click") { later(1.6) { self.header.simulateClick(n) } }
-                    // A short wait, so that the backdrop is on screen before the menu opens over it.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.statusItem.button?.performClick(nil) }
-                }
-            }
-            return
-        }
+        if let demo { demo.start(self); return }
+        updates.onChange = { [weak self] in self?.rebuildMenu() }
+        updates.start()
         refreshStatusItem()
         rebuildMenu()
         refreshRunning()
@@ -164,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        if demoStyle == nil { disk = DiskUsage.current() }
+        if demo == nil { disk = DiskUsage.current() }
         refreshStatusItem()
         if let last = result?.date, Date().timeIntervalSince(last) > 30 * 60 { scan() }
         rebuildMenu()
@@ -174,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Scan
 
     private func scan() {
-        guard demoStyle == nil, !scanning, !cleaning else { return }
+        guard demo == nil, !scanning, !cleaning else { return }
         scanning = true
         busyChanged()
         let scanner = self.scanner
@@ -260,10 +182,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func handle(_ action: MenuModel.Action) {
         switch action {
         case .clean(let prompt):
-            guard demoStyle == nil else { return }
+            guard demo == nil else { return }
             cleaner.confirmAndClean(FindingBox(prompt))
         case .quitAndClean(let prompt):
-            guard demoStyle == nil else { return }
+            guard demo == nil else { return }
             cleaner.confirmQuitAndClean(FindingBox(prompt))
         case .rescan:
             Log.info("user: scan again")
@@ -285,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The words of the dialog for one item. They come from the core, where tests check them. Only demo mode uses this.
-    private func dialog(for f: Finding) -> FindingBox {
+    func demoDialog(for f: Finding) -> FindingBox {
         let c = Confirmation.forOne(f, staleDays: scanner.config.staleDays)
         return FindingBox([f], title: c.title, body: c.body, footer: c.footer, confirmTitle: c.confirmTitle,
                           cancelIsDefault: c.cancelIsDefault)
@@ -304,3 +226,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
+extension AppDelegate: DemoHost {
+    var statusButton: NSStatusBarButton? { statusItem.button }
+
+    func showDemo(_ demoResult: ScanResult) {
+        result = demoResult
+        disk = demoResult.disk
+        refreshStatusItem()
+        rebuildMenu()
+        refreshRunning()
+    }
+}

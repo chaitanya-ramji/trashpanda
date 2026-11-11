@@ -130,7 +130,7 @@ final class StorageHeaderView: NSView {
         return SplitBar.hit(slots, x: point.x - Self.inset)
     }
 
-    private func setHovered(_ index: Int?) {
+    func setHovered(_ index: Int?) {
         guard hovered != index else { return }
         hovered = index
         needsDisplay = true
@@ -146,14 +146,10 @@ final class StorageHeaderView: NSView {
         if let i = segment(at: convert(event.locationInWindow, from: nil)) { choose(i) }
     }
 
-    private func choose(_ index: Int) {
+    func choose(_ index: Int) {
         guard segments.indices.contains(index) else { return }
         onSelect?(segments[index])
     }
-
-    /// For demo mode: act as if the mouse were over, or had clicked, a part.
-    func simulateHover(_ index: Int?) { setHovered(index) }
-    func simulateClick(_ index: Int) { choose(index) }
 
     // MARK: VoiceOver
 
