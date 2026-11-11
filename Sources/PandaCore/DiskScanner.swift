@@ -176,7 +176,7 @@ public final class DiskScanner {
     public func remainingBytes(of finding: Finding) -> Int64 {
         switch finding.action {
         case .removeContents(let url), .removeArtifact(let url):
-            return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url, exclusiveOnly: true) : 0
+            return FileManager.default.fileExists(atPath: url.path) ? Sizer.size(of: url) : 0
         case .docker(let action):
             guard case .success(let engine) = dockerEngine(), let inventory = engine.inventory() else { return finding.bytes }
             switch action {

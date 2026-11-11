@@ -42,7 +42,7 @@ public struct ProjectScanner {
         let lock = NSLock()
         DispatchQueue.concurrentPerform(iterations: candidates.count) { i in
             let c = candidates[i]
-            let bytes = Sizer.size(of: c.url, exclusiveOnly: true)
+            let bytes = Sizer.size(of: c.url)
             guard bytes > 0 else { return }
             let finding = makeFinding(c, bytes: bytes)
             lock.lock(); results[i] = finding; lock.unlock()
