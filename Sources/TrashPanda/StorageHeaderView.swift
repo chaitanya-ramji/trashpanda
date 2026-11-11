@@ -49,7 +49,8 @@ final class StorageHeaderView: NSView {
     private var colorSlots: [Int?] = []
     private var hovered: Int?
     private var elements: [SegmentElement] = []
-    private let spinner = NSProgressIndicator()
+    /// Drives the spinner. It runs only while the header is in a window and the app is busy.
+    private var animationTimer: Timer?
 
     /// Called when the user clicks a part of the split bar.
     var onSelect: ((SplitSegment) -> Void)?
@@ -107,16 +108,14 @@ final class StorageHeaderView: NSView {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(accessibilityOptionsChanged), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil)
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.isIndeterminate = true
-        spinner.isDisplayedWhenStopped = false
-        addSubview(spinner)
         setAccessibilityElement(false)
     }
     required init?(coder: NSCoder) { return nil }
 
-    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+    deinit {
+        animationTimer?.invalidate()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
 
     /// The user changed "Increase contrast", "Reduce motion" or a similar setting: draw again.
     @objc private func accessibilityOptionsChanged() {
@@ -124,8 +123,67 @@ final class StorageHeaderView: NSView {
         needsDisplay = true
     }
 
+    // MARK: Spinner
+
+    // The spinner is drawn here, not with an NSProgressIndicator. An animating NSProgressIndicator makes the header layer-backed
+    // in the middle of an open menu, and the menu then shows the header empty. Nothing in this view has a layer.
+
+    private static let spinnerSize: CGFloat = 14
+    private static let spinnerSpokes = 12
+
+    private var showsSpinner: Bool { activity != .idle && style.showSpinner }
+
+    /// Where the spinner is: at the right end of the title row.
+    private var spinnerRect: NSRect {
+        NSRect(x: bounds.width - Self.rightInset - Self.spinnerSize, y: rows.titleY + 1, width: Self.spinnerSize, height: Self.spinnerSize)
+    }
+
+    /// Starts or stops the timer. It runs only while something moves, and only while the view is in a window.
     private func applyActivity() {
-        if activity == .idle || !style.showSpinner { spinner.stopAnimation(nil) } else { spinner.startAnimation(nil) }
+        let needed = showsSpinner && window != nil
+        if needed, animationTimer == nil {
+            let timer = Timer(timeInterval: 1.0 / 12, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.setNeedsDisplay(self.spinnerRect.insetBy(dx: -1, dy: -1))
+            }
+            RunLoop.main.add(timer, forMode: .common)   // keeps turning while the menu is open
+            animationTimer = timer
+        } else if !needed {
+            animationTimer?.invalidate()
+            animationTimer = nil
+        }
+        needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyActivity()
+    }
+
+    /// Each rebuild of the menu puts this one view into a new menu item. Draw it again each time, so that a new item never shows it empty.
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        needsDisplay = true
+    }
+
+    private func drawSpinner() {
+        guard showsSpinner else { return }
+        let step = Int(Date().timeIntervalSinceReferenceDate * 12) % Self.spinnerSpokes
+        let rect = spinnerRect
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        let inner = rect.width * 0.28, outer = rect.width / 2
+        for spoke in 0..<Self.spinnerSpokes {
+            // The newest spoke is the darkest. The others fade behind it.
+            let age = (step - spoke + Self.spinnerSpokes) % Self.spinnerSpokes
+            let angle = -CGFloat(spoke) * 2 * .pi / CGFloat(Self.spinnerSpokes) + .pi / 2
+            let path = NSBezierPath()
+            path.lineWidth = 1.6
+            path.lineCapStyle = .round
+            path.move(to: NSPoint(x: center.x + cos(angle) * inner, y: center.y + sin(angle) * inner))
+            path.line(to: NSPoint(x: center.x + cos(angle) * outer, y: center.y + sin(angle) * outer))
+            NSColor.secondaryLabelColor.withAlphaComponent(max(0.15, 1 - CGFloat(age) * 0.08)).setStroke()
+            path.stroke()
+        }
     }
 
     func update(disk: DiskUsage, totals: SplitTotals, activity: MenuModel.Activity, segments: [SplitSegment]) {
@@ -143,7 +201,6 @@ final class StorageHeaderView: NSView {
     /// Called when the width changes: the bar, the hit areas, and the spinner follow the menu width.
     private func relayout() {
         slots = SplitBar.layout(segments, width: barWidth)
-        spinner.frame = NSRect(x: bounds.width - Self.rightInset - 16, y: rows.titleY, width: 16, height: 16)
         rebuildAccessibility()
         needsDisplay = true
     }
@@ -264,6 +321,7 @@ final class StorageHeaderView: NSView {
 
         drawSplitBar()
         drawLegend()
+        drawSpinner()
     }
 
     /// The second bar. Its whole width is the data of the group rows below it, split by group.

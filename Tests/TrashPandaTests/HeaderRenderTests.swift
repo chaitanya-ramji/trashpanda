@@ -237,4 +237,67 @@ final class HeaderRenderTests: XCTestCase {
         XCTAssertGreaterThan(b.ring, 0.8, "a blocked dot has a ring")
         XCTAssertGreaterThan(s.center, 0.95, "a solid dot is full")
     }
+
+    // MARK: Hosted in a menu
+
+    private func ink(_ rep: NSBitmapImageRep, rows: Range<Int>) -> Int {
+        var n = 0
+        for y in rows { for x in 0..<rep.pixelsWide where alpha(rep, x, y) > 0.1 { n += 1 } }
+        return n
+    }
+
+    private func model(scanning: Bool, cleaning: Bool) -> MenuModel {
+        let disk = DiskUsage(total: 245_000_000_000, free: 137_000_000_000)
+        return MenuModel.make(MenuInput(result: ScanResult(findings: ownerCase, disk: disk), disk: disk, scanning: scanning,
+                                        cleaning: cleaning, running: RunningSnapshot(apps: []), staleDays: 90))
+    }
+
+    private func feed(_ view: StorageHeaderView, _ model: MenuModel) {
+        view.update(disk: model.header.disk, totals: model.header.totals, activity: model.header.activity, segments: model.header.segments)
+    }
+
+    /// The owner saw the whole header empty while the app scanned. The spinner was an NSProgressIndicator. When it animated,
+    /// AppKit made the header layer-backed in the middle of the open menu, and the menu showed it empty.
+    /// The menu hosts the header in its own item view (`NSMenu.size` does it without a window). In every state the header must
+    /// have no layer and no subview. (A bitmap render makes a layer by itself, so the layer is read before any render.)
+    func testTheHeaderIsNeverLayerBackedWhileTheAppIsBusy() throws {
+        let view = StorageHeaderView(frame: .zero)
+        view.settingsOverride = HeaderSettings()
+        let menu = NSMenu()
+        let builder = MenuBuilder { _ in }
+        func step(_ label: String, scanning: Bool, cleaning: Bool, rebuild: Bool) throws {
+            let m = model(scanning: scanning, cleaning: cleaning)
+            feed(view, m)
+            if rebuild { builder.populate(menu, model: m, header: view) }
+            _ = menu.size
+            XCTAssertNotNil(view.superview, "\(label): the menu hosts the header")
+            XCTAssertNil(view.layer, "\(label): the header has no layer")
+            XCTAssertTrue(view.subviews.isEmpty, "\(label): the header has no subview")
+        }
+        try step("idle", scanning: false, cleaning: false, rebuild: true)
+        try step("scan starts", scanning: true, cleaning: false, rebuild: true)
+        try step("scan runs, menu open", scanning: true, cleaning: false, rebuild: false)
+        try step("scan ends", scanning: false, cleaning: false, rebuild: false)
+        try step("cleaning", scanning: false, cleaning: true, rebuild: true)
+        try step("idle again", scanning: false, cleaning: false, rebuild: true)
+    }
+
+    /// What the menu item view draws, in each state: the title, and the bar and the legend below it.
+    func testTheMenuItemDrawsTheHeaderInEveryState() throws {
+        for (label, scanning, cleaning) in [("idle", false, false), ("scanning", true, false), ("cleaning", false, true)] {
+            let view = StorageHeaderView(frame: .zero)
+            view.settingsOverride = HeaderSettings()
+            let menu = NSMenu()
+            let m = model(scanning: scanning, cleaning: cleaning)
+            feed(view, m)
+            MenuBuilder { _ in }.populate(menu, model: m, header: view)
+            _ = menu.size
+            let host = try XCTUnwrap(view.superview)
+            let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            let h = rep.pixelsHigh
+            XCTAssertGreaterThan(ink(rep, rows: 0..<h / 3), 500, "\(label): the title is drawn")
+            XCTAssertGreaterThan(ink(rep, rows: h / 3..<h), 2000, "\(label): the rest is drawn")
+        }
+    }
 }
