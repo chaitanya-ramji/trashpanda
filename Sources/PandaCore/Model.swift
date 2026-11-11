@@ -327,6 +327,22 @@ public struct Finding: Identifiable, Sendable {
         return true
     }
 
+    /// The one folder or file that Finder can show for this item. nil for a tool action (Docker, Homebrew, simctl,
+    /// a package manager) and for an item that has more than one path.
+    public var revealURL: URL? {
+        switch action {
+        case .removeContents(let url), .removeArtifact(let url), .removeInstaller(let url), .removeArchive(let url),
+             .removeUpdateDownloads(let url), .removeDeviceSupport(let url):
+            return url
+        case .removeCacheFolderContents(let name):
+            guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0") else { return nil }
+            return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches/\(name)", isDirectory: true)
+        case .removeRuntime, .globalPackage, .agent, .brew, .removeOldLogs, .emptyTrash, .simulator, .removeOldTestBrowsers,
+             .removeServiceWorkerSite, .removeServiceWorkerStorage, .removeBrowserCaches, .inform, .docker, .owner:
+            return nil
+        }
+    }
+
     public init(id: String, ecosystem: Ecosystem, title: String, location: String, bytes: Int64,
                 tier: Tier, rebuild: Rebuild, action: Action, lastActivity: Date? = nil,
                 note: String? = nil, helpURL: URL? = nil, owner: AppOwner? = nil, sizeIsUpperLimit: Bool = false) {

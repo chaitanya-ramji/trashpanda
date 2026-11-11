@@ -243,6 +243,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             toggleLogin()
         case .quit:
             NSApp.terminate(nil)
+        case .reveal(let url):
+            NSWorkspace.shared.activateFileViewerSelecting([url])
         case .openKeepList:
             openInTextEdit(Config.ensureFile("keep"))
         case .openRootsList:
