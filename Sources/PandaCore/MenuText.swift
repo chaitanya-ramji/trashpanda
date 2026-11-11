@@ -68,6 +68,166 @@ public enum MenuText {
         return out
     }
 
+    /// A title that fits in `room` points: the middle becomes "…" and the start and the end stay.
+    /// `measure` gives the width of a text in points. A title that fits is not changed.
+    public static func middleTruncated(_ title: String, toFit room: Double, measure: (String) -> Double) -> String {
+        if measure(title) <= room { return title }
+        let chars = Array(title)
+        func kept(_ n: Int) -> String {
+            let head = (n + 1) / 2, tail = n / 2
+            return String(chars.prefix(head)) + "…" + String(chars.suffix(tail))
+        }
+        // The widest text is the longest one that fits: look for it by halving.
+        var low = 0, high = chars.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if measure(kept(mid)) <= room { low = mid } else { high = mid - 1 }
+        }
+        return kept(low)
+    }
+
+    // MARK: Rows of a group submenu
+
+    /// The longest title that a row shows. A longer one gets a middle ellipsis. The tooltip has the full text.
+    public static let maxTitle = 44
+
+    /// "abcdefghij…vwxyz": the start and the end stay, the middle goes. A short text is not changed.
+    public static func capped(_ text: String, max limit: Int = maxTitle) -> String {
+        guard text.count > limit, limit >= 3 else { return text }
+        let keep = limit - 1
+        return String(text.prefix((keep + 1) / 2)) + "…" + String(text.suffix(keep / 2))
+    }
+
+    private static let domainStarts: Set<String> = ["com", "org", "net", "io", "dev", "app", "co", "me", "edu"]
+    /// The last parts of a name that tell nothing about its owner.
+    private static let emptyParts: Set<String> = ["helper", "cache", "caches", "shipit", "updater", "agent", "service", "services", "daemon", "xpc"]
+
+    /// A folder name that is a reverse domain name, such as `com.example.tool`. Plain names and file names are not.
+    private static func domainParts(_ name: String) -> [String]? {
+        let parts = name.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count >= 3, domainStarts.contains(parts[0]) else { return nil }
+        let ok = parts.allSatisfy { part in
+            !part.isEmpty && part.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+        }
+        return ok ? parts : nil
+    }
+
+    /// A short name for a folder that is named like a reverse domain: the last part that says something.
+    /// `com.apple.<x>` is a macOS name, so it gets "(macOS)". Any other name is not changed. No product name is made up.
+    /// When the short name could mislead, the original name stays: a long name, a part that says nothing,
+    /// a part that is a number or an id, or a part that is a common word.
+    public static func friendlyName(_ name: String) -> String {
+        guard let parts = domainParts(name), parts.count <= 4 else { return name }
+        guard let meaningful = parts.dropFirst(2).last(where: { !emptyParts.contains($0.lowercased()) }) else { return name }
+        let letters = meaningful.filter(\.isLetter).count, digits = meaningful.filter(\.isNumber).count
+        guard meaningful.count >= 3, letters > digits, !genericParts.contains(meaningful.lowercased()) else { return name }
+        return parts[1] == "apple" ? "\(meaningful) (macOS)" : meaningful
+    }
+
+    /// Common words. A name that ends with one of them says nothing about its owner.
+    private static let genericParts: Set<String> = ["client", "chat", "app", "desktop", "mac", "main", "agent", "helper", "service",
+                                                    "services", "networking", "daemon", "xpc", "cache", "caches", "web", "core",
+                                                    "common", "mobile", "macos", "osx", "electron", "browser", "ui", "shared", "default"]
+
+    /// The title of an item as a row shows it. The first part (before " · ") gets a friendly name. In the cache folders list the
+    /// kind ("system cache", "cache folder") and "(macOS)" are dropped, because the section header says it.
+    /// A Docker title is short: "Running · web + 1 volume". The full title stays in the tooltip.
+    public static func rowTitle(_ title: String, ecosystem: Ecosystem) -> String {
+        if title.hasPrefix("Unused anonymous volume · ") { return "Unused anonymous volume" }
+        if ecosystem == .docker { return dockerTitle(title) }
+        var parts = title.components(separatedBy: " · ")
+        let friendly = friendlyName(parts[0])
+        if ecosystem == .cacheExplorer, parts.count == 2, ["system cache", "cache folder"].contains(parts[1]) {
+            return friendly.hasSuffix(" (macOS)") ? String(friendly.dropLast(" (macOS)".count)) : friendly
+        }
+        parts[0] = friendly
+        return parts.joined(separator: " · ")
+    }
+
+    /// The text for a row's second line on a system that has none (before macOS 14.4): it joins the tooltip, on top.
+    public static func tooltip(withSecondLine subtitle: String?, tooltip: String?) -> String? {
+        let text = [subtitle, tooltip].compactMap { $0 }.joined(separator: "\n")
+        return text.isEmpty ? nil : text
+    }
+
+    /// What the rebuild labels of one section say. `sectionSuffix` goes once into the section header.
+    /// `rowLabels` is the label that a row keeps for itself: nil when the header already says it.
+    public struct RebuildNotes: Equatable, Sendable {
+        public let sectionSuffix: String?
+        public let rowLabels: [String?]
+    }
+
+    /// A label shows on a row only when it adds information. When most rows have the same label, it goes once into the header.
+    /// "Cannot be recovered" is never moved: each row that has it keeps it. One row alone keeps its label.
+    public static func rebuildNotes(_ list: [Rebuild]) -> RebuildNotes {
+        let own = list.map { Optional(rowLabel($0)) }
+        let alone = RebuildNotes(sectionSuffix: nil, rowLabels: own)
+        // A section with an item that cannot be recovered has a plain header. Each row says its own label.
+        guard list.count >= 2, !list.contains(.never) else { return alone }
+        let counts = Dictionary(grouping: list.filter { $0 != .never }, by: { $0 }).mapValues(\.count)
+        guard let top = counts.max(by: { $0.value < $1.value }), top.value * 2 > list.count else { return alone }
+        let suffix: String
+        switch top.key {
+        case .seconds: suffix = "back in seconds"
+        case .minutes: suffix = "rebuild in minutes"
+        case .download: suffix = "re-download when needed"
+        case .recreate: suffix = "must be recreated"
+        case .never: return alone
+        }
+        return RebuildNotes(sectionSuffix: suffix, rowLabels: list.map { $0 == top.key ? nil : rowLabel($0) })
+    }
+
+    /// The label on a row. The tooltip and the dialogs keep the longer `Rebuild.label`.
+    private static func rowLabel(_ r: Rebuild) -> String { r == .recreate ? "Must be recreated" : r.label }
+
+    /// The parts of the place line of a Docker item. The row shows a short second line. The tooltip has the engine first,
+    /// then the image and the state, then the volumes that a person named. An id of an anonymous volume (it ends with "…") never shows:
+    /// the title says "1 volume". A running container says "Stopped first"; "Up 22 hours" is in the tooltip.
+    public static func dockerPlace(_ location: String) -> (tooltip: String, subtitle: String?) {
+        var parts = location.components(separatedBy: " · ")
+        var engine: String?
+        if let first = parts.first, first.hasPrefix("Docker engine: ") {
+            engine = String(first.dropFirst("Docker engine: ".count))
+            parts.removeFirst()
+        }
+        var tip = parts.compactMap { part -> String? in
+            guard part.hasPrefix("volumes: ") else { return part }
+            let named = part.dropFirst("volumes: ".count).components(separatedBy: ", ").filter { !$0.hasSuffix("…") }
+            return named.isEmpty ? nil : "volumes: " + named.joined(separator: ", ")
+        }
+        if let engine { tip.insert(engine, at: 0) }
+        // "Exited (0) 3 days ago" is shown as "Exited 3 days ago". The exit code stays in the tooltip.
+        let shown = parts.filter { !$0.hasPrefix("image ") && !$0.hasPrefix("volumes: ") }
+            .map { $0.replacingOccurrences(of: #" \(\d+\)"#, with: "", options: .regularExpression) }
+        let sub = shown.contains("will be stopped first") ? "Will be stopped first" : shown.joined(separator: " · ")
+        return (tip.joined(separator: " · "), sub.isEmpty ? nil : sub.prefix(1).uppercased() + sub.dropFirst())
+    }
+
+    /// The first part of a Docker title says what it is. A row says it in one word: "Running · web + 1 volume".
+    private static func dockerTitle(_ title: String) -> String {
+        var t = title
+        for (long, short) in [("Running container · ", "Running · "), ("Stopped container · ", "Stopped · ")] where t.hasPrefix(long) {
+            t = short + t.dropFirst(long.count)
+        }
+        return t.replacingOccurrences(of: #" and (\d+ volumes?)$"#, with: " + $1", options: .regularExpression)
+    }
+
+    /// Cuts a row title to `maxTitle`. In a Docker title the name of a container is not cut while a shorter form fits:
+    /// the part that gets the ellipsis is the long image reference, or else the name itself.
+    public static func capTitle(_ title: String, ecosystem: Ecosystem) -> String {
+        guard title.count > maxTitle, ecosystem == .docker, let dot = title.range(of: " · ") else { return capped(title) }
+        let head = String(title[..<dot.upperBound])
+        var name = String(title[dot.upperBound...])
+        var tail = ""
+        if let plus = name.range(of: #" \+ \d+ volumes?$"#, options: .regularExpression) {
+            tail = String(name[plus.lowerBound...])
+            name = String(name[..<plus.lowerBound])
+        }
+        let room = maxTitle - head.count - tail.count
+        guard room >= 8 else { return capped(title) }
+        return head + capped(name, max: room) + tail
+    }
+
     public static let helpURL = URL(string: "https://github.com/chaitanya-ramji/trashpanda#readme")!
 
     /// The page for a new issue. The text holds only the two versions: no path, no log line.

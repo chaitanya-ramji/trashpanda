@@ -134,8 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async {
             let r = scanner.scan()
             DispatchQueue.main.async {
-                // Nothing in the menu is read only. A line that has no action (a note) is not shown. Everything shown can be removed.
-                self.result = ScanResult(findings: r.findings.filter(\.isActionable), disk: r.disk)
+                // Every item in a list can be removed. A line that has no action is not an item: it goes to "Good to know".
+                self.result = ScanResult(findings: r.findings.filter(\.isActionable), disk: r.disk,
+                                         infoRows: StorageFacts.rows(from: r.findings, disk: r.disk))
                 self.disk = r.disk
                 self.scanning = false
                 self.busyChanged()
@@ -229,7 +230,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard result != nil, !cleaning else { return }
         let popup = NSMenu()
         popup.appearance = menu.appearance
-        builder.populate(popup, submenu: MenuModel.popup(for: segment, menuInput()))
+        let input = menuInput()
+        builder.populate(popup, submenu: MenuModel.popup(for: segment, input), tab: builder.mainTab(for: MenuModel.make(input)))
         Log.info("user: opened \(segment.name) from the split bar")
         menu.cancelTracking()
         DispatchQueue.main.async { [weak self] in

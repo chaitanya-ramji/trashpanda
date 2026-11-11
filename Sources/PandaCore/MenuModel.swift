@@ -102,13 +102,12 @@ public struct MenuModel: Equatable, Sendable {
         public var icon: Icon?
         /// A check mark in front of the row.
         public var checked: Bool?
-        public var keyEquivalent: String
         /// Shown only while the Option key is held. It has the same key as the row before it.
         public var isOptionAlternate: Bool
 
         public init(kind: Kind = .text, title: String = "", size: String? = nil, enabled: Bool = true, action: Action? = nil,
                     submenu: Submenu? = nil, tooltip: String? = nil, subtitle: String? = nil, icon: Icon? = nil, checked: Bool? = nil,
-                    keyEquivalent: String = "", isOptionAlternate: Bool = false) {
+                    isOptionAlternate: Bool = false) {
             self.kind = kind
             self.title = title
             self.size = size
@@ -119,7 +118,6 @@ public struct MenuModel: Equatable, Sendable {
             self.subtitle = subtitle
             self.icon = icon
             self.checked = checked
-            self.keyEquivalent = keyEquivalent
             self.isOptionAlternate = isOptionAlternate
         }
 
@@ -150,6 +148,35 @@ public struct MenuModel: Equatable, Sendable {
     /// `widestTitle` is the width of that title in the menu font.
     public static func tab(forWidestTitle widestTitle: Double) -> Double {
         min(520, max(defaultTab, widestTitle + 90))
+    }
+
+    /// The least space between a title and its size.
+    public static let minTitleGap: Double = 12
+
+    /// How much room a title has before the size column starts: the tab, minus the size and the minimum gap.
+    public static func titleRoom(tab: Double, sizeWidth: Double, minGap: Double = minTitleGap) -> Double {
+        max(0, tab - sizeWidth - minGap)
+    }
+
+    /// The smallest tab of the main menu. The menu is as wide as its tab plus the icon and the chevron columns.
+    public static let minTab: Double = 220
+
+    /// The tab of the main menu: as small as the widest row allows (`widestRow` is title + minimum gap + size, in points),
+    /// so that the menu is not wider than its content. It never goes below `minTab`.
+    public static func mainTab(widestRow: Double) -> Double {
+        max(minTab, widestRow.rounded(.up))
+    }
+
+    /// The rows with a size that use the tab of the main menu: the group rows, and the groups inside "Smaller groups".
+    /// A submenu with its own `widthTitles` has its own tab.
+    public var sharedColumnRows: [Row] { Self.columnRows(in: rows) }
+
+    private static func columnRows(in rows: [Row]) -> [Row] {
+        rows.flatMap { row -> [Row] in
+            var found = row.kind == .columns ? [row] : []
+            if let sub = row.submenu, sub.widthTitles == nil { found += columnRows(in: sub.rows) }
+            return found
+        }
     }
 
     public static func make(_ input: MenuInput) -> MenuModel {
@@ -187,19 +214,19 @@ public struct MenuModel: Equatable, Sendable {
             }
             rows.append(.separator)
             rows += groupRows(findings, input)
+            rows += goodToKnowRows(input.infoRows)
         } else {
             rows.append(.note("Scanning…"))
         }
 
         rows.append(.separator)
         rows.append(Row(title: scanning ? "Scanning…" : "Scan again", enabled: !scanning && !cleaning, action: .rescan,
-                        subtitle: scanning ? nil : input.result.map { MenuText.lastScan($0.date, now: input.now) },
-                        keyEquivalent: "r"))
+                        subtitle: scanning ? nil : input.result.map { MenuText.lastScan($0.date, now: input.now) }))
         if let version = input.updateVersion {
             rows.append(Row(title: "Update available: \(version)…", action: .openUpdate))
         }
         rows.append(Row(title: "Settings", submenu: Submenu(rows: settingsRows(input))))
-        rows.append(Row(title: "Quit Trash Panda", action: .quit, keyEquivalent: "q"))
+        rows.append(Row(title: "Quit Trash Panda", action: .quit))
         return MenuModel(header: header, rows: rows)
     }
 
@@ -228,6 +255,14 @@ public struct MenuModel: Equatable, Sendable {
             return submenu(for: only, items: findings.filter { $0.ecosystem == only }, input)
         }
         return Submenu(rows: segment.ecosystems.map { eco in groupRow(eco, findings.filter { $0.ecosystem == eco }, input) })
+    }
+
+    /// The short section at the bottom: facts that cannot be cleaned here. At most 3 rows. Each one is off and has no action.
+    private static func goodToKnowRows(_ info: [InfoRow]) -> [Row] {
+        guard !info.isEmpty else { return [] }
+        return [.separator, .section("Good to know · can't be cleaned here")] + info.prefix(StorageFacts.maxRows).map {
+            Row(title: $0.title, enabled: false, tooltip: $0.tooltip, subtitle: $0.detail)
+        }
     }
 
     // MARK: Groups
@@ -286,10 +321,6 @@ public struct MenuModel: Equatable, Sendable {
     private static func submenu(for ecosystem: Ecosystem, items: [Finding], _ input: MenuInput, nest: Bool = true) -> Submenu {
         if nest, ecosystem == .aiAgents, AgentMenu.shouldNest(items) { return nestedAgentSubmenu(items, input) }
         var rows: [Row] = []
-        if ecosystem == .docker, let engine = items.first?.location, engine.hasPrefix("Docker engine: ") {
-            rows.append(.note(engine.replacingOccurrences(of: "Docker engine: ", with: "Engine: ") + " (local)"))
-            rows.append(.separator)
-        }
         let actionable = items.filter(\.isActionable)
         // The bulk "Free up" line takes only items that need no quit. It never quits an app.
         let safeAll = actionable.filter { $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
@@ -303,24 +334,64 @@ public struct MenuModel: Equatable, Sendable {
                 findings: safe, title: "Free up \(ByteText.string(total)) of \(ecosystem.name) files?",
                 body: "Trash Panda will clear old build files and caches."))))
         }
-        if !safeAll.isEmpty {
-            if !safe.isEmpty { rows.append(.separator) }
-            rows.append(.section("Safe to clean"))
-            rows += listRows(safeAll, input, groupBytes: groupBytes)
+        var widths: [String] = []
+        func section(_ list: [Finding], _ name: String, _ first: Bool) {
+            if !first { rows.append(.separator) }
+            let notes = MenuText.rebuildNotes(list.map(\.rebuild))
+            let title = header(name, notes)
+            rows.append(.section(title))
+            rows += listRows(list, input, groupBytes: groupBytes, labels: notes.rowLabels, header: title, widths: &widths)
         }
-        if !review.isEmpty {
-            if !safeAll.isEmpty { rows.append(.separator) }
-            rows.append(.section("Review first"))
-            rows += listRows(review, input, groupBytes: groupBytes)
+        if !safeAll.isEmpty { section(safeAll, "Safe to clean", safe.isEmpty) }
+        if ecosystem == .cacheExplorer {
+            // The system caches of macOS have their own section. The header says what they are, so a row does not repeat it.
+            let system = review.filter { $0.title.hasSuffix(" · system cache") }
+            let other = review.filter { !$0.title.hasSuffix(" · system cache") }
+            if !other.isEmpty { section(other, "Review first", safeAll.isEmpty) }
+            if !system.isEmpty {
+                if !safeAll.isEmpty || !other.isEmpty { rows.append(.separator) }
+                rows.append(.section("Apple caches · empty with care"))
+                rows += listRows(system, input, groupBytes: groupBytes, labels: system.map { _ in nil },
+                                 header: "Apple caches · empty with care", widths: &widths)
+            }
+        } else if ecosystem == .docker, case let images = review.filter({ $0.id.hasPrefix("docker.image:") }),
+                  !images.isEmpty, images.allSatisfy({ $0.rebuild == .download }) {
+            // Images come back by download, so they have their own section. The other items keep their own labels.
+            let other = review.filter { !$0.id.hasPrefix("docker.image:") }
+            if !other.isEmpty { section(other, "Review first", safeAll.isEmpty) }
+            if !safeAll.isEmpty || !other.isEmpty { rows.append(.separator) }
+            rows.append(.section("Images · re-download when needed"))
+            rows += listRows(images, input, groupBytes: groupBytes, labels: images.map { _ in nil },
+                             header: "Images · re-download when needed", widths: &widths, dropImagePrefix: true)
+        } else if !review.isEmpty {
+            section(review, "Review first", safeAll.isEmpty)
         }
-        return Submenu(rows: rows, widthTitles: items.map(\.title), alignIcons: true)
+        return Submenu(rows: rows, widthTitles: widths, alignIcons: true)
+    }
+
+    /// "Review first · re-download when needed"
+    private static func header(_ name: String, _ notes: MenuText.RebuildNotes) -> String {
+        notes.sectionSuffix.map { "\(name) · \($0)" } ?? name
     }
 
     /// The first rows of a list, and then the rest in a "N more… · size" submenu, so that no row is hidden.
     /// The first list has at most 12 rows. It stops earlier at the first row that is below 50 MB and below 1 percent of the group.
-    private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64) -> [Row] {
-        let titles = MenuText.distinct(titles: list.map(\.title), locations: list.map(\.location))
-        func row(_ i: Int) -> [Row] { findingRows(list[i], input, title: titles[i]) }
+    private static func listRows(_ list: [Finding], _ input: MenuInput, groupBytes: Int64, labels: [String?],
+                                 header: String, widths: inout [String], dropImagePrefix: Bool = false) -> [Row] {
+        var friendly = list.map { MenuText.rowTitle($0.title, ecosystem: $0.ecosystem) }
+        // In a list of images only, the section header says "Images", so a row does not repeat it.
+        if dropImagePrefix { friendly = friendly.map { $0.hasPrefix("Image · ") ? String($0.dropFirst("Image · ".count)) : $0 } }
+        // Two anonymous volumes would look the same. Then each one shows the start of its id.
+        let anonymous = "Unused anonymous volume · "
+        for indexes in Dictionary(grouping: friendly.indices, by: { friendly[$0] }).values where indexes.count > 1 {
+            for i in indexes where list[i].title.hasPrefix(anonymous) {
+                friendly[i] += " · " + list[i].title.dropFirst(anonymous.count).prefix(8)
+            }
+        }
+        let titles = MenuText.distinct(titles: friendly, locations: list.map(\.location))
+        // The width of the submenu comes from the titles as they are drawn, with the id or the folder that was added.
+        widths += list.indices.map { MenuText.capTitle(titles[$0], ecosystem: list[$0].ecosystem) }
+        func row(_ i: Int) -> [Row] { findingRows(list[i], input, title: titles[i], label: labels[i]) }
         var shown = 0
         while shown < min(12, list.count) {
             let f = list[shown]
@@ -332,20 +403,31 @@ public struct MenuModel: Equatable, Sendable {
             let rest = Array(shown..<list.count)
             let size = rest.reduce(Int64(0)) { $0 + list[$1].countedBytes }
             rows.append(Row(title: "\(rest.count) more… · \(ByteText.string(size))",
-                            submenu: Submenu(rows: rest.flatMap(row), alignIcons: true)))
+                            submenu: Submenu(rows: [.section(header)] + rest.flatMap(row), alignIcons: true)))
         }
         return rows
     }
 
     /// The row of one item. When Finder can show it, an alternate row follows: "Show in Finder", while Option is held.
-    private static func findingRows(_ f: Finding, _ input: MenuInput, title: String) -> [Row] {
-        let row = findingRow(f, input, title: title)
+    private static func findingRows(_ f: Finding, _ input: MenuInput, title: String, label: String?) -> [Row] {
+        let row = findingRow(f, input, title: title, label: label)
         guard let url = f.revealURL else { return [row] }
         return [row, Row(title: "Show in Finder", action: .reveal(url), isOptionAlternate: true)]
     }
 
-    private static func findingRow(_ f: Finding, _ input: MenuInput, title: String) -> Row {
-        var row = Row(kind: .columns, title: title, size: f.sizeText, subtitle: f.rebuild.label,
+    private static func findingRow(_ f: Finding, _ input: MenuInput, title fullTitle: String, label: String?) -> Row {
+        let title = MenuText.capTitle(fullTitle, ecosystem: f.ecosystem)
+        var subtitle = label
+        var place = f.location
+        if f.ecosystem == .docker, f.location.hasPrefix("Docker engine: ") {
+            // The engine is in the tooltip. The row says what is new: its state, and that a running one is stopped first.
+            // Its own rebuild label stays when it differs from the header, and "Cannot be recovered" always stays.
+            let docker = MenuText.dockerPlace(f.location)
+            place = docker.tooltip
+            let joined = [docker.subtitle, label].compactMap { $0 }.joined(separator: " · ")
+            subtitle = joined.isEmpty ? nil : joined
+        }
+        var row = Row(kind: .columns, title: title, size: f.sizeText, subtitle: subtitle,
                       icon: .item(owner: f.owner, agentTitle: f.ecosystem == .aiAgents ? f.title : nil))
         let open = input.blockers(f)
         let c = Confirmation.forOne(f, staleDays: input.staleDays, now: input.now)
@@ -362,7 +444,17 @@ public struct MenuModel: Equatable, Sendable {
                 footer: c.footer, confirmTitle: "Quit \(names) and free \(ByteText.string(f.bytes))",
                 cancelIsDefault: true, cancelTitle: "Not now", revealURL: f.revealURL))
         }
-        var tip = "\(f.location)\n\(f.rebuild.label)"
+        // The tooltip keeps the full name and the rebuild label, even when the row shows less.
+        // A system cache does not say that it comes back: its dialog warns that data that is not synced yet can be lost.
+        let system = f.ecosystem == .cacheExplorer && f.title.hasSuffix(" · system cache")
+        var reason = "Empty with care. Data that is not synced yet can be lost."
+        if system, case .removeCacheFolderContents(let name) = f.action, let why = CacheExplorer.keepReason(name) {
+            // The reason of the dialog, and the warning that the dialog also gives: never a text that sounds harmless.
+            reason = why.contains("not synced") ? why : why + " Data that is not synced yet can be lost."
+        }
+        let rebuild = system ? reason : f.rebuild.label
+        var tip = (title == f.title ? "" : "\(f.title)\n") + "\(place)\n\(rebuild)"
+        // (the full title above is the original one; the dialogs use it too)
         if isProject(f), let days = f.lastActivity.map({ max(0, Int(input.now.timeIntervalSince($0) / 86_400)) }) {
             tip += "\nLast worked on \(days == 0 ? "today" : "\(days) days ago")"
         }
@@ -427,6 +519,7 @@ public struct MenuInput: Sendable {
     }
 
     public var findings: [Finding] { result?.findings ?? [] }
+    public var infoRows: [InfoRow] { result?.infoRows ?? [] }
     public var hasResult: Bool { result != nil }
     public var activity: MenuModel.Activity { cleaning ? .cleaning : (scanning ? .scanning : .idle) }
 

@@ -314,6 +314,8 @@ public struct Finding: Identifiable, Sendable {
     /// True when `bytes` is only an upper limit of what the clean frees. The same bytes are also in another item.
     /// The item stays in the clean, but its size is not added to any total.
     public let sizeIsUpperLimit: Bool
+    /// For an information line about a disk file: the bytes of data inside the file. nil for any other item.
+    public let insideBytes: Int64?
 
     /// The bytes that a total adds up. An upper limit is not counted, so no byte is counted two times.
     public var countedBytes: Int64 { sizeIsUpperLimit ? 0 : bytes }
@@ -345,7 +347,8 @@ public struct Finding: Identifiable, Sendable {
 
     public init(id: String, ecosystem: Ecosystem, title: String, location: String, bytes: Int64,
                 tier: Tier, rebuild: Rebuild, action: Action, lastActivity: Date? = nil,
-                note: String? = nil, helpURL: URL? = nil, owner: AppOwner? = nil, sizeIsUpperLimit: Bool = false) {
+                note: String? = nil, helpURL: URL? = nil, owner: AppOwner? = nil, sizeIsUpperLimit: Bool = false, insideBytes: Int64? = nil) {
+        self.insideBytes = insideBytes
         self.sizeIsUpperLimit = sizeIsUpperLimit
         self.note = note
         self.helpURL = helpURL
@@ -365,11 +368,14 @@ public struct Finding: Identifiable, Sendable {
 public struct DiskUsage: Sendable, Equatable {
     public let total: Int64
     public let free: Int64
+    /// Space that macOS can free by itself when it needs it. `free` already counts it. 0 when unknown.
+    public let purgeable: Int64
     public var used: Int64 { max(0, total - free) }
 
-    public init(total: Int64, free: Int64) {
+    public init(total: Int64, free: Int64, purgeable: Int64 = 0) {
         self.total = total
         self.free = free
+        self.purgeable = max(0, purgeable)
     }
 
     /// Free bytes without purgeable space. This shows real change after a delete. It is for the log only.
@@ -379,11 +385,13 @@ public struct DiskUsage: Sendable, Equatable {
 
     /// Reads the capacity that Finder shows (includes purgeable space as free).
     public static func current(for url: URL = URL(fileURLWithPath: NSHomeDirectory())) -> DiskUsage {
-        let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
+        let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey]
         let values = try? url.resourceValues(forKeys: keys)
         let total = Int64(values?.volumeTotalCapacity ?? 0)
         let free = values?.volumeAvailableCapacityForImportantUsage ?? 0
-        return DiskUsage(total: total, free: free)
+        // Free space with purgeable space, minus free space without it. Both numbers come from the volume. Nothing is scanned.
+        let purgeable = values?.volumeAvailableCapacity.map { free - Int64($0) } ?? 0
+        return DiskUsage(total: total, free: free, purgeable: purgeable)
     }
 }
 
@@ -391,11 +399,14 @@ public struct ScanResult: Sendable {
     public let findings: [Finding]
     public let disk: DiskUsage
     public let date: Date
+    /// Facts for the "Good to know" section. They are not items: no total counts them and nothing can be cleaned from them.
+    public let infoRows: [InfoRow]
 
     public var reclaimable: Int64 { findings.filter { $0.isActionable && $0.tier == .safe }.reduce(0) { $0 + $1.countedBytes } }
     public var reviewable: Int64 { findings.filter { $0.isActionable && $0.tier == .review }.reduce(0) { $0 + $1.countedBytes } }
 
-    public init(findings: [Finding], disk: DiskUsage, date: Date = Date()) {
+    public init(findings: [Finding], disk: DiskUsage, date: Date = Date(), infoRows: [InfoRow] = []) {
+        self.infoRows = infoRows
         self.findings = findings
         self.disk = disk
         self.date = date
