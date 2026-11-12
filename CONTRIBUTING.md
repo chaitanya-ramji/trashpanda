@@ -12,6 +12,12 @@ All work starts from an issue on the [roadmap](https://github.com/chaitanya-ramj
 
 If you have an idea that is not on the roadmap, open an issue first. Wait for a reply before you write code. This saves your time.
 
+## Branches and pull requests
+
+- Name a branch `feat/<topic>`, `fix/<topic>`, `hotfix/<topic>`, or `docs/<topic>`. Open the pull request against `main`. Nobody pushes to `main` directly.
+- The build and all tests must pass on your Mac, and the checks of the pull request must pass, before a merge. A change to the path guard or to a delete rule also needs an independent review.
+- We merge with "rebase and merge" (or "squash" when a branch has a merge commit). GitHub deletes the branch after the merge. Delete your local copy too: `git branch -D <name>`.
+
 ## Set up
 
 You need macOS 13 or later and the Swift toolchain (Xcode or the Command Line Tools).
