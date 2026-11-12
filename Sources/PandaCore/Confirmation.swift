@@ -122,7 +122,7 @@ public struct Confirmation: Equatable, Sendable {
             return Confirmation(
                 title: "Remove this simulator runtime?", body: detail,
                 footer: "Simulators that use it stop working. You can download it again in Xcode Settings. This can't be undone.",
-                confirmTitle: "Remove runtime", cancelIsDefault: false)
+                confirmTitle: "Remove runtime", cancelIsDefault: true)
         case .archive:
             return Confirmation(
                 title: "Delete this archive?", body: detail,
@@ -197,7 +197,7 @@ public struct Confirmation: Equatable, Sendable {
             return Confirmation(
                 title: "Remove these device support files?", body: detail,
                 footer: "Xcode copies them from the device again the next time you connect it. This can't be undone.",
-                confirmTitle: "Remove files", cancelIsDefault: false)
+                confirmTitle: "Remove files", cancelIsDefault: true)
         case .ordinary:
             // A review item is one that the user must choose, so Return must keep it. Only a safe item may delete on Return.
             let keeps = defaultKeeps(tier: f.tier)

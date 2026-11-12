@@ -27,7 +27,6 @@ final class ReviewDefaultButtonTests: XCTestCase {
     }
 
     /// Every kind of dialog, with a review item: the default button keeps it.
-    /// Two exceptions were decided on purpose: a simulator runtime and device support files come back from Apple or the device.
     func testEveryReviewKindKeepsByDefault() {
         let url = URL(fileURLWithPath: "/x/item")
         let repo = URL(fileURLWithPath: "/x/repo")
@@ -40,6 +39,7 @@ final class ReviewDefaultButtonTests: XCTestCase {
             .agent(.removeOllamaModel(name: "m")),
             .agent(.removeOldSessions(kind: .codex, olderThan: Date(), minimumAgeDays: 30)),
             .globalPackage(manager: .npm, name: "pkg"), .removeRuntime(storeID: "s", tool: "t", name: "n"),
+            .simulator(.deleteRuntime(id: device)), .removeDeviceSupport(url),
             .removeCacheFolderContents(name: "Some Cache"),
             .docker(.removeStoppedContainerWithVolumes(id: "0123456789ab", volumes: ["v"])),
             .docker(.stopAndRemoveContainerWithVolumes(id: "0123456789ab", volumes: ["v"])),
@@ -49,9 +49,16 @@ final class ReviewDefaultButtonTests: XCTestCase {
             let f = finding(action, tier: .review)
             XCTAssertTrue(Confirmation.forOne(f, staleDays: 30).cancelIsDefault, "\(Confirmation.kind(of: f))")
         }
-        let exempt: [Action] = [.simulator(.deleteRuntime(id: device)), .removeDeviceSupport(url)]
-        for action in exempt {
-            XCTAssertFalse(Confirmation.forOne(finding(action, tier: .review), staleDays: 30).cancelIsDefault)
+    }
+
+    /// The "Clean up" dialog (a tool decides what it removes) is a review item too: Return keeps it.
+    func testAReviewCleanUpToolDialogKeepsByDefault() {
+        for command in [OwnerCommand.brewCleanup, .simctlDeleteUnavailable] {
+            let f = Finding(id: "x", ecosystem: .swift, title: "Thing", location: "Where", bytes: 3_000_000_000, tier: .review,
+                            rebuild: .download, action: .owner(command), sizeIsUpperLimit: true)
+            let c = Confirmation.forOne(f, staleDays: 30)
+            XCTAssertEqual(c.confirmTitle, "Clean up", "\(command)")
+            XCTAssertTrue(c.cancelIsDefault, "\(command)")
         }
     }
 }
