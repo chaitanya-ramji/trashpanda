@@ -15,7 +15,7 @@ Usage: trashpanda [option]
 // An option that we do not know is an error. Other values do not start with a dash.
 // `--json` works only with `--scan`.
 if let message = CommandLineCheck.error(CommandLine.arguments) {
-    Log.warn("cli: wrong option, exit 64: \(CommandLine.arguments.dropFirst().joined(separator: " "))")
+    Log.warn("cli: wrong option, exit 64: \(CommandLineCheck.logOptions(CommandLine.arguments))")
     Log.flush()
     FileHandle.standardError.write(Data((message + "\n" + usage).utf8))
     exit(64)
@@ -34,8 +34,7 @@ if CommandLine.arguments.contains("--version") {
 if CommandLine.arguments.contains("--scan") {
     let started = Date()
     let json = CommandLine.arguments.contains("--json")
-    let options = CommandLine.arguments.dropFirst().joined(separator: " ")
-    Log.info("cli start version=\(UpdateController.currentVersion) mode=\(CommandLineCheck.mode(CommandLine.arguments)) options=\(options)")
+    Log.info("cli start version=\(UpdateController.currentVersion) mode=\(CommandLineCheck.mode(CommandLine.arguments)) \(CommandLineCheck.logOptions(CommandLine.arguments))")
     let result = DiskScanner().scan()
     if json {
         print(ScanReport(result).json(), terminator: "")
