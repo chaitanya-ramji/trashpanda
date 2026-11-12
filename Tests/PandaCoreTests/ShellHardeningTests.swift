@@ -9,24 +9,88 @@ final class ShellHardeningTests: XCTestCase {
     /// The one file that may start programs. This is an exact path, relative to `Sources`. It is not a prefix.
     static let spawnExemptPath = "PandaCore/Shell.swift"
 
-    /// Each pattern names a way to start a program outside `Shell.run`.
+    /// Each pattern names a way to start a program outside `Shell.run`. It runs on code with strings removed.
     private static let spawnPatterns: [(label: String, regex: NSRegularExpression)] = [
         ("Process", #"\bProcess\b"#),
         ("NSTask", #"\bNSTask\b"#),
         ("posix_spawn", #"posix_spawn"#),
-        ("exec family", #"\bexec(?:ve|v|vp|vP|l|le|lp)\b"#),
+        ("exec family", #"\bf?exec(?:ve|v|vp|vP|l|le|lp)\b"#),
         ("system(", #"(?:(?<![\w.])|(?<=Darwin\.))system\s*\("#),
         ("popen", #"\bpopen\b"#),
+        ("fork", #"\bv?fork\s*\("#),
+        ("NSUserTask", #"\bNSUser(?:Unix|Script|AppleScript|Automator)Task\b"#),
+        ("AppleScript", #"\b(?:NSAppleScript|OSAScript|OSAScriptController)\b"#),
+        ("dlopen/dlsym", #"\bdl(?:open|sym|open_preflight)\b"#),
+        ("name lookup by string", #"\b(?:NSClassFromString|NSSelectorFromString|NSProtocolFromString|objc_getClass|objc_lookUpClass|objc_getRequiredClass)\b"#),
+        ("privileged launch", #"\b(?:AuthorizationExecuteWithPrivileges|SMJobSubmit|SMJobBless)\b"#),
     ].map { ($0.0, try! NSRegularExpression(pattern: $0.1)) }
+
+    /// Each pattern runs on code where the text of the strings is kept. It names a shell or a script that a string can start.
+    private static let stringPatterns: [(label: String, regex: NSRegularExpression)] = [
+        ("shell path in a string", #"(?:^|[\s\x{1}'=])(?:/usr)?/bin/(?:sh|bash|zsh|dash|ksh|csh|tcsh|fish|env)\b"#),
+        ("shell name as a string", #"\x{1}(?:sh|bash|zsh|dash|ksh|csh|tcsh|fish)\x{2}"#),
+        ("shell script text", #"do shell script"#),
+        ("command file", #"\x{1}[^\x{2}]*\.command\b"#),
+    ].map { ($0.0, try! NSRegularExpression(pattern: $0.1)) }
+
+    /// `NSWorkspace` can open a file or an app, and a `.command` file then runs in Terminal. These are the only
+    /// files that may call it, with the exact number of calls. A new call site must be added here on purpose.
+    static let workspaceOpenAllowed: [String: Int] = [
+        "TrashPanda/AppDelegate.swift": 3,
+        "TrashPanda/Dialogs.swift": 1,
+        "TrashPanda/UpdateController.swift": 1,
+    ]
+    private static let workspaceOpenCall = try! NSRegularExpression(
+        pattern: #"\bNSWorkspace\b[\w.\s]*?\.(?:open|openApplication|openURL|openURLs|openFile|openTempFile|launchApplication|launchApp)\s*\("#)
+    /// The same methods on any receiver, for the old names that no allowed file uses.
+    private static let workspaceOldNames = try! NSRegularExpression(
+        pattern: #"\.(?:openURLs|openFile|openTempFile|launchApplication|launchApp|openApplication)\s*\("#)
 
     /// Removes comments and string literals, so that a comment cannot hide a call and cannot cause a hit.
     /// Code inside a string interpolation `\( ... )` is kept, because it runs.
-    static func codeOnly(_ text: String) -> String {
+    /// In `keepStrings` mode, each string is written between these two marks, so a pattern can tell string text from code.
+    static let openMark = "\u{1}"
+    static let closeMark = "\u{2}"
+
+    /// With `keepStrings`, the text of each string stays in the result, between the two marks. Comments and regex literals are still removed.
+    static func codeOnly(_ text: String, keepStrings: Bool = false) -> String {
         var i = 0
-        return code(Array(text), &i, nested: false)
+        return code(Array(text), &i, nested: false, keep: keepStrings)
     }
 
-    private static func code(_ s: [Character], _ i: inout Int, nested: Bool) -> String {
+    /// The index after a regex literal that starts at `i`, or nil when there is none.
+    /// A bare `/.../` is only a regex where a value can start, and it stays on one line. A wrong guess is safe:
+    /// when nothing closes the literal, the text is scanned as normal code.
+    private static func regexEnd(_ s: [Character], _ i: Int, previous: Character?) -> Int? {
+        func at(_ k: Int) -> Character? { k < s.count ? s[k] : nil }
+        var hashes = 0
+        while at(i + hashes) == "#" { hashes += 1 }
+        guard at(i + hashes) == "/" else { return nil }
+        if at(i + hashes + 1) == "/" || at(i + hashes + 1) == "*" { return nil }   // a comment, not a regex
+        var j = i + hashes + 1
+        if hashes > 0 {
+            // Extended literal. It may span lines. It ends at a slash with the same number of hashes.
+            while j < s.count {
+                if s[j] == "\\" { j += 2; continue }
+                if s[j] == "/", (0..<hashes).allSatisfy({ at(j + 1 + $0) == "#" }) { return j + 1 + hashes }
+                j += 1
+            }
+            return nil
+        }
+        // Bare literal. It cannot follow a name, a number or a closing bracket, and it cannot start with a space.
+        if let p = previous, !"(,=:{[;!&|?~<>+-*%^".contains(p) { return nil }
+        guard let first = at(j), first != " ", first != "\t", first != "\n" else { return nil }
+        var inClass = false
+        while j < s.count, s[j] != "\n" {
+            if s[j] == "\\" { j += 2; continue }
+            if s[j] == "[" { inClass = true } else if s[j] == "]" { inClass = false }
+            else if s[j] == "/", !inClass { return s[j - 1] != " " ? j + 1 : nil }
+            j += 1
+        }
+        return nil
+    }
+
+    private static func code(_ s: [Character], _ i: inout Int, nested: Bool, keep: Bool = false) -> String {
         var out = ""
         var depth = 0
         func at(_ k: Int) -> Character? { k < s.count ? s[k] : nil }
@@ -47,6 +111,14 @@ final class ShellHardeningTests: XCTestCase {
                 out.append(" ")
                 continue
             }
+            if c == "/" || c == "#" {
+                let previous = out.last(where: { !$0.isWhitespace })
+                if let end = regexEnd(s, i, previous: previous) {
+                    i = end
+                    out.append(" ")
+                    continue
+                }
+            }
             if c == "\"" || c == "#" {
                 var hashes = 0
                 while at(i + hashes) == "#" { hashes += 1 }
@@ -54,11 +126,12 @@ final class ShellHardeningTests: XCTestCase {
                     let multiline = at(i + hashes + 1) == "\"" && at(i + hashes + 2) == "\""
                     let quotes = multiline ? 3 : 1
                     i += hashes + quotes
+                    var body = ""
                     while i < s.count {
                         if s[i] == "\\", (0..<hashes).allSatisfy({ at(i + 1 + $0) == "#" }) {
                             if at(i + 1 + hashes) == "(" {
                                 i += 2 + hashes
-                                out += " " + code(s, &i, nested: true) + " "
+                                out += " " + code(s, &i, nested: true, keep: keep) + " "
                             } else {
                                 i += 2 + hashes
                             }
@@ -69,9 +142,10 @@ final class ShellHardeningTests: XCTestCase {
                             i += quotes + hashes
                             break
                         }
+                        if keep { body.append(s[i]) }
                         i += 1
                     }
-                    out += " \"\" "
+                    out += keep ? " \(openMark)\(body)\(closeMark) " : " \"\" "
                     continue
                 }
             }
@@ -93,10 +167,20 @@ final class ShellHardeningTests: XCTestCase {
         if relativePath == spawnExemptPath { return [] }
         let code = codeOnly(text)
         var problems: [String] = []
-        for (label, regex) in spawnPatterns
-        where regex.firstMatch(in: code, range: NSRange(code.startIndex..., in: code)) != nil {
+        func found(_ regex: NSRegularExpression, in t: String) -> Int {
+            regex.numberOfMatches(in: t, range: NSRange(t.startIndex..., in: t))
+        }
+        for (label, regex) in spawnPatterns where found(regex, in: code) > 0 {
             problems.append("\(relativePath) uses \(label)")
         }
+        let withStrings = codeOnly(text, keepStrings: true)
+        for (label, regex) in stringPatterns where found(regex, in: withStrings) > 0 {
+            problems.append("\(relativePath) has a \(label)")
+        }
+        let opens = found(workspaceOpenCall, in: code)
+        let allowed = workspaceOpenAllowed[relativePath, default: 0]
+        if opens != allowed { problems.append("\(relativePath) calls NSWorkspace open \(opens) times, allowed \(allowed)") }
+        if found(workspaceOldNames, in: code) > 0 { problems.append("\(relativePath) uses an old NSWorkspace launch call") }
         return problems
     }
 
@@ -160,6 +244,158 @@ final class ShellHardeningTests: XCTestCase {
         // Code inside an interpolation runs, so it counts.
         XCTAssertFalse(Self.spawnProblems(in: "let s = \"a \\(Process()) b\"", relativePath: "A.swift").isEmpty)
         XCTAssertFalse(Self.spawnProblems(in: "let s = \"a \\(f(\"x\", g())) \\(popen(a, b))\"", relativePath: "A.swift").isEmpty)
+    }
+
+    func testRegexLiteralsDoNotHideACall() {
+        let hidden = [
+            "let r = #/\"/#; let p = Process()",
+            "let r = ##/\"#/##; let p = Process()",
+            "let r = /\"/; let p = Process()",
+            "let r = try Regex(\"a\"); let m = x.firstMatch(of: /\"+/); posix_spawn(&pid, p, nil, nil, a, e)",
+            "let r = #/\n  \"\n/#\nlet p = Process()",
+            "let r = /[\"/]\"/; let p = Process()",
+            "foo(a, /\\//, \"x\"); Process()",
+        ]
+        for text in hidden {
+            XCTAssertFalse(Self.spawnProblems(in: text, relativePath: "A.swift").isEmpty, text)
+        }
+        // A regex literal hides nothing from the scan, and a word in it is not a hit.
+        let harmless = [
+            "let r = #/Process|posix_spawn/#",
+            "let r = /Process()/",
+            "let r = #/a\\/Process/#",
+            "let r = /[/]Process/",
+        ]
+        for text in harmless {
+            XCTAssertEqual(Self.spawnProblems(in: text, relativePath: "A.swift"), [], text)
+        }
+        // Division is not a regex.
+        XCTAssertFalse(Self.spawnProblems(in: "let a = x / 2; let b = y / 3; Process()", relativePath: "A.swift").isEmpty)
+        XCTAssertFalse(Self.spawnProblems(in: "let a = (x)/2/\"q\"; Process()", relativePath: "A.swift").isEmpty)
+        // A slash with no end is scanned as code.
+        XCTAssertFalse(Self.spawnProblems(in: "let r = #/ never ends\nProcess()", relativePath: "A.swift").isEmpty)
+    }
+
+    func testScannerCatchesTheOtherLaunchVectors() {
+        let cases: [String: String] = [
+            "let t = NSUserUnixTask(url: u)": "NSUserTask",
+            "let t = NSUserScriptTask(url: u)": "NSUserTask",
+            "let t = NSUserAppleScriptTask(url: u)": "NSUserTask",
+            "let t = NSUserAutomatorTask(url: u)": "NSUserTask",
+            "let s = NSAppleScript(source: x)": "AppleScript",
+            "let s = OSAScript(source: x)": "AppleScript",
+            "let h = dlopen(nil, RTLD_NOW)": "dlopen/dlsym",
+            "let f = dlsym(h, \"posix_\" + \"spawn\")": "dlopen/dlsym",
+            "let c = NSClassFromString(\"NS\" + \"Task\")": "name lookup by string",
+            "let c: AnyClass? = objc_getClass(\"NSTask\") as? AnyClass": "name lookup by string",
+            "let s = NSSelectorFromString(x)": "name lookup by string",
+            "let pid = fork()": "fork",
+            "let pid = vfork ()": "fork",
+            "fexecve(fd, a, e)": "exec family",
+            "execle(p, a, nil, e)": "exec family",
+            "posix_spawn_file_actions_init(&fa)": "posix_spawn",
+            "AuthorizationExecuteWithPrivileges(a, p, f, args, nil)": "privileged launch",
+            "NSWorkspace.shared.open(url)": "NSWorkspace",
+            "NSWorkspace.shared.openApplication(at: u, configuration: c, completionHandler: nil)": "NSWorkspace",
+            "let w = NSWorkspace.shared\nw.launchApplication(\"Terminal\")": "NSWorkspace",
+            "NSWorkspace.shared.open([f], withApplicationAt: a, configuration: c)": "NSWorkspace",
+            "let a = \"/bin/sh\"": "shell path in a string",
+            "let a = \"/bin/bash -c ls\"": "shell path in a string",
+            "let a = #\"/usr/bin/env\"#": "shell path in a string",
+            "let a = \"\\(x) /bin/zsh\"": "shell path in a string",
+            "let a = [\"sh\", \"-c\", cmd]": "shell name as a string",
+            "let a = \"bash\"": "shell name as a string",
+            "let a = \"tell app \\\"Terminal\\\" to do shell script \\\"ls\\\"\"": "shell script text",
+            "let u = dir.appendingPathComponent(\"x.command\")": "command file",
+        ]
+        for (code, label) in cases {
+            let hit = Self.spawnProblems(in: "func f() {\n    \(code)\n}\n", relativePath: "TrashPanda/Bad.swift")
+            XCTAssertTrue(hit.contains { $0.contains(label) }, "\(label) must be found in: \(code)\n\(hit)")
+        }
+    }
+
+    func testTypeAliasesOfProcessAreCaught() {
+        for text in ["typealias Runner = Foundation.Process", "typealias R = Process\nlet r = R()",
+                     "import Foundation\nextension Process { }", "let t = (Process).self", "func f(_ p: Process) {}",
+                     "let t: Process.Type = Process.self"] {
+            XCTAssertFalse(Self.spawnProblems(in: text, relativePath: "A.swift").isEmpty, text)
+        }
+    }
+
+    func testScannerLeavesHarmlessCodeAlone() {
+        let harmless = [
+            "let s = \"shell\"; let b = \"bashful\"; let e = \"/usr/bin/envelope\"",
+            "let a = \"commands\"; let b = x.command; let c = \"my.commandline\"",
+            "let w = NSWorkspace.shared.runningApplications",
+            "let u = NSWorkspace.shared.urlForApplication(withBundleIdentifier: b)",
+            "NSWorkspace.shared.activateFileViewerSelecting([u])",
+            "NSWorkspace.shared.notificationCenter.addObserver(self, selector: s, name: n, object: nil)",
+            "let f = FileHandle.standardOutput; try f.close(); let d = Dialog.open(x)",
+            "let forked = 1; let fork_count = 2; let platform = \"dlopen\"",
+            "// NSAppleScript dlopen fork() NSClassFromString \"/bin/sh\"\nlet x = 1",
+            "let s = \"NSUserUnixTask and do shell script\"".replacingOccurrences(of: "do shell script", with: "x"),
+            "let ratio = a / b; let c = d / e",
+            "let p = ProcessInfo.processInfo; let q = ProcessInfo()",
+        ]
+        for text in harmless {
+            XCTAssertEqual(Self.spawnProblems(in: text, relativePath: "A.swift"), [], text)
+        }
+    }
+
+    func testWorkspaceOpenNeedsAnAllowedFileAndAnExactCount() {
+        let one = "NSWorkspace.shared.open(url)\n"
+        XCTAssertEqual(Self.spawnProblems(in: one, relativePath: "TrashPanda/Dialogs.swift"), [])
+        XCTAssertFalse(Self.spawnProblems(in: one + one, relativePath: "TrashPanda/Dialogs.swift").isEmpty)
+        XCTAssertFalse(Self.spawnProblems(in: "let x = 1", relativePath: "TrashPanda/Dialogs.swift").isEmpty,
+                       "The allowance is exact. A file that no longer calls it must leave the list.")
+        XCTAssertFalse(Self.spawnProblems(in: one, relativePath: "PandaCore/Other.swift").isEmpty)
+        XCTAssertFalse(Self.spawnProblems(in: one, relativePath: "TrashPanda/Dialogs.swift.bak").isEmpty)
+        XCTAssertEqual(Self.spawnProblems(in: "// NSWorkspace.shared.open(url)\nlet s = \"NSWorkspace.shared.open(\"", relativePath: "A.swift"), [])
+    }
+
+    // MARK: Package and file layout
+
+    private static var packageRoot: URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    }
+
+    /// Returns a problem for each target that sets a `path:` outside `Sources/`, so that the scan would not see it.
+    static func packagePathProblems(in manifest: String) -> [String] {
+        let code = codeOnly(manifest, keepStrings: true)
+        let regex = try! NSRegularExpression(pattern: #"\bpath:\s*\x{1}([^\x{2}]*)\x{2}"#)
+        var problems: [String] = []
+        for m in regex.matches(in: code, range: NSRange(code.startIndex..., in: code)) {
+            let path = String(code[Range(m.range(at: 1), in: code)!])
+            let clean = (path as NSString).standardizingPath
+            if !clean.hasPrefix("Sources/") && !clean.hasPrefix("./Sources/") || clean.contains("..") {
+                problems.append("a target has the path \(path), outside Sources")
+            }
+        }
+        for word in [" sources:", "(sources:", ".binaryTarget", ".plugin(", ".systemLibrary", ".macro("]
+        where code.contains(word) { problems.append("Package.swift uses \(word)") }
+        return problems
+    }
+
+    func testPackageManifestKeepsEveryTargetUnderSources() throws {
+        let manifest = try String(contentsOf: Self.packageRoot.appendingPathComponent("Package.swift"), encoding: .utf8)
+        XCTAssertEqual(Self.packagePathProblems(in: manifest), [])
+    }
+
+    func testPackageScanFindsABadPath() {
+        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"Vendor/A\")").isEmpty)
+        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"Sources/../Vendor\")").isEmpty)
+        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"../x\")").isEmpty)
+        XCTAssertFalse(Self.packagePathProblems(in: ".binaryTarget(name: \"A\", path: \"Sources/A.xcframework\")").isEmpty)
+        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", sources: [\"../x.swift\"])").isEmpty)
+        XCTAssertEqual(Self.packagePathProblems(in: ".target(name: \"A\", path: \"Sources/A\")\n// path: \"Vendor\""), [])
+        XCTAssertEqual(Self.packagePathProblems(in: ".target(name: \"PandaCore\")"), [])
+    }
+
+    func testSourcesHoldOnlySwiftCode() throws {
+        let root = Self.packageRoot.appendingPathComponent("Sources")
+        let bad = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)!.compactMap { $0 as? URL }
+            .filter { ["c", "m", "mm", "h", "cpp", "cc", "s", "S", "sh", "command", "py", "scpt", "applescript"].contains($0.pathExtension) }
+        XCTAssertEqual(bad.map(\.lastPathComponent), [], "The scan reads Swift files only")
     }
 
     func testExemptionIsTheExactPathOnly() {
