@@ -422,8 +422,8 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(Set((main.map(\.title) + folded.map(\.title))).count, Ecosystem.allCases.count)
         // The largest first.
         XCTAssertEqual(groups.first?.title, Ecosystem.allCases.last?.name)
-        // The size of the row is the sum of the folded rows: 1 MB to 26 MB.
-        XCTAssertEqual(smaller.size, "351 MB")
+        // The size of the row is the sum of the folded rows: 1 MB to 27 MB.
+        XCTAssertEqual(smaller.size, "378 MB")
     }
 
     func testTheColumnOfSizesFollowsTheTitlesOfTheGroup() throws {

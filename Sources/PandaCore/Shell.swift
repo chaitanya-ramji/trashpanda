@@ -34,6 +34,7 @@ public enum Shell {
         "tmutil": "/usr/bin/tmutil",
         "lsof": "/usr/sbin/lsof",
         "ps": "/bin/ps",
+        "git": "/usr/bin/git",
     ]
 
     public static func resolve(_ tool: String) -> String? {

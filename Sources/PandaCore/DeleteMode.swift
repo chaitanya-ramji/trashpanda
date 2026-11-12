@@ -10,7 +10,7 @@ public enum DeleteMode: String, Sendable, Equatable, CaseIterable {
     public static let settingName = "delete_mode"
 
     /// True when the action removes files or folders by itself. In trash mode, these go to the Trash.
-    /// An action that runs a tool (Docker, Homebrew, the simulator, a package manager, Ollama, `hf`) is not a file delete.
+    /// An action that runs a tool (Docker, Homebrew, the simulator, a package manager, Ollama, `hf`, git for a worktree) is not a file delete.
     /// It stays as it is in both modes, and the Trash is not used. Emptying the Trash is also not a file delete.
     /// A Hugging Face repository is removed by the `hf` tool when it is installed, and by a folder delete when it is not.
     /// `hfInstalled` tells which. Without `hf`, the folder goes to the Trash.
@@ -31,7 +31,7 @@ public enum DeleteMode: String, Sendable, Equatable, CaseIterable {
             case .removeOllamaModel:
                 return false
             }
-        case .owner, .docker, .simulator, .globalPackage, .brew, .emptyTrash, .inform:
+        case .owner, .docker, .simulator, .globalPackage, .brew, .emptyTrash, .inform, .worktree:
             return false
         }
     }

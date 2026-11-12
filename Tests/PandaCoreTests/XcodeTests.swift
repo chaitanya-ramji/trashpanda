@@ -550,6 +550,8 @@ final class ConfirmationTests: XCTestCase {
             (.cacheFolder, item(.removeCacheFolderContents(name: "Some Cache")), true),
             (.containerWithVolumes, item(.docker(.removeStoppedContainerWithVolumes(id: "0123456789ab", volumes: ["v"]))), true),
             (.runningContainer, item(.docker(.stopAndRemoveContainerWithVolumes(id: "0123456789ab", volumes: ["v"]))), true),
+            (.worktree, item(.worktree(.remove(repo: URL(fileURLWithPath: "/x/repo"), path: url))), true),
+            (.worktreeRecords, item(.worktree(.prune(repo: URL(fileURLWithPath: "/x/repo"), paths: ["/x/gone"]))), true),
         ]
         XCTAssertEqual(Set(samples.map { "\($0.0)" }), Set(Confirmation.Kind.allCases.map { "\($0)" }),
                        "Each kind needs a sample and a decision")
