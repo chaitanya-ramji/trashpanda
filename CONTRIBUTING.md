@@ -116,6 +116,7 @@ A pull request must follow these rules. A reviewer checks them.
   - If you are not sure, use `review`.
 - **Every delete goes through `PathGuard`.** Do not call `FileManager.removeItem` anywhere else.
 - **Use fixed commands.** To run a tool, add a case to `OwnerCommand`. Never build a command from a path or from user input.
+- **Start programs only with `Shell.run`.** `Process`, `posix_spawn`, `NSTask`, `exec*`, `system`, and `popen` may appear only in `Sources/PandaCore/Shell.swift`, and a test scans the source for them. `Shell.run` refuses a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`, `csh`, `tcsh`, `fish`), `env`, and `xargs`, as it refuses the tools that stop other processes.
 - **Use the owner tool when the tool keeps state.** Docker, Homebrew, and the simulator are examples.
 - **Measure, do not guess.** If a tool keeps files that it never removes, ask the tool what it would free. See the Homebrew code.
 - **Add a test that fails without your change.** A new catalog row needs a test. A new safety rule needs a test that tries to break it.
