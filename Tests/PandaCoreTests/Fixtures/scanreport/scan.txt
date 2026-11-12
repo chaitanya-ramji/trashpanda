@@ -1,0 +1,8 @@
+42 GB free of 500 GB
+Reclaim now: 5.3 GB · To review: 12 GB
+
+safe    5.3 GB   Xcode & Swift             Example build cache  [~/Library/Caches/Example]
+review  12 GB    AI agents & local models  Example models "big"  [~/.example/models]
+review  40 MB    Git worktrees             Worktree · demo  [~/code/demo]
+safe    700 MB   Docker                    Example upper limit  [Docker]
+info    2 MB     Homebrew                  Example note  [~/Library/Example]

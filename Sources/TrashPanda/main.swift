@@ -4,6 +4,7 @@ import PandaCore
 let usage = """
 Usage: trashpanda [option]
   --scan               Print what the app would show. Nothing is deleted.
+  --scan --json        Print the same as one JSON object (schema 1) for scripts. Nothing else is printed.
   --write-icons DIR    Write the app icon sizes to DIR.
   --demo [light|dark]  Show made-up data. Nothing is scanned or deleted.
   --version            Print the version.
@@ -12,11 +13,11 @@ Usage: trashpanda [option]
 """
 
 // An option that we do not know is an error. Other values do not start with a dash.
-let knownOptions: Set<String> = ["--scan", "--write-icons", "--demo", "--dialog", "--submenu", "--hover", "--click", "--backdrop",
-                                 "--version", "--help"]
-let unknownOptions = CommandLine.arguments.dropFirst().filter { $0.hasPrefix("-") && !knownOptions.contains($0) && !$0.hasPrefix("-psn_") }
-if !unknownOptions.isEmpty {
-    FileHandle.standardError.write(Data(("Unknown option: \(unknownOptions.joined(separator: " "))\n" + usage).utf8))
+// `--json` works only with `--scan`.
+if let message = CommandLineCheck.error(CommandLine.arguments) {
+    Log.warn("cli: wrong option, exit 64: \(CommandLine.arguments.dropFirst().joined(separator: " "))")
+    Log.flush()
+    FileHandle.standardError.write(Data((message + "\n" + usage).utf8))
     exit(64)
 }
 if CommandLine.arguments.contains("--help") {
@@ -28,22 +29,26 @@ if CommandLine.arguments.contains("--version") {
     exit(0)
 }
 
-// `trashpanda --scan` prints what the app would show. It never deletes anything.
+// BEGIN scan: this path only reads. It must never call a delete (a test reads this text).
+// `trashpanda --scan` prints what the app would show. With `--json` it prints only the JSON object.
 if CommandLine.arguments.contains("--scan") {
     let started = Date()
+    let json = CommandLine.arguments.contains("--json")
+    let options = CommandLine.arguments.dropFirst().joined(separator: " ")
+    Log.info("cli start version=\(UpdateController.currentVersion) mode=\(CommandLineCheck.mode(CommandLine.arguments)) options=\(options)")
     let result = DiskScanner().scan()
-    print("\(Format.bytes(result.disk.free)) free of \(Format.bytes(result.disk.total))")
-    print("Reclaim now: \(Format.bytes(result.reclaimable)) · To review: \(Format.bytes(result.reviewable))\n")
-    // The name column is as wide as the longest name, plus 2.
-    let nameWidth = (result.findings.map { $0.ecosystem.name.count }.max() ?? 0) + 2
-    for f in result.findings {
-        let tier = !f.isActionable ? "info  " : (f.tier == .safe ? "safe  " : "review")
-        print("\(tier)  \(Format.bytes(f.bytes).padding(toLength: 9, withPad: " ", startingAt: 0))"
-              + "\(f.ecosystem.name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))\(f.title)  [\(f.location)]")
+    if json {
+        print(ScanReport(result).json(), terminator: "")
+    } else {
+        print(ScanReport.text(result), terminator: "")
+        print(String(format: "\nScanned in %.1f s", Date().timeIntervalSince(started)))
     }
-    print(String(format: "\nScanned in %.1f s", Date().timeIntervalSince(started)))
+    let millis = Int(Date().timeIntervalSince(started) * 1000)
+    Log.info("cli end \(ScanReport.summary(result)) duration_ms=\(millis) exit=0")
+    Log.flush()
     exit(0)
 }
+// END scan
 
 // `trashpanda --write-icons <folder>` writes the app icon sizes. The build script uses it.
 if let flag = CommandLine.arguments.firstIndex(of: "--write-icons"), flag + 1 < CommandLine.arguments.count {

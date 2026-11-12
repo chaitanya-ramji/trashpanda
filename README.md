@@ -194,6 +194,35 @@ To see the result without the menu, run this command. It never deletes anything.
 .build/release/trashpanda --scan
 ```
 
+### Commands for scripts
+
+`trashpanda --scan --json` prints the same scan as one JSON object, on one line, with a new line at the end. It deletes nothing. Nothing else goes to stdout: warnings go to stderr and to the log. The format is **schema 1**. Inside schema 1 a field is never removed and never changes its meaning. A new field can be added, so ignore a key that you do not know. The keys are sorted, the report has no time, and the findings have the same order as the text output.
+
+`--json` works only with `--scan`. Without it the command prints an error to stderr and exits with 64. Exit codes: 0 for success, 64 for a wrong option.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema` | number | The format version. Always `1`. |
+| `disk.total` | number | Size of the disk in bytes. |
+| `disk.free` | number | Free space in bytes, as Finder shows it. |
+| `findings[].id` | string | Fixed name of the item. The same item has the same id in each run. The home folder is written as `~`. |
+| `findings[].group` | string | The language or tool group, for example `swift`, `javascript`, `homebrew`, `docker`, `aiAgents`. |
+| `findings[].title` | string | The name of the item. |
+| `findings[].bytes` | number | Size in bytes, a whole number. |
+| `findings[].tier` | string | `safe` (cheap to rebuild), `review` (you must choose it), or `info` (information only, it cannot be cleaned). |
+| `findings[].rebuild` | string | `seconds`, `minutes`, `download`, `recreate`, or `never`. |
+| `findings[].location` | string | The place, as the text output shows it. |
+
+Example (the lines are split here to read them):
+
+```json
+{"disk":{"free":42000000000,"total":500000000000},
+ "findings":[{"bytes":5300000000,"group":"swift","id":"example.cache","location":"~/Library/Caches/Example","rebuild":"minutes","tier":"safe","title":"Example build cache"}],
+ "schema":1}
+```
+
+Each run writes a start line and an end line to the log (`~/Library/Logs/TrashPanda/trashpanda.log`): the options, the number of items by tier, the sizes, the time, and the exit code. It does not write file contents.
+
 ## Spinner and log
 
 The panda in the menu bar turns into a spinner while the app scans or cleans. The menu header shows a spinner too.
