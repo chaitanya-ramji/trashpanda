@@ -184,7 +184,8 @@ public struct MenuModel: Equatable, Sendable {
     public static func make(_ input: MenuInput) -> MenuModel {
         let findings = input.findings
         let cleaning = input.cleaning, scanning = input.scanning
-        let usableSafe = findings.filter { $0.isActionable && $0.tier == .safe && input.blockers($0).isEmpty }
+        // The one rule of the one-click clean is shared with `trashpanda --clean-safe --dry-run`.
+        let usableSafe = findings.filter { CleanPlan.isOneClickSafe($0, blockers: input.blockers($0)) }
         let safeBytes = usableSafe.reduce(Int64(0)) { $0 + $1.countedBytes }
         // The bar has one part for each group row that shows a size. An item of an open app stays in the bar.
         // The bar stays while the app cleans, so the header keeps its height. The view draws it lighter.
@@ -311,7 +312,7 @@ public struct MenuModel: Equatable, Sendable {
     /// The AI agents group, split by product. One row for each product, with its own "Free up" line.
     private static func nestedAgentSubmenu(_ items: [Finding], _ input: MenuInput) -> Submenu {
         var rows: [Row] = []
-        let safe = items.filter { $0.isActionable && $0.tier == .safe && input.blockers($0).isEmpty }
+        let safe = items.filter { CleanPlan.isOneClickSafe($0, blockers: input.blockers($0)) }
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
             rows.append(Row(title: DeleteModeText.bulkRow(ByteText.string(total), mode: input.deleteMode), action: .clean(Prompt(
@@ -333,7 +334,7 @@ public struct MenuModel: Equatable, Sendable {
         let actionable = items.filter(\.isActionable)
         // The bulk "Free up" line takes only items that need no quit. It never quits an app.
         let safeAll = actionable.filter { $0.tier == .safe }.sorted { $0.bytes > $1.bytes }
-        let safe = safeAll.filter { input.blockers($0).isEmpty }
+        let safe = safeAll.filter { CleanPlan.isOneClickSafe($0, blockers: input.blockers($0)) }
         let review = actionable.filter { $0.tier == .review }.sorted { $0.bytes > $1.bytes }
         let groupBytes = SplitBar.rowBytes(items)
 

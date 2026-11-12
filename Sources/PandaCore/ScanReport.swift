@@ -79,10 +79,10 @@ public struct ScanReport: Codable, Equatable, Sendable {
         totals = Totals(reclaimable: result.reclaimable, reviewable: result.reviewable)
     }
 
-    /// Writes the home folder as `~` at the start of an id only: `~` when the id is the home folder,
-    /// `~/rest` when it starts with the home folder and a slash, else it is not changed.
+    /// Writes the home folder as `~` at the start of an id, and at the start of the part after a `kind:` colon:
+    /// `~` when it is the home folder, `~/rest` when it starts with the home folder and a slash, else it is not changed.
     /// So `/Users/al` does not change `/Users/alice/x`. An id can start with a kind and a colon, for example
-    /// `worktree:/Users/al/x`. The kind is kept and the rest is rewritten the same way.
+    /// `worktree:/Users/al/x`. The kind is kept and the rest is rewritten the same way (it can repeat for a second colon).
     public static func id(_ text: String, home: String) -> String {
         guard !home.isEmpty, home != "/" else { return text }
         if let colon = text.firstIndex(of: ":"), !text[..<colon].contains("/") {
@@ -148,14 +148,21 @@ extension Rebuild {
 /// The options of the command line, checked without any side effect.
 public enum CommandLineCheck {
     public static let knownOptions: Set<String> = ["--scan", "--json", "--write-icons", "--demo", "--dialog", "--submenu", "--hover",
-                                                   "--click", "--backdrop", "--version", "--help"]
+                                                   "--click", "--backdrop", "--version", "--help", "--clean-safe", "--dry-run", "--yes", "--verbose"]
 
     /// nil when the options are fine. Else the message for stderr (without the usage text). The exit code is then 64.
     public static func error(_ arguments: [String]) -> String? {
         let args = arguments.dropFirst()
         let unknown = args.filter { $0.hasPrefix("-") && !knownOptions.contains($0) && !$0.hasPrefix("-psn_") }
         if !unknown.isEmpty { return "Unknown option: \(unknown.joined(separator: " "))" }
-        if args.contains("--json") && !args.contains("--scan") { return "--json works only with --scan" }
+        // `--yes` is for the real clean. It does not exist in this version.
+        if args.contains("--yes") { return "--yes is not available in this version" }
+        if args.contains("--scan") && args.contains("--clean-safe") { return "Use --scan or --clean-safe, not both" }
+        if args.contains("--clean-safe") && !args.contains("--dry-run") { return "--clean-safe needs --dry-run in this version" }
+        if args.contains("--dry-run") && !args.contains("--clean-safe") { return "--dry-run works only with --clean-safe" }
+        if args.contains("--json") && !args.contains("--scan") && !args.contains("--clean-safe") {
+            return "--json works only with --scan or with --clean-safe --dry-run"
+        }
         return nil
     }
 
@@ -167,8 +174,14 @@ public enum CommandLineCheck {
         return "options=\(known.joined(separator: " ")) other=\(args.count - known.count)"
     }
 
-    /// `scan` or `scan --json`, for the log.
+    /// True for `--clean-safe --dry-run` (the options are fine, see `error`).
+    public static func isDryRun(_ arguments: [String]) -> Bool {
+        arguments.contains("--clean-safe") && arguments.contains("--dry-run")
+    }
+
+    /// `scan`, `scan --json`, `clean-safe --dry-run`, or `clean-safe --dry-run --json`, for the log.
     public static func mode(_ arguments: [String]) -> String {
-        arguments.contains("--json") ? "scan --json" : "scan"
+        let base = isDryRun(arguments) ? "clean-safe --dry-run" : "scan"
+        return arguments.contains("--json") ? base + " --json" : base
     }
 }
