@@ -32,19 +32,22 @@ final class CleanCoordinator {
     func confirmAndClean(_ box: FindingBox) {
         guard !isCleaning else { return }
         let total = box.findings.reduce(Int64(0)) { $0 + $1.bytes }
-        guard Dialogs.confirm(box) else {
+        // The mode is read once. The dialog and the clean use the same value.
+        let mode = Config.readDeleteMode()
+        guard Dialogs.confirm(box, mode: mode) else {
             Log.info("user: cancelled clean of \(box.findings.count) items")
             return
         }
         Log.info("user: confirmed clean of \(box.findings.count) items, \(total) bytes: \(box.findings.map(\.id).joined(separator: ", "))")
         stop.reset()
-        perform(box.findings)
+        perform(box.findings, mode: mode)
     }
 
     /// Asks the owner app to quit, politely, and cleans when it has. An app that stays open is left alone.
     func confirmQuitAndClean(_ box: FindingBox) {
         guard let finding = box.findings.first, let owner = finding.owner, !isCleaning else { return }
-        guard Dialogs.confirm(box) else {
+        let mode = Config.readDeleteMode()
+        guard Dialogs.confirm(box, mode: mode) else {
             Log.info("user: cancelled quit and clean of \(finding.id)")
             return
         }
@@ -67,7 +70,7 @@ final class CleanCoordinator {
             DispatchQueue.main.async {
                 switch outcome {
                 case .quit:
-                    self.perform([finding])
+                    self.perform([finding], mode: mode)
                 case .stillOpen(let names):
                     self.isCleaning = false
                     self.stop.reset()
@@ -87,13 +90,14 @@ final class CleanCoordinator {
         busyChanged()
     }
 
-    private func perform(_ findings: [Finding]) {
+    private func perform(_ findings: [Finding], mode: DeleteMode) {
         // A stop that the user made before this point (for example while the app quits) stays set.
         isCleaning = true
         progressText = nil
         busyChanged()
         let cleaner = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
-                              runningApps: runningApps, runtimeRequests: scanner.runtimeRequests)
+                              runningApps: runningApps, runtimeRequests: scanner.runtimeRequests,
+                              deleteMode: mode)
         let stop = self.stop
         cleaner.shouldStop = { stop.isRequested }
         let total = findings.count
@@ -119,7 +123,7 @@ final class CleanCoordinator {
         stop.reset()
         progressText = nil
         diskChanged(DiskUsage.current())
-        flash = report.freed > 0 ? "Freed \(Format.bytes(report.freed))" : "Nothing to free"
+        flash = DeleteModeText.flash(report)
         busyChanged()
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
             self?.flash = nil

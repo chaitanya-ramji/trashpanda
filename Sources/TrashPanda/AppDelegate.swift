@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var refreshGate = MenuRefreshGate()
     /// Read when the Settings submenu opens, not at each build.
     private var loginEnabled = false
+    /// The delete mode of the settings file. Read again when the Settings submenu opens.
+    private var deleteMode = Config.readDeleteMode()
     private let updates = UpdateController()
     /// Waits a moment after an app opens or quits, so that a burst of changes gives one refresh.
     private var appsChangedTimer: Timer?
@@ -122,6 +124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func settingsWillOpen(_ settings: NSMenu) {
         loginEnabled = SMAppService.mainApp.status == .enabled
         settings.items.first { $0.title == "Open at login" }?.state = loginEnabled ? .on : .off
+        deleteMode = Config.readDeleteMode()
+        settings.items.first { $0.title == MenuText.trashModeTitle }?.state = deleteMode == .trash ? .on : .off
     }
 
     // MARK: Scan
@@ -181,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var input = MenuInput(result: result, disk: disk, scanning: scanning, cleaning: cleaning, running: running,
                               staleDays: scanner.config.staleDays, updateVersion: updates.available?.version,
                               updateCheckEnabled: updates.isEnabled, loginEnabled: loginEnabled)
+        input.deleteMode = deleteMode
         input.cleaningTitle = cleaner.progressText
         input.stopRequested = cleaner.stopRequested
         return input
@@ -266,6 +271,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menuChanged()
         case .toggleLogin:
             toggleLogin()
+        case .toggleTrashMode:
+            let next: DeleteMode = Config.readDeleteMode() == .trash ? .permanent : .trash
+            if Config.setDeleteMode(next) {
+                Log.info("user: delete mode is now \(next.rawValue)")
+            } else {
+                Log.error("could not save the delete mode")
+            }
+            deleteMode = Config.readDeleteMode()
+            menuChanged()
         case .quit:
             NSApp.terminate(nil)
         case .reveal(let url):

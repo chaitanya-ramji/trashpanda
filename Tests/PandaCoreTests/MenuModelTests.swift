@@ -62,7 +62,7 @@ final class MenuModelTests: XCTestCase {
 
     private let settingsLines = [
         "Settings",
-        "  Check for updates…", "  Check for updates every day", "  Open at login", "  ---",
+        "  Check for updates…", "  Check for updates every day", "  Open at login", "  Move files to the Trash", "  ---",
         "  Open the keep list", "  Open the project folders list", "  ---",
         "  Show log in Finder", "  Help", "  Report a problem", "  About Trash Panda",
         "Quit Trash Panda",
@@ -241,7 +241,7 @@ final class MenuModelTests: XCTestCase {
 
     func testTheMainListHasNoSettingsRowsAndSettingsHasThemInOrder() throws {
         let model = MenuModel.make(input(fixture()))
-        let settingsActions: [MenuModel.Action] = [.checkForUpdates, .toggleUpdateCheck, .toggleLogin, .openKeepList, .openRootsList,
+        let settingsActions: [MenuModel.Action] = [.checkForUpdates, .toggleUpdateCheck, .toggleLogin, .toggleTrashMode, .openKeepList, .openRootsList,
                                                    .showLog, .openHelp, .reportProblem, .showAbout]
         for action in settingsActions { XCTAssertFalse(model.rows.contains { $0.action == action }, "\(action) is in Settings only") }
         let settings = try XCTUnwrap(model.rows.first { $0.title == "Settings" }?.submenu?.rows)
