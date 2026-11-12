@@ -58,6 +58,18 @@ Until a release is notarized by Apple, you must approve the app on first launch.
 
 The app is not sandboxed, because it must read developer folders. It runs with your user rights. It never asks for an administrator password. It makes one kind of network request. One time each day, it asks api.github.com for the list of releases, to find out if a newer one exists. The request holds no data about your files. You can turn it off in the menu ("Check for updates every day"). The app never downloads and never installs an update by itself.
 
+## What it never touches
+
+Trash Panda removes files only when you ask. It never removes these things:
+
+- Your documents, photos, and personal files.
+- Your source code. The app can remove build folders in a project, such as `node_modules` or `target`. It never removes the files that you write.
+- Files outside your home folder.
+- Paths that you list in the `keep` file in `~/.config/trashpanda`.
+- Your settings. The app saves its own options in the `settings` file, and only when you change them in the menu or in the file.
+
+The app never cleans by itself. A clean starts only after you confirm it in a dialog.
+
 ## Safe harbor
 
 We will not take legal action against you if you:

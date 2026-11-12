@@ -33,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The low-disk limit of the settings file in GB. nil: off. Read again when the Settings submenu opens.
     private var lowDiskAlertGB = Config.readLowDiskAlertGB()
     private let lowDisk = LowDiskNotifier()
+    /// Decides once per run whether the first-start note shows.
+    private var firstStartNote = FirstStartNote()
     private let updates = UpdateController()
     /// Waits a moment after an app opens or quits, so that a burst of changes gives one refresh.
     private var appsChangedTimer: Timer?
@@ -61,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Dialogs.keepListChanged = { [weak self] in self?.scan() }
         statusItem.menu = menu
         if let demo { demo.start(self); return }
+        // Demo mode returned above, so the first-start note never shows there. It waits until the launch ends.
+        DispatchQueue.main.async { [weak self] in self?.showFirstStartNoteIfDue() }
         updates.onChange = { [weak self] in self?.menuChanged() }
         updates.start()
         refreshStatusItem()
@@ -77,6 +81,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in self?.appsChanged() }
+        }
+    }
+
+    /// Shows the first-start note once. The decision is in `FirstStartNote`. The note is recorded before it shows, so a
+    /// settings file that cannot be written does not bring it back in this run.
+    private func showFirstStartNoteIfDue() {
+        guard firstStartNote.showNow(isDemo: false, recorded: FirstStartNote.isRecorded()) else { return }
+        if !FirstStartNote.record() { Log.error("could not save the first-start note") }
+        Log.info("first start: showed the note")
+        let alert = NSAlert()
+        alert.messageText = "Trash Panda"
+        alert.informativeText = FirstStartNote.message
+        alert.addButton(withTitle: FirstStartNote.okTitle)
+        alert.addButton(withTitle: FirstStartNote.neverTouchesTitle)
+        NSApp.bringToFront()
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSWorkspace.shared.open(FirstStartNote.neverTouchesURL)
         }
     }
 

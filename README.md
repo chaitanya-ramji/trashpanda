@@ -6,6 +6,8 @@ Trash Panda is a small menu bar app for developers. It finds the files that fill
 
 The app has no window. It has only a menu.
 
+The first time you start the app, one note says what it does and what it never touches. Choose **What it never touches** in the note to read the list in [SECURITY.md](SECURITY.md#what-it-never-touches).
+
 ## What you see
 
 <p align="center">
@@ -222,6 +224,8 @@ stale_days = 30
 
 If the value is not valid, the app uses 30 and writes a warning to the log.
 
+At the first start, the app writes `first_start_note = shown` to this file. That line means the first-start note was shown. Remove the line if you want to see the note again.
+
 ```
 # What the app does with a file or a folder that it may remove.
 # permanent (the default): delete for good.
@@ -398,7 +402,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Test on Intel Macs and older macOS versions ([#36](https://github.com/chaitanya-ramji/trashpanda/issues/36))
 - [ ] Decide: cloud-synced project folders ([#37](https://github.com/chaitanya-ramji/trashpanda/issues/37))
 - [ ] Commands for scripts: JSON, dry run, and a clean of safe items ([#197](https://github.com/chaitanya-ramji/trashpanda/issues/197))
-- [ ] A note at the first start ([#198](https://github.com/chaitanya-ramji/trashpanda/issues/198))
+- [x] A note at the first start ([#198](https://github.com/chaitanya-ramji/trashpanda/issues/198))
 - [ ] Swift 6 language mode ([#199](https://github.com/chaitanya-ramji/trashpanda/issues/199))
 
 ### Later: ideas (no milestone yet)

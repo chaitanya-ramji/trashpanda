@@ -183,6 +183,8 @@ public struct Config: Sendable {
                 if !parsed.isValid {
                     warnings.append("\(LowDiskAlert.settingName) \"\(parts[1])\" is not \"off\" or a whole number of GB from \(LowDiskAlert.limitRange.lowerBound) to \(LowDiskAlert.limitRange.upperBound). The alert is off.")
                 }
+            case FirstStartNote.settingName:
+                break   // written by the app at the first start; no user option
             default:
                 warnings.append("unknown setting \"\(parts[0])\"")
             }

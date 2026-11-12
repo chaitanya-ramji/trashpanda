@@ -19,6 +19,11 @@ final class SecurityPolicyTextTests: XCTestCase {
         XCTAssertFalse(text.contains("never uses the network"))
     }
 
+    func testPolicyHasTheSectionThatTheFirstStartNoteLinksTo() throws {
+        // The second button of the first-start note opens this heading (#198).
+        XCTAssertTrue(try policy().contains("\n## What it never touches\n"))
+    }
+
     func testPolicyNamesTheDailyUpdateRequest() throws {
         let text = try policy()
         XCTAssertTrue(text.contains("api.github.com"))
