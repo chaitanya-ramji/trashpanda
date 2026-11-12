@@ -48,6 +48,8 @@ public enum StorageFacts {
     }
 
     /// The rows for a scan, at most `maxRows`. The order is fixed: Docker, snapshots, space that macOS frees.
+    /// Only one Docker row is ever shown. One scan reads one engine (the active one), and if a list has two disk
+    /// findings anyway, the first one wins.
     public static func rows(from findings: [Finding], disk: DiskUsage = DiskUsage(total: 0, free: 0)) -> [InfoRow] {
         var rows: [InfoRow] = []
         if let f = findings.first(where: { $0.id == "docker.vmdisk" && !$0.isActionable }), let inside = f.insideBytes,

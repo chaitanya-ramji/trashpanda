@@ -680,11 +680,31 @@ final class DockerDesktopDiskTests: DockerTestCase {
         XCTAssertTrue(StorageFacts.rows(from: [item]).isEmpty, "A file that is not 5 GB larger than its data has no row")
     }
 
-    func testOnlyForDockerDesktop() throws {
+    func testEachEngineUsesOnlyItsOwnFile() throws {
         let box = try Sandbox()
-        try sparseFile(box, diskPath, logical: 8_000_000_000, written: 1_000_000)
-        let (_, s) = try scanner(box, socket: ".orbstack/run/docker.sock")     // OrbStack
-        XCTAssertNil(s.scanDocker().first { $0.id == "docker.vmdisk" }, "No disk line for another engine")
+        try sparseFile(box, diskPath, logical: 8_000_000_000, written: 1_000_000)           // a Docker Desktop file
+        let (_, orb) = try scanner(box, socket: ".orbstack/run/docker.sock")     // OrbStack
+        XCTAssertNil(orb.scanDocker().first { $0.id == "docker.vmdisk" }, "The Docker Desktop file is not OrbStack's")
+    }
+
+    func testOrbStackRowWhenItsFileExists() throws {
+        let box = try Sandbox()
+        try sparseFile(box, "Library/Group Containers/HUAQ24HBR6.dev.orbstack/data/data.img", logical: 8_000_000_000, written: 3_000_000)
+        let (_, s) = try scanner(box, socket: ".orbstack/run/docker.sock")
+        let item = try XCTUnwrap(s.scanDocker().first { $0.id == "docker.vmdisk" })
+
+        XCTAssertEqual(item.title, "OrbStack disk image")
+        XCTAssertFalse(item.isActionable, "Information only")
+        XCTAssertEqual(item.insideBytes, 3_032_700_000)
+        XCTAssertLessThan(item.bytes, 10_000_000, "The size on this Mac, not the 8 GB that Finder shows")
+        // This test file is small on disk, so it is not 5 GB larger than its data and gets no row. The row itself is tested in GoodToKnowTests.
+        XCTAssertTrue(StorageFacts.rows(from: [item]).isEmpty)
+    }
+
+    func testOrbStackNoRowWhenThereIsNoFile() throws {
+        let box = try Sandbox()
+        let (_, s) = try scanner(box, socket: ".orbstack/run/docker.sock")
+        XCTAssertNil(s.scanDocker().first { $0.id == "docker.vmdisk" }, "No file, no row")
     }
 
     func testNothingWhenThereIsNoFileOrItIsALink() throws {
