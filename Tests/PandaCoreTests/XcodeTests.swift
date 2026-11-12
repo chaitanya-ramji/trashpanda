@@ -511,7 +511,7 @@ final class ConfirmationTests: XCTestCase {
         (.simulatorDevice, .simulator(.deleteDevice(udid: uid("1"))), true),
         (.archive, .removeArchive(URL(fileURLWithPath: "/x/Archives/d/A.xcarchive")), true),
         (.container, .docker(.removeContainer(id: "0123456789ab")), true),
-        (.simulatorRuntime, .simulator(.deleteRuntime(id: uid("1"))), false),
+        (.simulatorRuntime, .simulator(.deleteRuntime(id: uid("1"))), true),
     ]
 
     func testWhereAMistakeLosesDataTheDefaultButtonKeepsTheItem() {
@@ -532,10 +532,10 @@ final class ConfirmationTests: XCTestCase {
             (.ordinary, item(.owner(.brewCleanup), tier: .safe), false),
             (.container, item(.docker(.removeContainer(id: "0123456789ab"))), true),
             (.volume, item(.docker(.removeVolume(name: "data"))), true),
-            (.simulatorRuntime, item(.simulator(.deleteRuntime(id: uid("1")))), false),
+            (.simulatorRuntime, item(.simulator(.deleteRuntime(id: uid("1")))), true),
             (.simulatorDevice, item(.simulator(.deleteDevice(udid: uid("1")))), true),
             (.archive, item(.removeArchive(url)), true),
-            (.deviceSupport, item(.removeDeviceSupport(url)), false),
+            (.deviceSupport, item(.removeDeviceSupport(url)), true),
             (.serviceWorker, item(.removeServiceWorkerStorage(browserID: "b")), true),
             (.trash, item(.emptyTrash), true),
             (.installer, item(.removeInstaller(url)), true),

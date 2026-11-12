@@ -239,6 +239,6 @@ final class DeviceSupportTests: XCTestCase {
         XCTAssertTrue(c.footer!.contains("copies them from the device again"))
         XCTAssertTrue(c.footer!.contains("can't be undone"))
         XCTAssertEqual(c.confirmTitle, "Remove files")
-        XCTAssertFalse(c.cancelIsDefault, "They can be copied back, so this is not data loss")
+        XCTAssertTrue(c.cancelIsDefault, "Files for an old iOS version or a device that is gone cannot be restored")
     }
 }
