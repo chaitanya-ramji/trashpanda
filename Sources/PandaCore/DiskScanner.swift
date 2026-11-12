@@ -1007,16 +1007,16 @@ public final class DiskScanner {
             }
         }
 
-        // Docker Desktop keeps all its data in one disk image. Show its real size next to the data inside.
+        // Docker Desktop and OrbStack keep all their data in one disk image. Show its real size next to the data inside.
         // This is information only. The app never changes the file.
-        if engine.kind == "Docker Desktop", let disk = DockerDesktopDisk.find(home: home), disk.allocatedBytes > 0 {
+        if let disk = DockerDesktopDisk.find(home: home, engine: engine.kind), disk.allocatedBytes > 0 {
             let inside = engine.summary().filter { ["Images", "Containers", "Local Volumes", "Build Cache"].contains($0.key) }
                 .values.reduce(Int64(0)) { $0 + $1.size }
             // Finder shows the full size of a sparse file. We say so in the tooltip, to avoid confusion.
             let finder = disk.logicalBytes > disk.allocatedBytes * 2
                 ? " · Finder may show \(ByteText.string(disk.logicalBytes))" : ""
             out.append(Finding(
-                id: "docker.vmdisk", ecosystem: .docker, title: "Docker Desktop disk image",
+                id: "docker.vmdisk", ecosystem: .docker, title: "\(engine.kind) disk image",
                 location: "\(place) · \(disk.url.path)\(finder)", bytes: disk.allocatedBytes, tier: .review,
                 rebuild: .never, action: .inform,
                 note: "Holds \(ByteText.string(inside)) of data. The file can stay large after a clean.",

@@ -44,6 +44,41 @@ final class GoodToKnowTests: XCTestCase {
         XCTAssertTrue(StorageFacts.rows(from: [noInside]).isEmpty, "We never guess the data inside")
     }
 
+    private func disk(_ engine: String, onDisk: Int64, inside: Int64) -> Finding {
+        Finding(id: "docker.vmdisk", ecosystem: .docker, title: "\(engine) disk image", location: "x", bytes: onDisk,
+                tier: .review, rebuild: .never, action: .inform, note: "n", insideBytes: inside)
+    }
+
+    func testOrbStackDiskFileGetsTheSameRow() {
+        let rows = StorageFacts.rows(from: [disk("OrbStack", onDisk: 20 * gb, inside: 12 * gb)])
+        XCTAssertEqual(rows.map(\.title), ["Docker disk file: 20 GB, 12 GB in use"])
+        XCTAssertEqual(rows.first?.detail, "Stays large after a clean")
+        XCTAssertTrue(StorageFacts.rows(from: [disk("OrbStack", onDisk: 16 * gb, inside: 12 * gb)]).isEmpty,
+                      "The same 5 GB rule as Docker Desktop")
+    }
+
+    func testOnlyOneDockerRowWhenBothEnginesHaveAFile() {
+        let snap = snapshot(2)
+        let purgeable = DiskUsage(total: 500 * gb, free: 100 * gb, purgeable: 18 * gb)
+        let desktopFirst = StorageFacts.rows(from: [disk("Docker Desktop", onDisk: 34 * gb, inside: 12 * gb),
+                                                    disk("OrbStack", onDisk: 20 * gb, inside: 12 * gb), snap], disk: purgeable)
+        XCTAssertEqual(desktopFirst.map(\.title), ["Docker disk file: 34 GB, 12 GB in use", "Time Machine · 2 local snapshots",
+                                                   "18 GB of free space is purgeable"], "The first file in the scan wins, and the total stays at 3")
+        let orbFirst = StorageFacts.rows(from: [disk("OrbStack", onDisk: 20 * gb, inside: 12 * gb),
+                                                disk("Docker Desktop", onDisk: 34 * gb, inside: 12 * gb), snap], disk: purgeable)
+        XCTAssertEqual(orbFirst.filter { $0.title.hasPrefix("Docker disk file") }.map(\.title), ["Docker disk file: 20 GB, 12 GB in use"])
+        XCTAssertEqual(orbFirst.count, 3)
+        XCTAssertLessThanOrEqual(orbFirst.count, StorageFacts.maxRows)
+    }
+
+    func testOrbStackRowAddsToNoTotal() {
+        let finding = disk("OrbStack", onDisk: 20 * gb, inside: 12 * gb)
+        let plain = model([trash(2 * gb)], info: [])
+        let with = model([trash(2 * gb), finding], info: StorageFacts.rows(from: [finding]))
+        XCTAssertEqual(with.header, plain.header, "The disk file is not in any total")
+        XCTAssertFalse(finding.isActionable)
+    }
+
     // MARK: Space that macOS frees, and snapshots
 
     func testPurgeableRowIsHiddenAtOneGigabyteOrLess() {
