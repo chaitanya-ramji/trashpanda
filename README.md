@@ -129,7 +129,7 @@ By default, Trash Panda deletes files for good. They do not go to the Trash. You
 - The app marks a project as review when someone changed it in the last 30 days. You can change this limit (see Settings).
 - Python virtual environments are always review items.
 - The app never follows symbolic links.
-- The app never deletes outside your home folder.
+- The app itself never deletes files outside your home folder. Some items are removed by their own tool (brew, npm, simctl, docker). That tool decides where its files are.
 - The app never deletes Documents, Desktop, Pictures, Movies, Music, `.ssh`, `.config`, iCloud, or app data.
 - The app counts only space that a delete frees. A file with more than one hard link frees no space.
 - For Homebrew, the app asks `brew` what it would remove. Homebrew keeps its own index files, and the app does not count them.
