@@ -244,7 +244,7 @@ public enum RuntimeVersions {
                 let type = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType
                 if type == .typeRegular, projectFiles.contains(name), let text = try? String(contentsOf: url, encoding: .utf8) {
                     out += requests(inFile: name, text: text)
-                } else if type == .typeDirectory, !Catalog.skipDescend.contains(name), !Catalog.isArtifactName(name), name != ".git" {
+                } else if type == .typeDirectory, !Catalog.skipDescend.contains(name), !Catalog.isSpecificArtifactName(name), name != ".git" {
                     walk(url, depth: depth + 1)
                 }
             }

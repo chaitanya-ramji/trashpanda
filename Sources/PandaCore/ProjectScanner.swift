@@ -78,7 +78,7 @@ public struct ProjectScanner {
             let url = dir.appendingPathComponent(name, isDirectory: true)
             guard isRealDirectory(url) else { continue }
 
-            if let rule = matchingRule(name: name, url: url, siblings: nameSet) {
+            if let rule = Catalog.matchingRule(name: name, url: url, siblings: nameSet) {
                 if guardian.check(url) == nil, !isInUse(project: dir) {
                     out.append(Candidate(url: url, project: dir, rule: rule,
                                          activity: lastActivity(of: dir, names: names)))
@@ -86,30 +86,8 @@ public struct ProjectScanner {
                 continue
             }
             if depth + 1 >= maxDepth { continue }
-            if name.hasPrefix(".") || Catalog.skipDescend.contains(name) || Catalog.isArtifactName(name) { continue }
+            if name.hasPrefix(".") || Catalog.skipDescend.contains(name) || Catalog.isSpecificArtifactName(name) { continue }
             walk(url, depth: depth + 1, into: &out)
-        }
-    }
-
-    private func matchingRule(name: String, url: URL, siblings: Set<String>) -> ArtifactRule? {
-        for rule in Catalog.artifacts where rule.matches(name: name) {
-            guard markerPresent(rule.markers, in: siblings) else { continue }
-            if !rule.innerMarkers.isEmpty {
-                let inner = Set((try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? [])
-                guard rule.innerMarkers.contains(where: inner.contains) else { continue }
-            }
-            return rule
-        }
-        return nil
-    }
-
-    private func markerPresent(_ markers: [String], in names: Set<String>) -> Bool {
-        markers.contains { marker in
-            if marker.hasPrefix("*") {
-                let suffix = String(marker.dropFirst())
-                return names.contains { $0.hasSuffix(suffix) }
-            }
-            return names.contains(marker)
         }
     }
 
@@ -135,7 +113,7 @@ public struct ProjectScanner {
                 if newest == nil || d > newest! { newest = d }
             }
         }
-        for name in names where !Catalog.isArtifactName(name) && name != ".git" {
+        for name in names where !Catalog.isSpecificArtifactName(name) && name != ".git" {
             consider(project.appendingPathComponent(name).path)
         }
         for git in ["HEAD", "index", "FETCH_HEAD", "ORIG_HEAD"] {

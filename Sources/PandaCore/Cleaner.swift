@@ -129,7 +129,7 @@ public final class Cleaner {
                 removeContents(of: dir, finding: finding, into: &report)
 
             case .removeArtifact(let url):
-                guard Catalog.isArtifactName(url.lastPathComponent) else {
+                guard Catalog.isArtifactFolder(url) else {
                     skip(finding, "not a known build folder", &report); continue
                 }
                 if let reason = guardian.check(url) {
@@ -1016,7 +1016,7 @@ public final class Cleaner {
     private func removeArtifact(_ url: URL, finding: Finding, into report: inout CleanReport) {
         let before = report.freed
         let done = removeEach([url], of: finding, into: &report, notTarget: "not a known build folder", isTarget: {
-            Catalog.isArtifactName($0.lastPathComponent) && UpdateDownloads.isPlainPath($0)
+            UpdateDownloads.isPlainPath($0) && Catalog.isArtifactFolder($0)
         }, linkText: "a folder in the path is a link", keepReason: { url, measureStart in
             if self.activeSnapshot.at <= measureStart {
                 self.activeSnapshot = (self.activeDirectories(), ProcessInfo.processInfo.systemUptime)

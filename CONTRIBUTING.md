@@ -77,6 +77,8 @@ Most languages need data only. Open `Sources/PandaCore/Catalog.swift`.
 
 A marker file is a file that proves the folder is a project of that language. For example, `Cargo.toml` proves that `target` is a Rust build folder. Never match a folder by name alone.
 
+Some folder names are common, for example `lib` and `local`. Give such a row `generic: true`. The project scan still enters a folder with a generic name, and lists it only when its marker file is next to it. A project inside a folder named `lib` is found as before.
+
 ## Test Docker features
 
 No test may use a real Docker engine. Docker tests use a fake `docker` tool.

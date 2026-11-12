@@ -60,9 +60,9 @@ Trash Panda looks in two places:
 | Julia | Precompiled code (safe). Packages and artifacts (review). | None |
 | Nim | Build cache (safe). | `nimcache` |
 | OCaml | Dune cache (safe). | `_build` (dune), `_opam` (review) |
-| Crystal | Compiler cache (safe). | None (`lib` is left out: see the PR) |
+| Crystal | Compiler cache (safe). | `lib` (Shards, review; needs `shard.yml`) |
 | Clojure | Git libraries (review). `~/.m2` is already covered under Java. | `target`, `.cpcache`, `.shadow-cljs` |
-| Perl | cpanm and CPAN build folders and downloads (safe). | `blib` (`local` is left out: see the PR) |
+| Perl | cpanm and CPAN build folders and downloads (safe). | `blib`, `local` (Carton, review; needs `cpanfile`) |
 | Lua | None (no global cache path could be confirmed on macOS). | `lua_modules` (review) |
 | Homebrew | Downloads and old versions (safe). Review: each package that no other package needs (`brew leaves`), with its install date. Brew removes it. | None |
 | Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia): cache, code cache, and GPU caches. Firefox and Zen: `cache2` and `startupCache`. Dia and Zen are not checked on a real install yet. Review: Service Worker storage. | None |
@@ -310,13 +310,13 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Service Worker storage: show each website by name ([#44](https://github.com/chaitanya-ramji/trashpanda/issues/44))
 - [x] Menu: show the full split of reclaimable data as an interactive bar ([#42](https://github.com/chaitanya-ramji/trashpanda/issues/42))
 
-### Done: v0.6 Old tools (one item moves on: #88)
+### Done: v0.6 Old tools
 - [x] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
 - [x] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
 - [x] Unused global JavaScript packages: npm, pnpm, Bun, Yarn ([#51](https://github.com/chaitanya-ramji/trashpanda/issues/51))
 - [x] AI coding tool caches and old versions ([#28](https://github.com/chaitanya-ramji/trashpanda/issues/28))
 - [x] More languages (phase 2b): Scala, Haskell, R, Julia, Nim, OCaml, Crystal, Clojure, Perl, Lua ([#29](https://github.com/chaitanya-ramji/trashpanda/issues/29))
-- [ ] Project scan: match generic folder names (lib, local) only when the marker file is present ([#88](https://github.com/chaitanya-ramji/trashpanda/issues/88))
+- [x] Project scan: match generic folder names (lib, local) only when the marker file is present ([#88](https://github.com/chaitanya-ramji/trashpanda/issues/88))
 
 ### Done: v0.7 Correct numbers and safe tools
 - [x] Do not count the uv cache two times in the totals ([#124](https://github.com/chaitanya-ramji/trashpanda/issues/124))
