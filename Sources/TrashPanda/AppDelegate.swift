@@ -7,10 +7,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let menu = NSMenu()
     /// The header view of the menu that is built now. Each build makes a new one, so two menu items never hold one view.
     private(set) var header = StorageHeaderView(frame: .zero)
-    /// True while `menuWillOpen` runs. It builds the menu once, so a change in it does not build a second time.
-    private var isOpening = false
-    /// What the header of the last build shows. The live path compares with it.
-    private var builtContent = HeaderContent.make(activity: .scanning, hasResult: false, hasParts: false)
     private let scanner = DiskScanner()
     private lazy var builder = MenuBuilder { [weak self] action in self?.handle(action) }
     private lazy var cleaner: CleanCoordinator = {
@@ -28,8 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var cleaning: Bool { cleaner.isCleaning }
     private var flash: String? { cleaner.flash }
     private var timer: Timer?
-    /// Knows whether the menu is open. While it is, a change updates a few rows and waits for the close.
-    private var refreshGate = MenuRefreshGate()
+    /// Decides when the menu builds, updates a few rows, or waits for the close. This class only runs what it says.
+    private var wiring = MenuWiring()
     /// Read when the Settings submenu opens, not at each build.
     private var loginEnabled = false
     /// The delete mode of the settings file. Read again when the Settings submenu opens.
@@ -68,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updates.onChange = { [weak self] in self?.menuChanged() }
         updates.start()
         refreshStatusItem()
-        rebuildMenu()
+        menuChanged()   // the menu is closed: it builds at once
         refreshRunning()
         scan()
         lowDisk.check()
@@ -112,19 +108,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard menu === self.menu else { settingsWillOpen(menu); return }
         if demo == nil { disk = DiskUsage.current() }
         refreshStatusItem()
-        isOpening = true
+        wiring.openingBegan()
         if let last = result?.date, Date().timeIntervalSince(last) > 30 * 60 { scan() }
-        isOpening = false
-        rebuildMenu()
-        refreshGate.opened()
-        header.isMenuOpen = true
+        run(wiring.openingFinished(model: MenuModel.make(menuInput())))
         refreshRunning()
     }
 
     func menuDidClose(_ menu: NSMenu) {
         guard menu === self.menu else { return }
-        header.isMenuOpen = false   // the timer of the header stops
-        if refreshGate.closed() { rebuildMenu() }
+        run(wiring.menuClosed(model: MenuModel.make(menuInput())))
     }
 
     /// The Settings submenu is about to open. Only now is the login state read, and the check mark is set.
@@ -164,19 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Call when scanning or cleaning starts or stops.
     private func busyChanged() {
-        if activity == .idle {
-            spinnerTimer?.invalidate()
-            spinnerTimer = nil
-        } else if spinnerTimer == nil {
-            spinnerStep = 0
-            let t = Timer(timeInterval: 0.09, repeats: true) { [weak self] _ in
-                guard let self else { return }
-                self.spinnerStep += 1
-                self.statusItem.button?.image = PandaArt.spinnerFrame(self.spinnerStep)
-            }
-            RunLoop.main.add(t, forMode: .common)   // keeps turning while the menu is open
-            spinnerTimer = t
-        }
+        run(wiring.activityChanged(activity))
         refreshStatusItem()
         menuChanged()
     }
@@ -209,38 +189,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The state changed. A closed menu is built again. An open menu keeps its rows (a rebuild would close the
     /// submenu that the user reads): the header and two rows are updated, and the build waits for the close.
     private func menuChanged() {
-        if isOpening { return }   // `menuWillOpen` builds the menu once, after this
-        switch refreshGate.changed() {
-        case .rebuild:
-            rebuildMenu()
-        case .updateLiveRows:
-            let model = MenuModel.make(menuInput())
-            // The group rows keep their numbers while the menu is open, so the header keeps its parts too. The exception is a menu
-            // that still shows the skeleton: the first result builds the whole menu.
-            switch HeaderContent.liveUpdate(built: builtContent, now: model.header.content) {
-            case .rebuildMenu:
-                rebuildMenu()
-            case .detailOnly(let content):
+        run(wiring.modelChanged(MenuModel.make(menuInput())))
+    }
+
+    /// Runs what `MenuWiring` decided. There is no decision here.
+    private func run(_ actions: [MenuWiring.Action]) {
+        for action in actions {
+            switch action {
+            case .buildMenu(let model, let headerIsOpen):
+                // A new header view for each build. An equal model builds nothing.
+                guard let fresh = builder.rebuild(menu, model: model, onSelect: { [weak self] segment in self?.showGroup(segment) }) else { continue }
+                header = fresh
+                header.isMenuOpen = headerIsOpen
+                if let index = model.rows.firstIndex(where: { $0.title == "Settings" && $0.submenu != nil }),
+                   menu.items.indices.contains(index) {
+                    menu.items[index].submenu?.delegate = self
+                }
+            case .skipEqualModel:
+                break
+            case .updateLiveRows(let model, let content):
                 header.updateLive(content: content)
                 builder.updateLiveRows(model: model)
                 builder.invalidate()   // the open menu no longer shows the last build
+            case .setHeaderOpen(let open):
+                header.isMenuOpen = open   // the timer of the header stops when it closes
+            case .startSpinner:
+                spinnerStep = 0
+                let t = Timer(timeInterval: 0.09, repeats: true) { [weak self] _ in
+                    guard let self else { return }
+                    self.spinnerStep += 1
+                    self.statusItem.button?.image = PandaArt.spinnerFrame(self.spinnerStep)
+                }
+                RunLoop.main.add(t, forMode: .common)   // keeps turning while the menu is open
+                spinnerTimer = t
+            case .stopSpinner:
+                spinnerTimer?.invalidate()
+                spinnerTimer = nil
             }
         }
     }
-
-    private func rebuildMenu() {
-        let model = MenuModel.make(menuInput())
-        // A new header view for each build. An equal model builds nothing.
-        guard let fresh = builder.rebuild(menu, model: model, onSelect: { [weak self] segment in self?.showGroup(segment) }) else { return }
-        header = fresh
-        header.isMenuOpen = refreshGate.isOpen
-        builtContent = model.header.content
-        if let index = model.rows.firstIndex(where: { $0.title == "Settings" && $0.submenu != nil }),
-           menu.items.indices.contains(index) {
-            menu.items[index].submenu?.delegate = self
-        }
-    }
-
 
     /// The user clicked a part of the split bar. The menu closes, and the items of that group open under the icon.
     private func showGroup(_ segment: SplitSegment) {
