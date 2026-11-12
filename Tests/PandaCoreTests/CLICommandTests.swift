@@ -139,7 +139,7 @@ final class CLICommandTests: XCTestCase {
         }
         // The text form says how many items are checked again.
         let text = try XCTUnwrap(run(["--clean-safe", "--dry-run"], box).result?.stdout)
-        XCTAssertTrue(text.contains("checked again at clean time"), text)
+        XCTAssertTrue(text.contains("can change at clean time"), text)
         XCTAssertTrue(text.hasSuffix("Nothing was deleted.\n"))
         // Trash mode shows in the output, and nothing else changes.
         let trash = try XCTUnwrap(run(["--clean-safe", "--dry-run", "--json"], box, mode: .trash).result?.stdout)
@@ -170,6 +170,9 @@ final class CLICommandTests: XCTestCase {
             ["--scan", "--yes"], ["--scan", "--verbose"], ["--scan", "--json", "--verbose"], ["--json"], ["--json", "--demo"],
             ["--verbose"], ["--verbose", "--json"], ["--clean-safe", "--dry-run", "--json", "--verbose"],
             ["--clean-safe", "--dry-run", "--nope"], ["--delete"], ["--clean"], ["--scan", "--nope"], ["--demo", "--verbose"],
+            ["--write-icons"], ["--write-icons", "--scan"], ["--scan", "--write-icons"], ["--write-icons", "--demo"],
+            ["--demo", "--scan"], ["--demo", "dark", "--clean-safe", "--dry-run"], ["--demo", "--dry-run"],
+            ["--clean-safe", "--dry-run", "--demo"], ["--demo", "--scan", "--json"],
             ["-x"], ["--clean-safe", "--dry-run", "--yes", "--verbose"],
         ]
         for args in wrong {
@@ -226,6 +229,12 @@ final class CLICommandTests: XCTestCase {
 
     /// The code of a file without comments and without the text inside string literals.
     private func code(_ text: String) -> String {
+        // Remove the text of string literals (one line each).
+        stripComments(text).replacingOccurrences(of: #""([^"\\]|\\.)*""#, with: "\"\"", options: .regularExpression)
+    }
+
+    /// The code of a file without comments. The text of string literals stays (the scan for delete selectors needs it).
+    private func stripComments(_ text: String) -> String {
         var out = ""
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             var l = String(line)
@@ -237,8 +246,7 @@ final class CLICommandTests: XCTestCase {
             }
             out += l + "\n"
         }
-        // Remove the text of string literals (one line each).
-        return out.replacingOccurrences(of: #""([^"\\]|\\.)*""#, with: "\"\"", options: .regularExpression)
+        return out
     }
 
     /// The files that make the plan of the read-only commands.
@@ -277,7 +285,7 @@ final class CLICommandTests: XCTestCase {
         "isArtifactTarget": "shape check", "isArchiveTarget": "shape check", "isDeviceSupportTarget": "shape check",
         "isSparkleTarget": "shape check", "isUpdateItemTarget": "shape check", "isBrowserCacheTarget": "shape check",
         "isOldLogTarget": "shape check", "isTestBrowserTarget": "shape check", "cacheFolder": "shape check",
-        "systemCacheName": "pure", "projectInUse": "pure", "exists": "FileManager read", "isPlain": "reads the links of a path",
+        "systemCacheName": "pure", "projectInUse": "pure", "exists": "FileManager read", "isReadableFolder": "FileManager read (lists a folder)", "isPlain": "reads the links of a path",
         "isPlainPath": "reads the links of a path", "isArtifactFolder": "Catalog: reads a folder list",
         "isArchive": "pure path shape", "isDeviceSupport": "pure path shape", "isSparkleFolder": "pure path shape",
         "isInstallerPath": "pure path shape", "read": "Installers.read: reads file attributes", "staleItems": "reads folder lists",
@@ -290,12 +298,12 @@ final class CLICommandTests: XCTestCase {
         "info": "writes a log line (the log function of the caller)", "warn": "writes a log line (the log function of the caller)",
         // Types, enum cases, and properties that the regular expression sees as calls. None of them runs anything.
         "Bool": "a type", "Int64": "a type", "Equatable": "a type", "Sendable": "a type", "CodingKey": "a type", "Array": "a type",
-        "Rebuild": "a type", "JSONEncoder": "encodes to memory", "NSHomeDirectory": "reads the path of the home folder",
+        "Rebuild": "a type", "Entry": "a type of the report (ScanReport.Entry)", "JSONEncoder": "encodes to memory", "NSHomeDirectory": "reads the path of the home folder",
         "autoclosure": "an attribute", "self": "keyword", "nil": "keyword", "true": "keyword",
         "now": "the clock function of the caller", "findings": "a property", "base": "a property", "shape": "a closure of the plan that only reads",
         "resolvedShape": "a closure of the plan that only reads", "resolved": "a list", "shapeProblem": "a flag", "blockedReason": "a property",
         "isActionable": "a property", "would": "a local name", "verbose": "a flag", "safe": "an enum case", "trash": "an enum case",
-        "action": "a property", "remove": "an enum case that is matched, never run", "worktree": "an Action case that is matched, never run",
+        "action": "a property", "worktree": "an Action case that is matched, never run",
         "agent": "an Action case that is matched, never run", "removeContents": "an Action case that is matched, never run",
         "removeArtifact": "an Action case that is matched, never run", "removeArchive": "an Action case that is matched, never run",
         "removeInstaller": "an Action case that is matched, never run", "removeDeviceSupport": "an Action case that is matched, never run",
@@ -309,44 +317,68 @@ final class CLICommandTests: XCTestCase {
         "public": "keyword", "static": "keyword", "private": "keyword", "extension": "keyword", "throws": "keyword",
     ]
 
-    func testReadOnlyFilesCallOnlyAllowedFunctions() throws {
-        var unknown: [String: Set<String>] = [:]
-        for file in readOnlyFiles {
-            let text = code(try source(file))
-            let regex = try NSRegularExpression(pattern: #"\b([A-Za-z_][A-Za-z0-9_]*)\s*[(\{]"#)
-            for m in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                let name = String(text[Range(m.range(at: 1), in: text)!])
-                // A name that the file declares itself (a function or a type) is the code of that file. It is read like the rest.
-                if text.contains("func \(name)") || text.contains("struct \(name)") || text.contains("enum \(name)")
-                    || text.contains("class \(name)") || text.contains("init(") && name == "init" { continue }
-                if Self.allowedCalls[name] == nil { unknown[file, default: []].insert(name) }
-            }
+    /// The names of the low-level modules. A call like `Darwin.remove(` goes around every Foundation check, so the read-only files
+    /// may not call anything through these names, and they may not import them.
+    private static let lowLevelModules: Set<String> = ["Darwin", "Glibc", "Foundation", "Swift", "System", "SystemPackage"]
+
+    /// All the problems of one read-only file, as text. Empty means that the file is fine. The source is a parameter so that a test can
+    /// give a made-up source. A made-up source is never compiled into the product and never touches a disk.
+    func readOnlyProblems(_ source: String) throws -> [String] {
+        var problems: [String] = []
+        // `.worktree(.remove(` is an enum case that the plan matches, never calls. The one pattern is removed before the checks.
+        let source = source.replacingOccurrences(of: ".worktree(.remove(", with: ".worktree(.matched")
+        let text = code(source)
+        let raw = stripComments(source)
+        // 1. Every call name is in the allow-list. A qualified call is also read with its qualifier.
+        let regex = try NSRegularExpression(pattern: #"\b((?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*)([A-Za-z_][A-Za-z0-9_]*)\s*[(\{]"#)
+        for m in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            let qualifier = String(text[Range(m.range(at: 1), in: text)!]).replacingOccurrences(of: " ", with: "")
+            let name = String(text[Range(m.range(at: 2), in: text)!])
+            let first = qualifier.split(separator: ".").first.map(String.init) ?? ""
+            if Self.lowLevelModules.contains(first) { problems.append("low-level call \(qualifier)\(name)"); continue }
+            // A name that the file declares itself is the code of that file, but only for a call without a qualifier. A declared
+            // overload (for example `exists`) must not hide a qualified call.
+            let declared = text.contains("func \(name)") || text.contains("struct \(name)") || text.contains("enum \(name)")
+                || text.contains("class \(name)") || name == "init"
+            if qualifier.isEmpty && declared { continue }
+            if Self.allowedCalls[name] == nil { problems.append("call not in the allow-list: \(qualifier)\(name)") }
         }
-        XCTAssertTrue(unknown.isEmpty, "These calls are not in the allow-list. Check that each one is read-only, then add it with a reason: \(unknown)")
+        // 2. No import of a low-level module.
+        if text.range(of: #"\bimport\s+(Darwin|Glibc|System|SystemPackage)\b"#, options: .regularExpression) != nil {
+            problems.append("imports a low-level module")
+        }
+        // 3. No forbidden word at all (there is no allow-list for the read-only files), in the code and in the raw text.
+        for word in Self.forbiddenReadOnlyWords where text.contains(word) { problems.append("contains \(word)") }
+        problems += Self.dangerHits(source, words: Self.dangers).map { "contains \($0)" }
+        problems += Self.rawHits(raw).map { "contains the selector \($0)" }
+        // 4. The FileManager is used only through read methods.
+        let fm = try NSRegularExpression(pattern: #"FileManager\.default\.([A-Za-z]+)"#)
+        let readMethods: Set<String> = ["attributesOfItem", "contentsOfDirectory", "fileExists"]
+        for m in fm.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            let name = String(text[Range(m.range(at: 1), in: text)!])
+            if !readMethods.contains(name) { problems.append("calls FileManager.\(name)") }
+        }
+        return problems
+    }
+
+    static let forbiddenReadOnlyWords = ["Cleaner", "Shell", "Process", "removeItem", "trashItem", "unlink", "moveItem", "copyItem", "replaceItem",
+                                         "createFile", "createDirectory", "createSymbolicLink", "createLink", "setAttributes", "linkItem",
+                                         "FileHandle", "NSWorkspace", "recycle", "TrashMover", "TrashBin", "deleteItem", "dispose", "Docker",
+                                         "Simctl", "Brew", "write(to", "write(", "performDelete", "OwnerCommand", "ownerRunner"]
+
+    func testReadOnlyFilesCallOnlyAllowedFunctions() throws {
+        var found: [String: [String]] = [:]
+        for file in readOnlyFiles {
+            let problems = try readOnlyProblems(try source(file)).filter { $0.hasPrefix("call not") || $0.hasPrefix("low-level") || $0.hasPrefix("imports") }
+            if !problems.isEmpty { found[file] = problems }
+        }
+        XCTAssertTrue(found.isEmpty, "These calls are not in the allow-list. Check that each one is read-only, then add it with a reason: \(found)")
     }
 
     func testReadOnlyFilesDoNotReferenceTheCleanerOrAToolRunner() throws {
-        let forbidden = ["Cleaner", "Shell", "Process", "removeItem", "trashItem", "unlink", "moveItem", "copyItem", "replaceItem",
-                         "createFile", "createDirectory", "createSymbolicLink", "createLink", "setAttributes", "linkItem",
-                         "FileHandle", "NSWorkspace", "recycle", "TrashMover", "TrashBin", "deleteItem", "dispose", "Docker", "Simctl",
-                         "Brew", "write(to", "write(", "performDelete", "OwnerCommand", "ownerRunner", "emptyTrash"]
         for file in readOnlyFiles {
-            let text = code(try source(file))
-            for word in forbidden {
-                // `emptyTrash` is an Action case that the plan names in a switch. Naming it is fine: the plan never runs it.
-                if word == "emptyTrash" { continue }
-                XCTAssertFalse(text.contains(word), "\(file) must not contain \(word)")
-            }
-        }
-        // The FileManager is used only through read methods.
-        let readMethods: Set<String> = ["attributesOfItem", "contentsOfDirectory", "fileExists"]
-        for file in readOnlyFiles {
-            let text = code(try source(file))
-            let regex = try NSRegularExpression(pattern: #"FileManager\.default\.([A-Za-z]+)"#)
-            for m in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                let name = String(text[Range(m.range(at: 1), in: text)!])
-                XCTAssertTrue(readMethods.contains(name), "\(file) calls FileManager.\(name)")
-            }
+            let problems = try readOnlyProblems(try source(file))
+            XCTAssertEqual(problems, [], "\(file)")
         }
         // main.swift is thin: it calls the command, writes the result, and exits. It has no scan, plan, or delete code.
         let main = code(try source("Sources/TrashPanda/main.swift"))
@@ -356,32 +388,256 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
-    /// Where a delete, a move to the Trash, or a program start may be in PandaCore. Each entry has a reason.
-    /// A new file with one of these words fails the test, so that a person must look at it.
-    static let deleteWords = ["removeItem", "trashItem", "unlink", "moveItem", "replaceItem", "removeFile"]
-    static let deleteAllowList: [String: String] = [
-        "Cleaner.swift": "the one place that deletes items, after the guard (`deleteItem`)",
-        "DeleteMode.swift": "TrashMover: the move to the Trash in trash mode. Only the Cleaner calls it",
-        "Log.swift": "rotates the log file of the app itself (`trashpanda.log`), never a user file",
-    ]
-    static let processAllowList: [String: String] = [
-        "Shell.swift": "the one runner of tools. It has the trust checks, the time limit, and the quiet mode",
+    // MARK: Source: the words that delete, move, or start a program
+
+    /// A word that only a few files of PandaCore may contain. `pattern` is a regular expression for the code (comments and the text of
+    /// string literals are removed). A word that stands for a call with a name is matched even when another function has the same name.
+    struct Danger: Equatable {
+        let name: String
+        let pattern: String
+    }
+
+    static let dangers: [Danger] = [
+        // Delete, move, and link calls of Foundation and of libc
+        Danger(name: "removeItem", pattern: #"removeItem"#), Danger(name: "trashItem", pattern: #"trashItem"#),
+        Danger(name: "moveItem", pattern: #"(?<![A-Za-z0-9_])moveItem"#), Danger(name: "replaceItem", pattern: #"replaceItem"#),
+        Danger(name: "copyItem", pattern: #"copyItem"#), Danger(name: "createSymbolicLink", pattern: #"createSymbolicLink"#),
+        Danger(name: "setAttributes", pattern: #"setAttributes"#), Danger(name: "write(to", pattern: #"\bwrite\s*\(\s*to\b"#),
+        Danger(name: "unlink", pattern: #"\bunlink\w*"#), Danger(name: "unlinkat", pattern: #"\bunlinkat\b"#),
+        Danger(name: "removefile", pattern: #"(?i)\bremovefile"#), Danger(name: "remove(", pattern: #"\bremove\s*\("#),
+        Danger(name: "rmdir", pattern: #"\brmdir\b"#), Danger(name: "rename", pattern: #"\brename\s*\("#),
+        Danger(name: "renamex", pattern: #"\brenamex\w*"#), Danger(name: "renameat", pattern: #"\brenameat\w*"#),
+        // A call to libc through its module name goes around every check of Foundation
+        Danger(name: "Darwin./Glibc.", pattern: #"\b(Darwin|Glibc)\s*\."#),
+        Danger(name: "Foundation.<call>", pattern: #"\bFoundation\s*\.\s*\w+\s*\("#),
+        // A call by a name that is made at run time
+        Danger(name: "NSSelectorFromString", pattern: #"NSSelectorFromString"#), Danger(name: "perform(", pattern: #"\bperform\s*\("#),
+        // Start of a program
+        Danger(name: "Process(", pattern: #"\bProcess\s*\("#), Danger(name: "Process.init", pattern: #"\bProcess\s*\.\s*init\b"#),
+        Danger(name: "posix_spawn", pattern: #"posix_spawn"#), Danger(name: "system(", pattern: #"\bsystem\s*\("#),
+        Danger(name: "popen", pattern: #"\bpopen\b"#), Danger(name: "exec", pattern: #"\bexec\w*\s*\("#),
+        Danger(name: "NSTask", pattern: #"NSTask"#),
     ]
 
-    func testOnlyTheDocumentedFilesCanDeleteOrRunAProgram() throws {
+    /// Delete selectors that are searched in the raw text, WITH the text of string literals (`perform(NSSelectorFromString("..."))`
+    /// hides the name in a string). A match is a problem in every file: no file of PandaCore needs one.
+    static let rawSelectors = ["removeItemAtPath", "removeItemAtURL", "trashItemAtURL", "unlink"]
+
+    /// The names of the dangers that a source contains. `source` is raw: comments and string literals are handled here.
+    static func dangerHits(_ source: String, words: [Danger]) -> Set<String> {
+        let text = CLICommandTests.codeOnly(source)
+        var hits: Set<String> = []
+        for word in words where text.range(of: word.pattern, options: .regularExpression) != nil { hits.insert(word.name) }
+        return hits
+    }
+
+    /// The delete selectors in a source without comments (string literals kept).
+    static func rawHits(_ withoutComments: String) -> [String] { rawSelectors.filter { withoutComments.contains($0) } }
+
+    static func codeOnly(_ text: String) -> String { CLICommandTests().code(text) }
+
+    /// Where each word may be in PandaCore. A word that is not in this table has no file. Each entry has a reason.
+    /// A new file with one of these words fails the test, so that a person must look at it. An entry for a file that does not
+    /// contain the word any more also fails, so that the table stays true.
+    static let wordAllow: [String: [String: String]] = [
+        "removeItem": ["Cleaner.swift": "the one place that deletes items, after the guard (`deleteItem`)",
+                       "Log.swift": "rotates the log file of the app itself (`trashpanda.log`), never a user file"],
+        "moveItem": ["Log.swift": "rotates the log file of the app itself (`trashpanda.log`), never a user file"],
+        "setAttributes": ["Log.swift": "sets the permissions of the log folder and the log file of the app itself"],
+        "trashItem": ["Cleaner.swift": "the field `trashItem` holds the move to the Trash (`TrashMover.move`). Only the Cleaner calls it",
+                      "DeleteMode.swift": "TrashMover: the move to the Trash in trash mode. Only the Cleaner calls it"],
+        "remove(": ["Cleaner.swift": "calls `Worktrees.remove` and the Ollama `remove` after the guard, and matches the worktree case",
+                    "Worktrees.swift": "declares the worktree case `remove` and `Worktrees.remove` (it runs `git worktree remove` through Git)",
+                    "Model.swift": "matches the worktree case `.remove(` to read its path",
+                    "DiskScanner.swift": "matches the worktree case `.remove(` to read its path",
+                    "OllamaModels.swift": "declares `remove`: it runs `ollama rm` through Shell. Only the Cleaner calls it"],
+        "perform(": ["Cleaner.swift": "`perform` is a local closure that holds the delete or the move (`try perform(url)`)"],
+        "exec": ["Shell.swift": "`execute`: the one runner of tools. It has the trust checks, the time limit, and the quiet mode"],
+        "write(to": ["DiskScanner.swift": "writes the settings files of the app itself (the keep list and the help text), never a user file"],
+        "Process(": ["Shell.swift": "the one runner of tools. It has the trust checks, the time limit, and the quiet mode"],
+    ]
+
+    /// Every file that has a word, by word, in PandaCore (names without the folder).
+    private func dangerFiles() throws -> [String: Set<String>] {
         let dir = root().appendingPathComponent("Sources/PandaCore")
         let files = try FileManager.default.subpathsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }
         XCTAssertGreaterThan(files.count, 50)
-        var deleters: Set<String> = [], runners: Set<String> = [], cleanerUsers: Set<String> = []
+        var found: [String: Set<String>] = [:]
         for file in files {
-            let text = code(try String(contentsOf: dir.appendingPathComponent(file), encoding: .utf8))
+            let text = try String(contentsOf: dir.appendingPathComponent(file), encoding: .utf8)
             let name = (file as NSString).lastPathComponent
-            if Self.deleteWords.contains(where: { text.contains($0) }) { deleters.insert(name) }
-            if text.contains("Process(") || text.contains("Process()") { runners.insert(name) }
-            if text.range(of: #"\bCleaner\s*\("#, options: .regularExpression) != nil { cleanerUsers.insert(name) }
+            for word in Self.dangerHits(text, words: Self.dangers) { found[word, default: []].insert(name) }
+            for selector in Self.rawHits(stripComments(text)) { found["raw:" + selector, default: []].insert(name) }
         }
-        XCTAssertEqual(deleters, Set(Self.deleteAllowList.keys), "files with a delete word")
-        XCTAssertEqual(runners, Set(Self.processAllowList.keys), "files that start a program")
+        return found
+    }
+
+    func testOnlyTheDocumentedFilesHaveADangerWord() throws {
+        let found = try dangerFiles()
+        for (word, files) in found.sorted(by: { $0.key < $1.key }) {
+            let allowed = Set(Self.wordAllow[word, default: [:]].keys)
+            // CleanPlan.swift matches the worktree case `.remove(`. The read-only test removes that one pattern and checks again.
+            let extra = word == "remove(" ? files.subtracting(["CleanPlan.swift"]) : files
+            XCTAssertEqual(extra, allowed, "word `\(word)`: the files that have it and the files in the allow-list must be equal")
+        }
+        for word in Self.wordAllow.keys { XCTAssertNotNil(found[word], "the allow-list names `\(word)`, but no file has it") }
+        XCTAssertTrue(found.keys.filter { $0.hasPrefix("raw:") }.isEmpty, "No file may name a delete selector, even in a string: \(found)")
+    }
+
+    func testOnlyTheDocumentedFilesCanDeleteOrRunAProgram() throws {
+        let found = try dangerFiles()
+        // The old checks, kept: three files delete or move, one file starts a program, no file builds a Cleaner.
+        let deleteWords = ["removeItem", "trashItem", "unlink", "moveItem", "replaceItem", "removefile"]
+        let deleters = deleteWords.reduce(into: Set<String>()) { $0.formUnion(found[$1] ?? []) }
+        XCTAssertEqual(deleters, ["Cleaner.swift", "DeleteMode.swift", "Log.swift"], "files with a delete word")
+        let runners = ["Process(", "Process.init", "posix_spawn", "system(", "popen", "NSTask"].reduce(into: Set<String>()) { $0.formUnion(found[$1] ?? []) }
+        XCTAssertEqual(runners, ["Shell.swift"], "files that start a program")
+        let dir = root().appendingPathComponent("Sources/PandaCore")
+        var cleanerUsers: Set<String> = []
+        for file in try FileManager.default.subpathsOfDirectory(atPath: dir.path) where file.hasSuffix(".swift") {
+            let text = code(try String(contentsOf: dir.appendingPathComponent(file), encoding: .utf8))
+            if text.range(of: #"\bCleaner\s*\("#, options: .regularExpression) != nil { cleanerUsers.insert((file as NSString).lastPathComponent) }
+        }
         XCTAssertTrue(cleanerUsers.isEmpty, "no file in PandaCore builds a Cleaner except through its own type: \(cleanerUsers)")
+    }
+
+    // MARK: Made-up sources: the scanners catch each bypass, and harmless code passes
+    // These strings are never compiled and never run. They are only text for the scanner. They name no real path of a user.
+
+    private let probeB1 = """
+    import Foundation
+    enum CleanRules {
+        static func exists(_ url: URL) -> Bool { true }
+        static func exists(_ path: String, force: Bool) -> Int32 { Darwin.remove(path) }
+    }
+    """
+    private let probeB2 = """
+    func move(_ from: String, home: String) {
+        _ = rename(from, home + "/.Trash/x")
+        _ = renamex_np(from, home + "/.Trash/y", 0)
+        _ = renameat(0, from, 0, home + "/.Trash/z")
+    }
+    """
+    private let probeB3 = "func start() throws { let p = Process.init(); try p.run() }"
+    private let probeB4 = """
+    func go(_ p: String) {
+        _ = FileManager.default.perform(NSSelectorFromString("removeItemAtPath:error:"), with: p, with: nil)
+    }
+    """
+    private let probeB5 = "func gone(_ path: String) { _ = rmdir(path) }"
+    private let harmless = """
+    import Foundation
+    struct Totals { var a: Int
+        func double() -> Int { [a, a].map { $0 * 2 }.reduce(0, +) }
+        // Darwin.remove( is only a comment here, and the text "rename(" is a string
+        func label() -> String { "rename(" + String(a) }
+    }
+    """
+
+    func testEachBypassProbeIsCaught() throws {
+        let cases: [(name: String, source: String, words: [String])] = [
+            ("B1", probeB1, ["Darwin./Glibc.", "remove("]),
+            ("B2", probeB2, ["rename", "renamex", "renameat"]),
+            ("B3", probeB3, ["Process.init"]),
+            ("B4", probeB4, ["NSSelectorFromString", "perform("]),
+            ("B5", probeB5, ["rmdir"]),
+        ]
+        for c in cases {
+            let hits = Self.dangerHits(c.source, words: Self.dangers)
+            for word in c.words { XCTAssertTrue(hits.contains(word), "\(c.name) must be caught by `\(word)`; hits: \(hits)") }
+            // A new file with this code has no allow-list entry, so the table test fails for it.
+            XCTAssertFalse(hits.isEmpty, c.name)
+            // The read-only check catches it too.
+            XCTAssertFalse(try readOnlyProblems(c.source).isEmpty, "\(c.name) must fail the read-only check")
+        }
+        // B4 also hides the selector in a string. The raw scan sees it.
+        XCTAssertEqual(Self.rawHits(stripComments(probeB4)), ["removeItemAtPath"])
+        XCTAssertEqual(Self.rawHits(stripComments(probeB2)), [])
+    }
+
+    func testAnOverloadWithAnAllowedNameDoesNotHideALowLevelCall() throws {
+        // `exists` is in the allow-list and the file declares it. `Darwin.remove` must still be found.
+        let problems = try readOnlyProblems(probeB1)
+        XCTAssertTrue(problems.contains("low-level call Darwin.remove"), "\(problems)")
+        // A bare `remove(` call behind a declared overload is found by the word list.
+        let bare = "enum CleanRules { static func remove(_ p: String) {}\n static func go() { remove(\"x\") } }"
+        XCTAssertTrue(Self.dangerHits(bare, words: Self.dangers).contains("remove("))
+        XCTAssertTrue(try readOnlyProblems("import Darwin\nfunc a() {}").contains("imports a low-level module"))
+    }
+
+    func testHarmlessCodePassesEveryScanner() throws {
+        XCTAssertEqual(Self.dangerHits(harmless, words: Self.dangers), [])
+        XCTAssertEqual(Self.rawHits(stripComments(harmless)), [])
+        // The two functions of the made-up source are its own code. The read-only check has no other problem with it.
+        let problems = try readOnlyProblems(harmless)
+        XCTAssertEqual(problems, [])
+    }
+
+    func testRemovingAWordFromTheListLetsItsProbeThrough() throws {
+        // Mutation check. Each word has a probe. Without the word, the probe is no longer caught by that word.
+        let probes: [(word: String, source: String)] = [
+            ("remove(", probeB1), ("Darwin./Glibc.", probeB1), ("rename", probeB2), ("renamex", probeB2), ("renameat", probeB2),
+            ("Process.init", probeB3), ("NSSelectorFromString", probeB4), ("perform(", probeB4), ("rmdir", probeB5),
+        ]
+        for (word, source) in probes {
+            XCTAssertTrue(Self.dangerHits(source, words: Self.dangers).contains(word), word)
+            let without = Self.dangers.filter { $0.name != word }
+            XCTAssertEqual(without.count, Self.dangers.count - 1, word)
+            XCTAssertFalse(Self.dangerHits(source, words: without).contains(word), "without `\(word)` the probe must pass that word")
+        }
+        // The probes that only one word covers pass completely when that word is gone.
+        XCTAssertTrue(Self.dangerHits(probeB5, words: Self.dangers.filter { $0.name != "rmdir" }).isEmpty)
+        XCTAssertTrue(Self.dangerHits(probeB3, words: Self.dangers.filter { $0.name != "Process.init" }).isEmpty)
+        // Every word of the list has a probe, so that no word is unchecked.
+        let more = ["removeItem": "try fm.removeItem(at: u)", "trashItem": "try fm.trashItem(at: u, resultingItemURL: &r)",
+                    "moveItem": "try fm.moveItem(at: a, to: b)", "replaceItem": "try fm.replaceItem(at: a, withItemAt: b)",
+                    "copyItem": "try fm.copyItem(at: a, to: b)", "createSymbolicLink": "try fm.createSymbolicLink(at: a, withDestinationURL: b)",
+                    "setAttributes": "try fm.setAttributes([:], ofItemAtPath: p)", "write(to": "try text.write(to: u, atomically: true, encoding: .utf8)",
+                    "unlink": "unlink(p)", "unlinkat": "unlinkat(0, p, 0)", "removefile": "removefile(p, nil, 0)",
+                    "Foundation.<call>": "Foundation.remove(p)", "Process(": "let p = Process()", "posix_spawn": "posix_spawn(&pid, p, nil, nil, a, e)",
+                    "system(": "system(c)", "popen": "popen(c, r)", "exec": "execv(p, a)", "NSTask": "let t = NSTask()"]
+        let covered = Set(probes.map(\.word)).union(more.keys)
+        XCTAssertEqual(covered, Set(Self.dangers.map(\.name)))
+        for (word, source) in more {
+            XCTAssertTrue(Self.dangerHits(source, words: Self.dangers).contains(word), word)
+            XCTAssertFalse(Self.dangerHits(source, words: Self.dangers.filter { $0.name != word }).contains(word), word)
+        }
+    }
+
+    // MARK: Tests never write to the real home folder
+
+    /// Words that write, move, or delete. A test file that has one of these together with the real home folder is a risk: the
+    /// previous review moved fixture files into the real Trash this way.
+    private static let writeWords = ["removeItem", "moveItem", "trashItem", "copyItem", "createDirectory", "createFile", "createSymbolicLink",
+                                     "setAttributes", "write(to", ".write(", "rename", "unlink", "rmdir", "remove(", "removefile", "Process"]
+    /// The names of the real home folder. They are built from parts, so that this file does not contain them in one piece.
+    private static let realHomeNames = ["NSHome" + "Directory()", "NSHome" + "DirectoryForUser", "homeDirectory" + "ForCurrentUser",
+                                        "getpw" + "uid", "expandingTilde" + "InPath"]
+
+    /// The problems of one test file: the real home folder together with a write call. Empty means fine.
+    static func homeWriteProblems(_ source: String) -> [String] {
+        let text = CLICommandTests().stripComments(source)
+        guard realHomeNames.contains(where: { text.contains($0) }) else { return [] }
+        return writeWords.filter { text.contains($0) }
+    }
+
+    func testNoTestFileCombinesTheRealHomeFolderWithAWriteCall() throws {
+        // Today no test file names the real home folder at all (checked by the test below). Each test uses a temp home (`Sandbox`).
+        let dir = root().appendingPathComponent("Tests")
+        let files = try FileManager.default.subpathsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }
+        XCTAssertGreaterThan(files.count, 50)
+        var bad: [String: [String]] = [:]
+        for file in files {
+            let problems = Self.homeWriteProblems(try String(contentsOf: dir.appendingPathComponent(file), encoding: .utf8))
+            if !problems.isEmpty { bad[file] = problems }
+        }
+        XCTAssertTrue(bad.isEmpty, "A test must use a temp home (Sandbox), never the real home folder: \(bad)")
+        // The guard itself works on made-up sources.
+        let home = "NSHome" + "Directory()"
+        XCTAssertFalse(Self.homeWriteProblems("let h = \(home)\n_ = rename(a, h + \"/.Trash/x\")").isEmpty)
+        XCTAssertFalse(Self.homeWriteProblems("let h = \(home); try fm.moveItem(at: a, to: b)").isEmpty)
+        XCTAssertTrue(Self.homeWriteProblems("let h = \(home)\nlet n = h.count").isEmpty)
+        XCTAssertTrue(Self.homeWriteProblems("let box = try Sandbox()\ntry fm.removeItem(at: box.home)").isEmpty)
+        XCTAssertTrue(Self.homeWriteProblems("// \(home) in a comment\ntry fm.removeItem(at: box.home)").isEmpty)
     }
 }

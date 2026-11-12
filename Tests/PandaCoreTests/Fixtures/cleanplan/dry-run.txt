@@ -2,7 +2,7 @@
 up to 700 MB  Docker         Example upper limit  [Docker]
 300 MB        Homebrew       Example tool item  [Trash]
 3 items would be cleaned. Would free 5.6 GB
-1 of 3 items are checked again at clean time
+1 of 3 items can change at clean time
 
 Skipped: 7 items
   1  blocked: Has changes that are not committed

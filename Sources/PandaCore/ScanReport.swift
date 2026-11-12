@@ -157,6 +157,15 @@ public enum CommandLineCheck {
         if !unknown.isEmpty { return "Unknown option: \(unknown.joined(separator: " "))" }
         // `--yes` is for the real clean. It does not exist in this version.
         if args.contains("--yes") { return "--yes is not available in this version" }
+        // `--write-icons` needs a folder. Without it the app would start by chance.
+        if let i = args.firstIndex(of: "--write-icons") {
+            let next = args.index(after: i)
+            if next >= args.endIndex || args[next].hasPrefix("-") { return "--write-icons needs a folder" }
+        }
+        // `--demo` shows made-up data in the app. It does not mix with a command that scans.
+        if args.contains("--demo") && (args.contains("--scan") || args.contains("--clean-safe") || args.contains("--dry-run")) {
+            return "--demo cannot be used with --scan, --clean-safe, or --dry-run"
+        }
         if args.contains("--scan") && args.contains("--clean-safe") { return "Use --scan or --clean-safe, not both" }
         if args.contains("--clean-safe") && !args.contains("--dry-run") { return "--clean-safe needs --dry-run in this version" }
         if args.contains("--dry-run") && !args.contains("--clean-safe") { return "--dry-run works only with --clean-safe" }

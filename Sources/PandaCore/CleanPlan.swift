@@ -18,16 +18,21 @@ import Foundation
 /// 9. and the one-click clean of the menu would take it (`isOneClickSafe`). Step 9 is a safety net: steps 1 to 3 and 8 already
 ///    cover its rule, so no item can fail it alone.
 ///
-/// Some checks cannot run now (a tool decides, an app can start, an age changes). Each item says so in `checkedAtCleanTime`.
+/// The Cleaner ALWAYS runs the path guard and the shape checks again right before it deletes, for every item. That is not
+/// shown per item. Some parts cannot be decided now at all (a tool decides, an app can start, an age changes). Each item that
+/// has such a part names it in `checkedAtCleanTime`. An empty `checkedAtCleanTime` means only that the plan knows no such part.
 public struct CleanPlan: Sendable {
     public struct Item: Sendable {
         public let finding: Finding
         public let wouldClean: Bool
         /// A short fixed text. It is empty when `wouldClean` is true.
         public let skipReason: String
-        /// True when a check of the path ran at plan time (the guard, and the shape checks of the Cleaner).
+        /// True when a check of the path ran at plan time. It says what ran, not what is sure: for most items it is the guard and the
+        /// shape checks of the Cleaner, for a worktree it is the guard only.
         public let checkedNow: Bool
-        /// Empty, or a short fixed text that says what the Cleaner decides again at clean time. It is always empty for a skipped item.
+        /// Empty, or a short fixed text that says which part only the Cleaner decides at clean time (a tool, an app, an age).
+        /// Empty does not mean that nothing is checked later: the Cleaner always runs the guard and the shape checks again.
+        /// It is always empty for a skipped item.
         public let checkedAtCleanTime: String
     }
 
@@ -69,6 +74,8 @@ public struct CleanPlan: Sendable {
         var allowingSystemCache: String?
         /// The targets must exist.
         var mustExist = false
+        /// Each target must be a folder that can be read. The Cleaner lists the folder, and it fails when it cannot.
+        var mustBeReadableFolder = false
         /// The shape check of the Cleaner for each target. nil means that the Cleaner has none.
         var shape: ((URL) -> Bool)?
         /// The places that the Cleaner finds again from a fixed rule. nil means that the action has no such list.
@@ -89,12 +96,13 @@ public struct CleanPlan: Sendable {
     private static let foundAgainText = "targets are found again"
     private static let wrongShape = "not the kind of path that the clean takes"
     private static let linkInPath = "a folder in the path is a link"
+    private static let notReadableFolder = "not a readable folder"
 
     static func inspect(_ f: Finding, home: URL, now: Date) -> Inspection {
         var i = Inspection()
         switch f.action {
         case .removeContents(let url):
-            i.targets = [url]; i.mustExist = true
+            i.targets = [url]; i.mustExist = true; i.mustBeReadableFolder = true
         case .removeArtifact(let url):
             i.targets = [url]; i.mustExist = true; i.shape = CleanRules.isArtifactTarget; i.artifact = url
             i.atClean = ["project use is read again"]
@@ -170,6 +178,9 @@ public struct CleanPlan: Sendable {
             }
         }
         if i.mustExist, i.targets.contains(where: { !CleanRules.exists($0) }) { return stop("not there now", checked: true) }
+        if i.mustBeReadableFolder, i.targets.contains(where: { !CleanRules.isReadableFolder($0) }) {
+            return stop(notReadableFolder, checked: true)
+        }
         if i.shapeProblem { return stop(wrongShape, checked: true) }
         if let shape = i.shape {
             for url in i.targets where !shape(url) { return stop(CleanRules.isPlain(url) ? wrongShape : linkInPath, checked: true) }
@@ -195,7 +206,7 @@ public struct CleanPlan: Sendable {
     public var wouldClean: [Item] { items.filter(\.wouldClean) }
     public var skipped: [Item] { items.filter { !$0.wouldClean } }
 
-    /// The items that would be cleaned and that the Cleaner decides again in part at clean time.
+    /// The items that would be cleaned and that have a part which only the Cleaner decides at clean time (a tool, an app, an age).
     public var checkedAgainAtCleanTime: [Item] { wouldClean.filter { !$0.checkedAtCleanTime.isEmpty } }
 
     /// The bytes that the app adds to its totals for the items that would be cleaned.
@@ -212,8 +223,8 @@ public struct CleanPlan: Sendable {
     /// The note of one item for `--verbose`.
     static func note(_ item: Item) -> String {
         let now = "Checked now: \(item.checkedNow ? "yes" : "no")"
-        guard item.wouldClean else { return now }
-        return now + ". Checked again at clean time: \(item.checkedAtCleanTime.isEmpty ? "no" : item.checkedAtCleanTime)"
+        guard item.wouldClean, !item.checkedAtCleanTime.isEmpty else { return now }
+        return now + ". Decided again at clean time: \(item.checkedAtCleanTime)"
     }
 
     /// The text of `trashpanda --clean-safe --dry-run`. Each line ends with a new line.
@@ -230,7 +241,7 @@ public struct CleanPlan: Sendable {
         out += "\(would.count) \(would.count == 1 ? "item" : "items") would be cleaned. Would free \(ByteText.string(wouldFree))\n"
         if !would.isEmpty {
             let again = checkedAgainAtCleanTime.count
-            out += "\(again) of \(would.count) \(would.count == 1 ? "item is" : "items are") checked again at clean time\n"
+            out += "\(again) of \(would.count) \(would.count == 1 ? "item" : "items") can change at clean time\n"
         }
         if deleteMode == .trash {
             out += "Delete mode is trash: files would move to the Trash. Space comes back when the Trash is emptied.\n"
@@ -265,8 +276,9 @@ public struct CleanPlan: Sendable {
 /// - `totals.wouldFree`: the sum of `countedBytes` of the items with `wouldClean` true. An upper-limit item counts 0, as in the app.
 /// - `findings[].wouldClean`: `true` only for an item that a clean of the safe items would take now.
 /// - `findings[].skipReason`: a short fixed text. It is empty when `wouldClean` is true.
-/// - `findings[].checkedNow`: always present. `true` when a path check ran at plan time.
-/// - `findings[].checkedAtCleanTime`: always present. Empty, or a short fixed text that says what is decided again at clean time.
+/// - `findings[].checkedNow`: always present. `true` when a path check ran at plan time (for a worktree: the guard only).
+/// - `findings[].checkedAtCleanTime`: always present. Empty, or a short fixed text that says which part only the Cleaner decides at
+///   clean time. Empty does not mean that nothing is checked later: the Cleaner always runs the guard and the shape checks again.
 ///   It is empty for a skipped item.
 public struct DryRunReport: Codable, Equatable, Sendable {
     public struct Entry: Codable, Equatable, Sendable {
