@@ -1,11 +1,11 @@
 5.3 GB        Xcode & Swift  Example build cache  [~/Library/Caches/Example]
-    Checked now: yes. Checked again at clean time: no
+    Checked now: yes
 up to 700 MB  Docker         Example upper limit  [Docker]
-    Checked now: yes. Checked again at clean time: no
+    Checked now: yes
 300 MB        Homebrew       Example tool item  [Trash]
-    Checked now: no. Checked again at clean time: tool decides
+    Checked now: no. Decided again at clean time: tool decides
 3 items would be cleaned. Would free 5.6 GB
-1 of 3 items are checked again at clean time
+1 of 3 items can change at clean time
 
 Skipped: 7 items
   review item - AI agents & local models · Example models  [~/.example/models]

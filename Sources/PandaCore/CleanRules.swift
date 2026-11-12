@@ -6,6 +6,9 @@ enum CleanRules {
     /// The same test as the Cleaner uses before it touches a path.
     static func exists(_ url: URL) -> Bool { (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil }
 
+    /// True when the folder can be listed. The Cleaner lists the folder of a "remove contents" item, and it fails when it cannot.
+    static func isReadableFolder(_ url: URL) -> Bool { (try? FileManager.default.contentsOfDirectory(atPath: url.path)) != nil }
+
     static func isPlain(_ url: URL) -> Bool { UpdateDownloads.isPlainPath(url) }
 
     /// A build folder: no link in the path, and a known build folder name.

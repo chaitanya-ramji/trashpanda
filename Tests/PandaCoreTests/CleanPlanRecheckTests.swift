@@ -47,6 +47,58 @@ final class CleanPlanRecheckTests: XCTestCase {
         XCTAssertTrue(item(.removeContents(url(box, "Library/Caches/Here")), box).wouldClean)
     }
 
+    /// Step 2c: the Cleaner lists the folder of a `removeContents` item. A regular file, or a folder that cannot be listed, makes it
+    /// fail with "cannot read folder". The plan says so now. All files here are in a temp home.
+    func testContentsTargetThatIsAFileOrUnreadableIsNotAReadableFolder() throws {
+        let box = try Sandbox()
+        let file = try box.file("Library/Caches/AFile", bytes: 5)
+        let plan = item(.removeContents(file), box)
+        XCTAssertFalse(plan.wouldClean)
+        XCTAssertEqual(plan.skipReason, "not a readable folder")
+        XCTAssertTrue(plan.checkedNow)
+
+        let locked = try box.file("Library/Caches/Locked/a", bytes: 5).deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+        if FileManager.default.isReadableFile(atPath: locked.path) == false {
+            let lockedItem = item(.removeContents(locked), box)
+            XCTAssertFalse(lockedItem.wouldClean)
+            XCTAssertEqual(lockedItem.skipReason, "not a readable folder")
+            // The Cleaner agrees: it fails with "cannot read folder" and removes nothing.
+            let cleaner = Cleaner(guardian: PathGuard(home: box.home), runningApps: RunningApps { RunningSnapshot(apps: []) },
+                                  programPaths: { [] }, mountedImages: { [] }, freeSpace: { _ in 0 })
+            let f = Finding(id: "x", ecosystem: .swift, title: "x", location: "x", bytes: 1, tier: .safe, rebuild: .seconds, action: .removeContents(locked))
+            let report = cleaner.clean([f])
+            XCTAssertTrue(report.failed.contains { $0.contains("cannot read folder") }, "\(report.failed)")
+        }
+        // A readable folder, even an empty one, is fine.
+        try FileManager.default.createDirectory(at: url(box, "Library/Caches/Empty"), withIntermediateDirectories: true)
+        XCTAssertTrue(self.item(.removeContents(url(box, "Library/Caches/Empty")), box).wouldClean)
+        // And the Cleaner fails on the file too.
+        let cleaner = Cleaner(guardian: PathGuard(home: box.home), runningApps: RunningApps { RunningSnapshot(apps: []) },
+                              programPaths: { [] }, mountedImages: { [] }, freeSpace: { _ in 0 })
+        let f = Finding(id: "x", ecosystem: .swift, title: "x", location: "x", bytes: 1, tier: .safe, rebuild: .seconds, action: .removeContents(file))
+        XCTAssertTrue(cleaner.clean([f]).failed.contains { $0.contains("cannot read folder") })
+    }
+
+    /// For a worktree the plan runs the path guard only. `checkedNow` says what ran: the guard, no shape check, no existence check.
+    func testWorktreeReportsOnlyTheGuardThatRan() throws {
+        let box = try Sandbox()
+        let repo = url(box, "code/main")
+        let ok = item(.worktree(.remove(repo: repo, path: url(box, "code/wt"))), box)
+        XCTAssertTrue(ok.wouldClean, "no shape check and no existence check for a worktree path: a tool decides")
+        XCTAssertTrue(ok.checkedNow)
+        XCTAssertEqual(ok.checkedAtCleanTime, "tool decides")
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("tp-outside-wt")
+        let refused = item(.worktree(.remove(repo: repo, path: outside)), box)
+        XCTAssertFalse(refused.wouldClean)
+        XCTAssertTrue(refused.skipReason.hasPrefix("refused by the path guard"))
+        XCTAssertTrue(refused.checkedNow)
+        // A worktree with no path to check (a prune) ran no check.
+        let prune = item(.worktree(.prune(repo: repo, paths: [])), box)
+        XCTAssertFalse(prune.checkedNow)
+    }
+
     func testKeepListAndGuardAreCheckedNow() throws {
         let box = try Sandbox()
         try box.file("Library/Caches/Kept/a", bytes: 1)
