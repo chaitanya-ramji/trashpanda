@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var loginEnabled = false
     /// The delete mode of the settings file. Read again when the Settings submenu opens.
     private var deleteMode = Config.readDeleteMode()
+    /// The low-disk limit of the settings file in GB. nil: off. Read again when the Settings submenu opens.
+    private var lowDiskAlertGB = Config.readLowDiskAlertGB()
+    private let lowDisk = LowDiskNotifier()
     private let updates = UpdateController()
     /// Waits a moment after an app opens or quits, so that a burst of changes gives one refresh.
     private var appsChangedTimer: Timer?
@@ -68,7 +71,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenu()
         refreshRunning()
         scan()
-        timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in self?.scan() }
+        lowDisk.check()
+        timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+            self?.scan()
+            self?.lowDisk.check()
+        }
         // An app that opens or quits changes which items are blocked. The bar and the rows must follow, also while
         // the menu is open. A scan, a clean, and opening the menu rebuild the menu already.
         let center = NSWorkspace.shared.notificationCenter
@@ -126,6 +133,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.items.first { $0.title == "Open at login" }?.state = loginEnabled ? .on : .off
         deleteMode = Config.readDeleteMode()
         settings.items.first { $0.title == MenuText.trashModeTitle }?.state = deleteMode == .trash ? .on : .off
+        lowDiskAlertGB = Config.readLowDiskAlertGB()
+        for item in settings.items.first(where: { $0.title == LowDiskText.settingTitle })?.submenu?.items ?? [] {
+            item.state = item.title == LowDiskText.choiceTitle(lowDiskAlertGB) ? .on : .off
+        }
     }
 
     // MARK: Scan
@@ -186,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               staleDays: scanner.config.staleDays, updateVersion: updates.available?.version,
                               updateCheckEnabled: updates.isEnabled, loginEnabled: loginEnabled)
         input.deleteMode = deleteMode
+        input.lowDiskAlertGB = lowDiskAlertGB
         input.cleaningTitle = cleaner.progressText
         input.stopRequested = cleaner.stopRequested
         return input
@@ -280,6 +292,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             deleteMode = Config.readDeleteMode()
             menuChanged()
+        case .setLowDiskAlert(let gb):
+            if Config.setLowDiskAlertGB(gb) {
+                Log.info("user: low-disk alert is now \(LowDiskAlert.settingValue(gb))")
+            } else {
+                Log.error("could not save the low-disk alert")
+            }
+            lowDiskAlertGB = Config.readLowDiskAlertGB()
+            menuChanged()
+            // The permission is asked only now, when the user turns the alert on.
+            if gb != nil { lowDisk.requestPermission { [weak self] in self?.lowDisk.check() } }
         case .quit:
             NSApp.terminate(nil)
         case .reveal(let url):

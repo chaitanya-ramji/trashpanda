@@ -62,7 +62,8 @@ final class MenuModelTests: XCTestCase {
 
     private let settingsLines = [
         "Settings",
-        "  Check for updates…", "  Check for updates every day", "  Open at login", "  Move files to the Trash", "  ---",
+        "  Check for updates…", "  Check for updates every day", "  Open at login", "  Move files to the Trash",
+        "  Low-disk alert", "    Off", "    5 GB", "    10 GB", "    20 GB", "    50 GB", "  ---",
         "  Open the keep list", "  Open the project folders list", "  ---",
         "  Show log in Finder", "  Help", "  Report a problem", "  About Trash Panda",
         "Quit Trash Panda",

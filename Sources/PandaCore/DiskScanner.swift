@@ -11,6 +11,8 @@ public struct Config: Sendable {
     public var staleDays: Int
     /// What happens to a file that the cleaner may remove. The default is to delete it for good.
     public var deleteMode: DeleteMode
+    /// The free-space limit of the low-disk alert, in GB. nil: the alert is off (the default).
+    public var lowDiskAlertGB: Int?
 
     public static let defaultStaleDays = 30
     public static let staleDaysRange = 1...3650
@@ -31,7 +33,8 @@ public struct Config: Sendable {
         for warning in parsed.warnings { Log.warn("settings: \(warning)") }
         Log.info("stale limit: \(parsed.staleDays) days\(parsed.fromFile ? " (from settings file)" : " (default)")")
         Log.info("delete mode: \(parsed.deleteMode.rawValue)")
-        return Config(keep: lines("keep"), roots: lines("roots"), staleDays: parsed.staleDays, deleteMode: parsed.deleteMode)
+        return Config(keep: lines("keep"), roots: lines("roots"), staleDays: parsed.staleDays, deleteMode: parsed.deleteMode,
+                      lowDiskAlertGB: parsed.lowDiskAlertGB)
     }
 
     /// The delete mode in the settings file, read now. A clean and its dialog use this, so a change takes effect at once.
@@ -40,20 +43,50 @@ public struct Config: Sendable {
         return parseSettings(text).deleteMode
     }
 
+    /// The low-disk limit in the settings file, read now. nil is off. A value that is not valid is off, with a warning in the log.
+    public static func readLowDiskAlertGB(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Int? {
+        let text = (try? String(contentsOf: home.appendingPathComponent(".config/trashpanda/settings"), encoding: .utf8)) ?? ""
+        let parsed = parseSettings(text)
+        let bad = parsed.warnings.first { $0.hasPrefix(LowDiskAlert.settingName) }
+        // The log gets one warning for each bad text, not one at every check.
+        lowDiskWarnLock.lock()
+        let isNew = bad != lastLowDiskWarning
+        lastLowDiskWarning = bad
+        lowDiskWarnLock.unlock()
+        if let bad, isNew { Log.warn("settings: \(bad)") }
+        return parsed.lowDiskAlertGB
+    }
+
+    private static let lowDiskWarnLock = NSLock()
+    nonisolated(unsafe) private static var lastLowDiskWarning: String?
+    /// For tests: forget the last warning.
+    static func resetLowDiskWarning() { lowDiskWarnLock.lock(); lastLowDiskWarning = nil; lowDiskWarnLock.unlock() }
+
     /// Writes `delete_mode = <mode>` to the settings file. The other lines stay. A line for this setting is replaced, or one is added.
     @discardableResult
     public static func setDeleteMode(_ mode: DeleteMode, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
+        writeSetting(DeleteMode.settingName, mode.rawValue, home: home)
+    }
+
+    /// Writes `low_disk_alert_gb = <number>`, or `off`, to the settings file. The other lines stay.
+    @discardableResult
+    public static func setLowDiskAlertGB(_ limit: Int?, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
+        writeSetting(LowDiskAlert.settingName, LowDiskAlert.settingValue(limit), home: home)
+    }
+
+    /// Writes one `name = value` line. The other lines stay. A line for this name is replaced, or one is added.
+    static func writeSetting(_ name: String, _ value: String, home: URL) -> Bool {
         let folder = home.appendingPathComponent(".config/trashpanda")
         let file = folder.appendingPathComponent("settings")
         let old = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
         var lines = old.components(separatedBy: "\n")
         if lines.last == "" { lines.removeLast() }
-        let newLine = "\(DeleteMode.settingName) = \(mode.rawValue)"
+        let newLine = "\(name) = \(value)"
         var replaced = false
         lines = lines.compactMap { raw in
             let line = raw.trimmingCharacters(in: .whitespaces)
             let key = line.split(separator: "=", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) }
-            guard !line.hasPrefix("#"), key == DeleteMode.settingName else { return raw }
+            guard !line.hasPrefix("#"), key == name else { return raw }
             if replaced { return nil }          // one line only
             replaced = true
             return newLine
@@ -64,7 +97,7 @@ public struct Config: Sendable {
             try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
             return true
         } catch {
-            Log.error("settings: could not write the delete mode: \(error.localizedDescription)")
+            Log.error("settings: could not write \(name): \(error.localizedDescription)")
             return false
         }
     }
@@ -119,9 +152,10 @@ public struct Config: Sendable {
     }
 
     /// Reads `key = value` lines. A bad value gives a warning and the default.
-    static func parseSettings(_ text: String) -> (staleDays: Int, fromFile: Bool, warnings: [String], deleteMode: DeleteMode) {
+    static func parseSettings(_ text: String) -> (staleDays: Int, fromFile: Bool, warnings: [String], deleteMode: DeleteMode, lowDiskAlertGB: Int?) {
         var staleDays = defaultStaleDays
         var deleteMode = DeleteMode.permanent
+        var lowDiskAlertGB: Int?
         var fromFile = false
         var warnings: [String] = []
         for raw in text.split(separator: "\n") {
@@ -143,16 +177,23 @@ public struct Config: Sendable {
                 } else {
                     warnings.append("delete_mode \"\(parts[1])\" is not \"permanent\" or \"trash\". Using permanent.")
                 }
+            case LowDiskAlert.settingName:
+                let parsed = LowDiskAlert.parse(parts[1])
+                lowDiskAlertGB = parsed.limitGB
+                if !parsed.isValid {
+                    warnings.append("\(LowDiskAlert.settingName) \"\(parts[1])\" is not \"off\" or a whole number of GB from \(LowDiskAlert.limitRange.lowerBound) to \(LowDiskAlert.limitRange.upperBound). The alert is off.")
+                }
             default:
                 warnings.append("unknown setting \"\(parts[0])\"")
             }
         }
-        return (staleDays, fromFile, warnings, deleteMode)
+        return (staleDays, fromFile, warnings, deleteMode, lowDiskAlertGB)
     }
 
     public init(keep: [String] = [], roots: [String] = [], staleDays: Int = Config.defaultStaleDays,
-                deleteMode: DeleteMode = .permanent) {
+                deleteMode: DeleteMode = .permanent, lowDiskAlertGB: Int? = nil) {
         self.deleteMode = deleteMode
+        self.lowDiskAlertGB = lowDiskAlertGB
         self.keep = keep
         self.roots = roots
         self.staleDays = staleDays

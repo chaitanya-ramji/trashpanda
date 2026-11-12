@@ -383,6 +383,18 @@ public struct DiskUsage: Sendable, Equatable {
         Int64((try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity ?? 0)
     }
 
+    /// The free space for the low-disk alert. nil when the volume does not tell: a missing value is not "0 bytes free".
+    public static func alertFreeBytes(total: Int?, important: Int64?) -> Int64? {
+        guard let total, total > 0, let important else { return nil }
+        return important
+    }
+
+    /// The free space of the volume of `url` for the low-disk alert, or nil when it cannot be read.
+    public static func alertFree(for url: URL = URL(fileURLWithPath: NSHomeDirectory())) -> Int64? {
+        let values = try? url.resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey])
+        return alertFreeBytes(total: values?.volumeTotalCapacity, important: values?.volumeAvailableCapacityForImportantUsage)
+    }
+
     /// Reads the capacity that Finder shows (includes purgeable space as free).
     public static func current(for url: URL = URL(fileURLWithPath: NSHomeDirectory())) -> DiskUsage {
         let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey]

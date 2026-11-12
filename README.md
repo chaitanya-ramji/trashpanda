@@ -209,7 +209,7 @@ Settings are plain text files. Each file has one path on each line. A line that 
 - `~/.config/trashpanda/roots` lists more folders to search for projects.
 - `~/.config/trashpanda/settings` holds options as `name = value` lines.
 
-The `settings` file has two options:
+The `settings` file has these options:
 
 ```
 # A project that changed within this many days is a review item.
@@ -239,6 +239,23 @@ In `trash` mode:
 - Not checked on a real install: the move of real folders with `FileManager.trashItem`, and the error of a disk with no Trash. The tests use a fake Trash folder and never touch the real Trash.
 
 If the value is not `permanent` or `trash`, the app uses `permanent` and writes a warning to the log.
+
+### Low-disk alert
+
+```
+# Show a notification when the free space is below this limit.
+# off (the default): no alert. Or a whole number of GB from 1 to 10000.
+low_disk_alert_gb = off
+```
+
+You can also choose a limit in the menu: **Settings**, then **Low-disk alert**. The choices are Off, 5 GB, 10 GB, 20 GB, and 50 GB. The change is saved in the `settings` file.
+
+- The alert is off by default. The app asks macOS for the permission to show notifications only when you turn the alert on, not when it starts.
+- The app checks the free space of the startup disk when it starts and on its refresh timer (every 6 hours). It does not check more often.
+- When the free space is less than the limit, the app shows one notification. It shows at most one alert in a calendar day. The day of the last alert is kept in the preferences of the app. It is saved only when a notification was really shown, so a denied permission does not use up the day.
+- The notification tells how much space is free. It has no path and it offers no clean. It never cleans by itself.
+- If the value is not `off` or a whole number from 1 to 10000, the alert is off and the app writes a warning to the log.
+- Not checked on a real install: the real notification and the permission prompt of macOS. The tests use a fake clock, a fake free space, and a fake notice. A build that is not an `.app` (for example `swift run`) shows no notification.
 
 The app searches these folders by default: `Developer`, `dev`, `Projects`, `Code`, `GitHub`, `Repos`, `Workspace`, `Development`, `src`, `work`, and `www`.
 
@@ -374,7 +391,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Check for updates ([#32](https://github.com/chaitanya-ramji/trashpanda/issues/32))
 - [ ] One-click updates (OTA) with Sparkle ([#121](https://github.com/chaitanya-ramji/trashpanda/issues/121))
 - [x] Move to Trash delete mode ([#33](https://github.com/chaitanya-ramji/trashpanda/issues/33))
-- [ ] Low-disk alert ([#34](https://github.com/chaitanya-ramji/trashpanda/issues/34))
+- [x] Low-disk alert ([#34](https://github.com/chaitanya-ramji/trashpanda/issues/34))
 - [ ] Scheduled clean (opt in) ([#35](https://github.com/chaitanya-ramji/trashpanda/issues/35))
 - [ ] Test on Intel Macs and older macOS versions ([#36](https://github.com/chaitanya-ramji/trashpanda/issues/36))
 - [ ] Decide: cloud-synced project folders ([#37](https://github.com/chaitanya-ramji/trashpanda/issues/37))
