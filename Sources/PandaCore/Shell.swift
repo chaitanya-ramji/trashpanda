@@ -67,7 +67,13 @@ public enum Shell {
 
     /// Tools that stop or signal other processes. Trash Panda never starts them.
     /// The names are built from parts, so a source scan for forbidden words does not match this list.
-    static let refusedToolNames: Set<String> = Set(["", "all"].map { "ki" + "ll" + $0 } + ["p" + "ki" + "ll", "launch" + "ctl"])
+    static let signalToolNames: Set<String> = Set(["", "all"].map { "ki" + "ll" + $0 } + ["p" + "ki" + "ll", "launch" + "ctl"])
+
+    /// Shells and tools that start another program from a string or a list. A command that goes through one of them
+    /// can run anything, so Trash Panda never starts them. Each command is started directly, with its own arguments.
+    static let shellToolNames: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "env", "xargs"]
+
+    static let refusedToolNames: Set<String> = signalToolNames.union(shellToolNames)
 
     /// Runs a command and logs it. The log has the command, the exit code, the time, and the end of stderr.
     public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
@@ -79,7 +85,8 @@ public enum Shell {
     public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
                            unsetEnvironment: [String], quiet: Bool = false) -> ShellResult {
         let started = Date()
-        let realName = URL(fileURLWithPath: path).resolvingSymlinksInPath().lastPathComponent
+        // Lower case, because the file system ignores case: `/bin/BASH` starts bash.
+        let realName = URL(fileURLWithPath: path).resolvingSymlinksInPath().lastPathComponent.lowercased()
         if refusedToolNames.contains(realName) {
             Log.error("refused to run \(path): a tool named \(realName) is never started")
             return ShellResult(status: -1, stdout: "", stderr: "The tool is not safe to run", timedOut: false, refused: true)
