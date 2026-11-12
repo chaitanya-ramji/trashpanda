@@ -5,6 +5,9 @@ let usage = """
 Usage: trashpanda [option]
   --scan               Print what the app would show. Nothing is deleted.
   --scan --json        Print the same as one JSON object (schema 1) for scripts. Nothing else is printed.
+  --clean-safe --dry-run
+                       Print the safe items that a clean would remove, and their sum. Nothing is deleted.
+                       Add --json for one JSON object (schema 1), --verbose to list each skipped item.
   --write-icons DIR    Write the app icon sizes to DIR.
   --demo [light|dark]  Show made-up data. Nothing is scanned or deleted.
   --version            Print the version.
@@ -13,7 +16,7 @@ Usage: trashpanda [option]
 """
 
 // An option that we do not know is an error. Other values do not start with a dash.
-// `--json` works only with `--scan`.
+// `--json` works with `--scan` or with `--clean-safe --dry-run`. `--clean-safe` needs `--dry-run`: the real clean does not exist yet.
 if let message = CommandLineCheck.error(CommandLine.arguments) {
     Log.warn("cli: wrong option, exit 64: \(CommandLineCheck.logOptions(CommandLine.arguments))")
     Log.flush()
@@ -48,6 +51,30 @@ if CommandLine.arguments.contains("--scan") {
     exit(0)
 }
 // END scan
+
+// BEGIN dry-run: this path only reads. It must never call a delete (a test reads this text).
+// `trashpanda --clean-safe --dry-run` prints the safe items that a clean would remove. Nothing is deleted.
+if CommandLineCheck.isDryRun(CommandLine.arguments) {
+    let started = Date()
+    let json = CommandLine.arguments.contains("--json")
+    let verbose = CommandLine.arguments.contains("--verbose")
+    Log.info("cli start version=\(UpdateController.currentVersion) mode=\(CommandLineCheck.mode(CommandLine.arguments)) \(CommandLineCheck.logOptions(CommandLine.arguments))")
+    let scanner = DiskScanner()
+    let result = scanner.scan()
+    let plan = CleanPlan(result, guardian: scanner.guardian, running: RunningApps.system.take(), deleteMode: scanner.config.deleteMode)
+    let report = DryRunReport(result, plan: plan)
+    for entry in report.findings { Log.info(entry.logLine) }
+    if json {
+        print(report.json(), terminator: "")
+    } else {
+        print(plan.text(verbose: verbose), terminator: "")
+    }
+    let millis = Int(Date().timeIntervalSince(started) * 1000)
+    Log.info("cli end dry-run \(plan.summary()) duration_ms=\(millis) exit=0")
+    Log.flush()
+    exit(0)
+}
+// END dry-run
 
 // `trashpanda --write-icons <folder>` writes the app icon sizes. The build script uses it.
 if let flag = CommandLine.arguments.firstIndex(of: "--write-icons"), flag + 1 < CommandLine.arguments.count {

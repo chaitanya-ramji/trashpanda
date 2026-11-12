@@ -198,7 +198,7 @@ To see the result without the menu, run this command. It never deletes anything.
 
 `trashpanda --scan --json` prints the same scan as one JSON object, on one line, with a new line at the end. It deletes nothing. Nothing else goes to stdout: warnings go to stderr and to the log. The format is **schema 1**. Inside schema 1 a field is never removed and never changes its meaning. A new field can be added, so ignore a key that you do not know. The keys are sorted, the report has no time, and the findings have the same order as the text output.
 
-`--json` works only with `--scan`. Without it the command prints an error to stderr and exits with 64. Exit codes: 0 for success, 64 for a wrong option.
+`--json` works with `--scan` or with `--clean-safe --dry-run`. Without one of them the command prints an error to stderr and exits with 64. Exit codes: 0 for success, 64 for a wrong option.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -207,7 +207,7 @@ To see the result without the menu, run this command. It never deletes anything.
 | `disk.free` | number | Free space in bytes, as Finder shows it. |
 | `totals.reclaimable` | number | The number of "Reclaim now" in the text, in bytes. |
 | `totals.reviewable` | number | The number of "To review" in the text, in bytes. |
-| `findings[].id` | string | Fixed name of the item. The same item has the same id in each run. The home folder is written as `~` at the start of the id only. An id is an opaque string, unique inside one report. It can be an absolute path when the item is outside the home folder. |
+| `findings[].id` | string | Fixed name of the item. The same item has the same id in each run. The home folder is written as `~` at the start of the id and at the start of the part after a `kind:` colon (for example `worktree:~/code/x`). An id is an opaque string, unique inside one report. It can be an absolute path when the item is outside the home folder. |
 | `findings[].group` | string | The language or tool group, for example `swift`, `javascript`, `homebrew`, `docker`, `aiAgents`. |
 | `findings[].title` | string | The name of the item. |
 | `findings[].bytes` | number | Size of the item in bytes, a whole number. |
@@ -219,7 +219,7 @@ To see the result without the menu, run this command. It never deletes anything.
 | `findings[].rebuild` | string | `seconds`, `minutes`, `download`, `recreate`, or `never`. |
 | `findings[].location` | string | The place, as the text output shows it. It can hold a full path, the same as the text output. |
 
-An item can be cleaned by a script only when `tier` is `safe` and `blocked` is `false`. Whether the owner app is running, and the keep list, are checked at clean time. A script must never take an id as delete input. Later steps (a dry run and a clean) will reuse these same entry objects and add fields to them.
+An item can be cleaned by a script only when `tier` is `safe` and `blocked` is `false`. Whether the owner app is running, and the keep list, are checked at clean time. A script must never take an id as delete input. The dry run (below) reuses these same entry objects and adds fields to them.
 
 Example (the lines are split here to read them):
 
@@ -230,6 +230,47 @@ Example (the lines are split here to read them):
 ```
 
 Each run writes a start line and an end line to the log (`~/Library/Logs/TrashPanda/trashpanda.log`): the known options that were present and the number of other arguments (never their text), the number of items by tier, the sizes, the time, and the exit code. It does not write file contents.
+
+#### Dry run: `trashpanda --clean-safe --dry-run`
+
+This command shows which items a clean of the safe items would remove, and the sum. It is read-only: it deletes nothing, and it has no code that can delete. It scans, decides for each item, prints the result, and exits. The real clean does not exist yet: `--clean-safe` without `--dry-run`, and `--yes`, print an error and exit with 64.
+
+The text has one line for each item that would be cleaned (size, group, title, place), then `N items would be cleaned. Would free X`, then the number of skipped items with a count for each reason. Add `--verbose` to list each skipped item with its reason. An upper-limit item shows as `up to X`, and it adds 0 to the sum, the same as in the app. If the delete mode is `trash`, the text says that the files would move to the Trash.
+
+An item would be cleaned only if all of these are true:
+
+- it is not an information line, and its tier is `safe`;
+- it is not blocked;
+- the path guard accepts its path now (the same guard as the clean: no link, nothing outside the home folder, no protected folder);
+- it is not on the keep list;
+- its owner app is not open (the command line cannot ask an app to quit, the menu can);
+- the one-click clean of the menu would take it. The menu and this command use the same code for this rule.
+
+| Skip reason | Meaning |
+| --- | --- |
+| `review item` | The tier is `review`. You must choose it in the app. |
+| `info only` | The item is for information. It cannot be cleaned. |
+| `blocked: <reason>` | The app shows the item but cannot clean it now. The reason is the same as in the menu. |
+| `on the keep list` | The path is in your keep list. |
+| `refused by the path guard: <reason>` | The path is a link, is outside the home folder, or is protected. |
+| `owner app is open: <name>` | The app that uses the item is open. |
+| `not part of the one-click clean` | The menu would not take the item in its one-click clean. |
+
+An item that runs a tool (Docker, Homebrew, and similar) has no path, so the path guard and the keep list cannot check it here. The cleaner checks it again when it runs.
+
+With `--json` the output is one JSON object, still **schema 1**. The finding objects are the same as for `--scan`, with two more fields. Top level fields are added too. No field of the scan report is removed or renamed.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `mode` | string | Always `dry-run`. |
+| `deleteMode` | string | `permanent` or `trash`, from your settings. |
+| `totals.wouldFree` | number | The sum of `countedBytes` of the items with `wouldClean` true, in bytes. An upper-limit item counts 0, as in the app. |
+| `findings[].wouldClean` | boolean | `true` only for an item that a clean of the safe items would take now. |
+| `findings[].skipReason` | string | One of the texts above. Empty when `wouldClean` is `true`. |
+
+Exit codes: 0 for success, 64 for a wrong option. Wrong options include `--clean-safe` without `--dry-run`, `--dry-run` without `--clean-safe`, `--yes`, `--json` without `--scan` or `--clean-safe --dry-run`, and `--scan` together with `--clean-safe`. `--verbose` only changes the text of the dry run.
+
+The run writes to the log: a start line, one `INFO` line for each item (`id`, `wouldClean`, `skipReason`, `bytes`) so that you can check the run later, and an end line with the counts, the sum, the time, and the exit code.
 
 ## Spinner and log
 
