@@ -51,6 +51,8 @@ final class WorktreeTests: XCTestCase {
         git(["init", "-q"], in: dir)
         try write(".gitignore", in: dir, text: "node_modules/\n.build/\n.env\n*.sqlite\n")
         try write("readme.txt", in: dir, text: "hello\n")
+        try write("package.json", in: dir, text: "{}\n")           // the marker files of node_modules and .build
+        try write("Package.swift", in: dir, text: "// package\n")
         git(["add", "-A"], in: dir)
         git(["commit", "-q", "-m", "first"], in: dir)
         return dir
@@ -692,6 +694,57 @@ final class WorktreeTests: XCTestCase {
         XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 1)
     }
 
+    func testASecretInsideAnAllowedIgnoredFolderBlocks() throws {
+        let repo = try makeRepo("Developer/alpha")
+        for name in [".env", ".env.local", "prod.sqlite", "x.db", "cert.pem", "id.key"] {
+            let wt = try addWorktree(repo, at: home("Developer/wt-\(name)"), branch: "b\(name.hashValue.magnitude)")
+            try write("node_modules/\(name)", in: wt, bytes: 10)
+            XCTAssertNotNil(try XCTUnwrap(finding(for: wt, in: scan()), name).blockedReason, name)
+        }
+    }
+
+    func testALooseIgnoredFolderNameWithoutItsMarkerBlocks() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try addWorktree(repo, at: home("Developer/alpha-loose"), branch: "loose")
+        try write("dist/x.bin", in: wt, bytes: 100)
+        try write(".gitignore", in: wt, text: "node_modules/\n.build/\ndist/\n")      // an edit, so also commit it to stay clean
+        git(["add", ".gitignore"], in: wt); git(["commit", "-q", "-m", "ignore dist"], in: wt)
+        git(["merge", "-q", "loose"], in: repo)
+        XCTAssertNotNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+    }
+
+    func testFilesThatGitDoesNotWatchBlock() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let assume = try addWorktree(repo, at: home("Developer/alpha-assume"), branch: "assume")
+        let skip = try addWorktree(repo, at: home("Developer/alpha-skip"), branch: "skip")
+        let sparse = try addWorktree(repo, at: home("Developer/alpha-sparse"), branch: "sparse")
+        let clean = try addWorktree(repo, at: home("Developer/alpha-plain"), branch: "plain")
+        git(["update-index", "--assume-unchanged", "readme.txt"], in: assume)
+        try write("readme.txt", in: assume, text: "edited\n")
+        git(["update-index", "--skip-worktree", "readme.txt"], in: skip)
+        try write("readme.txt", in: skip, text: "edited\n")
+        git(["update-index", "--skip-worktree", "readme.txt"], in: sparse)
+        try FileManager.default.removeItem(at: sparse.appendingPathComponent("readme.txt"))     // sparse: not on disk
+        let list = scan()
+        for wt in [assume, skip] {
+            let f = try XCTUnwrap(finding(for: wt, in: list))
+            XCTAssertTrue((f.blockedReason ?? "").contains("files that git does not watch"), f.blockedReason ?? "nil")
+        }
+        XCTAssertEqual(cleaner().clean([forged(repo, assume)]).removed, 0)
+        XCTAssertTrue(exists(assume.appendingPathComponent("readme.txt")))
+        XCTAssertNil(try XCTUnwrap(finding(for: sparse, in: list)).blockedReason)
+        XCTAssertNil(try XCTUnwrap(finding(for: clean, in: list)).blockedReason)
+    }
+
+    func testGitIsNotStartedWithoutTheDeveloperTools() {
+        let old = Git.developerToolsProbe
+        defer { Git.developerToolsProbe = old }
+        Git.developerToolsProbe = { false }
+        XCTAssertNil(Git.find())
+        Git.developerToolsProbe = { true }
+        XCTAssertEqual(Git.find()?.path, "/usr/bin/git")
+    }
+
     func testTheDialogSaysThatIgnoredFilesAreDeleted() {
         let (ok, _) = sampleFindings()
         XCTAssertTrue((Confirmation.forOne(ok, staleDays: 30).footer ?? "").contains("Files that git ignores are deleted too."))
@@ -734,7 +787,8 @@ final class WorktreeTests: XCTestCase {
         let repo = try makeRepo("Developer/alpha")
         let wt = try addWorktree(repo, at: home("Developer/alpha-busy-git"), branch: "busygit")
         let gitDir = URL(fileURLWithPath: git(["rev-parse", "--absolute-git-dir"], in: wt).stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-        for marker in Worktrees.inProgressMarkers {
+        XCTAssertEqual(Set(Worktrees.inProgressMarkers), ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"])
+        for marker in ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"] {
             let url = gitDir.appendingPathComponent(marker)
             if marker.hasPrefix("rebase") { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
             else { try Data().write(to: url) }

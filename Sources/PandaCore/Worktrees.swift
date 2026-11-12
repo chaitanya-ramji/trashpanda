@@ -23,7 +23,27 @@ public struct Git: Sendable {
     public static let systemPath = "/usr/bin/git"
 
     /// The system git, or nil when it is not installed.
-    public static func find() -> Git? { FileManager.default.isExecutableFile(atPath: systemPath) ? Git(path: systemPath) : nil }
+    /// Without the developer tools, `/usr/bin/git` is a stub that opens an "install developer tools" prompt. We start it only when
+    /// `xcode-select -p` succeeds and prints a folder that exists. Tests replace the probe.
+    nonisolated(unsafe) static var developerToolsProbe: () -> Bool = {
+        let r = Shell.run("/usr/bin/xcode-select", ["-p"], timeout: 10, quiet: true)
+        let folder = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return r.status == 0 && !folder.isEmpty && FileManager.default.fileExists(atPath: folder)
+    }
+    private static let logOnce = LogOnce()
+    private final class LogOnce: @unchecked Sendable {
+        private let lock = NSLock(); private var done = false
+        func first() -> Bool { lock.lock(); defer { lock.unlock() }; let was = done; done = true; return !was }
+    }
+
+    public static func find() -> Git? {
+        guard FileManager.default.isExecutableFile(atPath: systemPath) else { return nil }
+        guard developerToolsProbe() else {
+            if logOnce.first() { Log.info("git worktrees skipped: the developer tools are not installed") }
+            return nil
+        }
+        return Git(path: systemPath)
+    }
 
     /// Variables that can point the tool at another repository or toolchain. We remove every variable that starts with `GIT_`
     /// (read from the environment now) and `DEVELOPER_DIR`, so that `-C` decides.
@@ -206,11 +226,19 @@ public enum Worktrees {
             result.reasons.append("It has changes that are not committed")
         }
 
+        // Edits that git does not watch are lost too: `update-index --assume-unchanged` and `--skip-worktree` hide them from status.
+        let listed = git.run(["ls-files", "-v", "-z"], in: path, timeout: 120)
+        if listed.status != 0 || listed.timedOut {
+            result.reasons.append("Git could not list its files")
+        } else if hasUnwatchedFiles(listed.stdout, root: path) {
+            result.reasons.append("Has files that git does not watch (assume-unchanged or skip-worktree). Check them first")
+        }
+
         // Files that git ignores (.env, a local database) are deleted with the folder. Plain build and dependency folders are expected.
         let ignored = git.run(["status", "--porcelain", "-z", "--ignored", "--untracked-files=normal"], in: path)
         if ignored.status != 0 || ignored.timedOut {
             result.reasons.append("Git could not read its ignored files")
-        } else if ignoredFilesOutsideCatalog(ignored.stdout) {
+        } else if ignoredFilesOutsideCatalog(ignored.stdout, root: path) {
             result.reasons.append("Contains files that git ignores (for example .env). Move them first")
         }
 
@@ -256,12 +284,33 @@ public enum Worktrees {
 
     /// True when the `status --ignored -z` output has an ignored entry that is not a plain build or dependency folder of the catalog.
     /// With `--untracked-files=normal`, an ignored folder is one entry that ends with a slash.
-    static func ignoredFilesOutsideCatalog(_ output: String) -> Bool {
+    /// An ignored folder is allowed only when a catalog rule matches it WITH its marker file next to it (`node_modules` next to
+    /// `package.json`). A loose name (`build`, `dist`, `.cache`) is not enough. Inside an allowed folder, one level is read for
+    /// names that look like secrets or data (`.env*`, `*.sqlite`, `*.db`, `*.pem`, `*.key`), and they block too.
+    static func ignoredFilesOutsideCatalog(_ output: String, root: URL) -> Bool {
+        let fm = FileManager.default
         for field in output.components(separatedBy: "\0") where field.hasPrefix("!! ") {
             let path = String(field.dropFirst(3))
             guard path.hasSuffix("/") else { return true }
-            let name = path.dropLast().split(separator: "/").last.map(String.init) ?? ""
-            if !(Catalog.isSpecificArtifactName(name) || Catalog.skipDescend.contains(name)) || name == ".git" { return true }
+            let dir = root.appendingPathComponent(String(path.dropLast()), isDirectory: true)
+            let name = dir.lastPathComponent
+            let siblings = Set((try? fm.contentsOfDirectory(atPath: dir.deletingLastPathComponent().path)) ?? [])
+            guard name != ".git", Catalog.matchingRule(name: name, url: dir, siblings: siblings) != nil else { return true }
+            for child in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] {
+                let n = child.lowercased()
+                if n.hasPrefix(".env") || [".sqlite", ".db", ".pem", ".key"].contains(where: n.hasSuffix) { return true }
+            }
+        }
+        return false
+    }
+
+    /// True when a tracked file that exists on disk is hidden from `git status`: assume-unchanged (a lower case tag) or skip-worktree
+    /// (`S` or `s`). An edit of such a file is deleted by the removal without a word. A sparse-checkout file that is not on disk is fine.
+    static func hasUnwatchedFiles(_ output: String, root: URL) -> Bool {
+        for entry in output.components(separatedBy: "\0") where entry.count > 2 {
+            guard let tag = entry.first, tag.isLowercase || tag == "S" else { continue }
+            let file = String(entry.dropFirst(2))
+            if (try? FileManager.default.attributesOfItem(atPath: root.appendingPathComponent(file).path)) != nil { return true }
         }
         return false
     }
