@@ -222,6 +222,90 @@ final class WorktreeTests: XCTestCase {
         XCTAssertNotNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
     }
 
+    /// A commit made on a detached HEAD, then left behind: the HEAD is back on a commit that main holds, and the lost commit
+    /// lives only in the HEAD log of the worktree.
+    func makeLeftBehindWorktree(_ repo: URL, name: String) throws -> URL {
+        let wt = home("Developer/\(name)")
+        git(["worktree", "add", "-q", "--detach", wt.path], in: repo)
+        try write("node_modules/blob.bin", in: wt, bytes: 1_500_000)
+        try write("lost.txt", in: wt, text: "lost\n")
+        git(["add", "lost.txt"], in: wt)
+        git(["commit", "-q", "-m", "lost work"], in: wt)
+        git(["checkout", "-q", "--detach", "main"], in: wt)
+        return wt
+    }
+
+    func testACommitThatLivesOnlyInTheHeadLogBlocksTheItem() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try makeLeftBehindWorktree(repo, name: "alpha-left")
+        XCTAssertEqual(git(["status", "--porcelain"], in: wt).stdout, "")
+        let f = try XCTUnwrap(finding(for: wt, in: scan()))
+        XCTAssertTrue((f.blockedReason ?? "").contains("HEAD log has 1 commit that exists nowhere else"), f.blockedReason ?? "nil")
+        let check = Worktrees.check(path: wt, repo: repo, git: Git(path: realGit), guardian: PathGuard(home: box.home), active: [], now: later)
+        XCTAssertEqual(check.uniqueCommits, 0)
+        XCTAssertEqual(check.headLogOnlyCommits, 1)
+        // A forged finding is refused too, and git never runs the removal.
+        XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 0)
+        XCTAssertTrue(exists(wt.appendingPathComponent("lost.txt")) == false && exists(wt), "the HEAD is on main, so lost.txt is not in the folder")
+        XCTAssertEqual(calls("worktree remove"), 0)
+        // A tag on the lost commit keeps it, so the worktree can go.
+        let lost = git(["rev-parse", "HEAD@{1}"], in: wt).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        git(["tag", "keep-lost", lost], in: repo)
+        XCTAssertNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+    }
+
+    func testAWorktreeWithAHeadLogThatIsKeptElsewhereIsRemovable() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = home("Developer/alpha-kept-log")
+        git(["worktree", "add", "-q", "--detach", wt.path], in: repo)
+        try write("node_modules/blob.bin", in: wt, bytes: 1_500_000)
+        try write("kept.txt", in: wt, text: "kept\n")
+        git(["add", "kept.txt"], in: wt)
+        git(["commit", "-q", "-m", "kept work"], in: wt)
+        git(["branch", "saved"], in: wt)                       // a branch holds the commit
+        git(["checkout", "-q", "--detach", "main"], in: wt)
+        XCTAssertNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+        XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 1)
+    }
+
+    func testAHeadLogCommitIsCheckedAgainWhenTheItemRunsAfterThePreview() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try addWorktree(repo, at: home("Developer/alpha-late"), branch: "late")
+        git(["checkout", "-q", "--detach"], in: wt)
+        let f = try XCTUnwrap(finding(for: wt, in: scan()))
+        XCTAssertNil(f.blockedReason)
+        // After the preview: a commit on the detached HEAD, and the HEAD goes back.
+        try write("late.txt", in: wt, text: "late\n")
+        git(["add", "late.txt"], in: wt)
+        git(["commit", "-q", "-m", "late work"], in: wt)
+        git(["checkout", "-q", "--detach", "main"], in: wt)
+        XCTAssertEqual(cleaner().clean([f]).removed, 0)
+        XCTAssertTrue(exists(wt))
+        XCTAssertEqual(calls("worktree remove"), 0)
+    }
+
+    func testAWorktreeThatBecameALinkAfterThePreviewIsRefusedAlsoWithAHeadLog() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try makeLeftBehindWorktree(repo, name: "alpha-left-swap")
+        let moved = home("Developer/alpha-left-swap-moved")
+        git(["tag", "keep-lost", git(["rev-parse", "HEAD@{1}"], in: wt).stdout.trimmingCharacters(in: .whitespacesAndNewlines)], in: repo)
+        let f = try XCTUnwrap(finding(for: wt, in: scan()))
+        XCTAssertNil(f.blockedReason)
+        let c = cleaner()
+        var swapped = false
+        c.sizeOf = { url in
+            if !swapped {
+                swapped = true
+                try? FileManager.default.moveItem(at: wt, to: moved)
+                try? FileManager.default.createSymbolicLink(at: wt, withDestinationURL: moved)
+            }
+            return Sizer.size(of: url)
+        }
+        XCTAssertEqual(c.clean([f]).removed, 0)
+        XCTAssertTrue(exists(moved.appendingPathComponent("node_modules/blob.bin")))
+        XCTAssertEqual(calls("worktree remove"), 0)
+    }
+
     func testCommitsThatWerePushedOrMergedAreNotUnique() throws {
         let repo = try makeRepo("Developer/alpha")
         let remote = box.home.deletingLastPathComponent().appendingPathComponent("remote.git")
@@ -737,12 +821,30 @@ final class WorktreeTests: XCTestCase {
     }
 
     func testGitIsNotStartedWithoutTheDeveloperTools() {
-        let old = Git.developerToolsProbe
-        defer { Git.developerToolsProbe = old }
-        Git.developerToolsProbe = { false }
-        XCTAssertNil(Git.find())
-        Git.developerToolsProbe = { true }
-        XCTAssertEqual(Git.find()?.path, "/usr/bin/git")
+        XCTAssertNil(Git.find(probe: { false }))
+        XCTAssertEqual(Git.find(probe: { true })?.path, "/usr/bin/git")
+    }
+
+    func testTheCleanerLooksForGitOnceForManyWorktrees() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let a = try addWorktree(repo, at: home("Developer/alpha-a"), branch: "a")
+        let b = try addWorktree(repo, at: home("Developer/alpha-b"), branch: "b")
+        var lookups = 0
+        let c = Cleaner(guardian: PathGuard(home: box.home), runningApps: FakeRunning(apps: []).provider, programPaths: { [] },
+                        openClaudeBinaries: { _ in [] }, git: { lookups += 1; return Git(path: self.realGit) })
+        c.now = { self.later }
+        XCTAssertEqual(c.clean([forged(repo, a), forged(repo, b)]).removed, 2)
+        XCTAssertEqual(lookups, 1)
+        _ = c.clean([forged(repo, a)])           // a new clean looks again
+        XCTAssertEqual(lookups, 2)
+    }
+
+    func testTheScanLooksForTheDeveloperToolsOnce() throws {
+        var probes = 0
+        _ = Git.find(probe: { probes += 1; return true })
+        XCTAssertEqual(probes, 1)
+        let text = try source("DiskScanner.swift")
+        XCTAssertEqual(text.components(separatedBy: "Git.find(").count - 1, 1, "one lookup for each scan")
     }
 
     func testTheDialogSaysThatIgnoredFilesAreDeleted() {

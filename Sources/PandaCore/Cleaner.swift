@@ -99,6 +99,7 @@ public final class Cleaner {
         report.deleteMode = deleteMode
         inventoryLoaded = false
         inventory = nil
+        gitLookup = (false, nil)
         let started = Date()
         let before = freeSpace(URL(fileURLWithPath: guardian.home))
         Log.info("clean start: \(findings.count) items, estimate \(findings.reduce(0) { $0 + $1.bytes }) bytes")
@@ -504,7 +505,12 @@ public final class Cleaner {
 
     // MARK: Worktrees
 
-    private var worktreeGit: Git? { gitTool() }
+    /// git is looked for once for each clean, not once for each item (the lookup runs `xcode-select`, which can take seconds).
+    private var gitLookup: (done: Bool, git: Git?) = (false, nil)
+    private var worktreeGit: Git? {
+        if !gitLookup.done { gitLookup = (true, gitTool()) }
+        return gitLookup.git
+    }
 
     private func runWorktree(_ action: WorktreeAction, finding: Finding, into report: inout CleanReport) {
         guard let git = worktreeGit else { skip(finding, "git not found", &report); return }
