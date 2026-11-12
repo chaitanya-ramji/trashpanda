@@ -19,6 +19,10 @@ final class WorktreeTests: XCTestCase {
         #!/bin/sh
         echo "$*" >> '\(spyLog)'
         case " $* " in
+          *" log -g "*) if [ -e '\(dir.path)/fail-log' ]; then echo "fatal: simulated failure" >&2; exit 1; fi ;;
+          *" rev-list --count "*) if [ -e '\(dir.path)/fail-revlist' ] && printf '%s' "$*" | grep -q -F "$(cat '\(dir.path)/fail-revlist')"; then echo "fatal: simulated failure" >&2; exit 1; fi ;;
+        esac
+        case " $* " in
           *" worktree remove "*) if [ -e '\(dir.path)/fail-remove' ]; then echo "fatal: simulated failure" >&2; exit 1; fi ;;
         esac
         exec \(realGit) "$@"
@@ -303,6 +307,86 @@ final class WorktreeTests: XCTestCase {
         }
         XCTAssertEqual(c.clean([f]).removed, 0)
         XCTAssertTrue(exists(moved.appendingPathComponent("node_modules/blob.bin")))
+        XCTAssertEqual(calls("worktree remove"), 0)
+    }
+
+    // MARK: Review follow-ups
+
+    func testTheHeadLogReasonDoesNotSayHowTheCommitWasMade() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try makeLeftBehindWorktree(repo, name: "alpha-words")
+        let why = try XCTUnwrap(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+        XCTAssertTrue(why.contains("only in the HEAD log of this worktree, and no branch, remote or tag has it"), why)
+        XCTAssertFalse(why.contains("detached"), why)
+    }
+
+    /// 250 HEAD moves, and the lost commit is the OLDEST, so it is in the second chunk of 200.
+    func testALostCommitInTheSecondChunkOfTheHeadLogBlocks() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = home("Developer/alpha-long")
+        git(["worktree", "add", "-q", "--detach", wt.path], in: repo)
+        try write("node_modules/blob.bin", in: wt, bytes: 1_500_000)
+        git(["commit", "-q", "--allow-empty", "-m", "lost oldest"], in: wt)
+        // 250 more commits on top of main, each one a new id in the log. A branch holds them all, but not the first one.
+        git(["checkout", "-q", "--detach", "main"], in: wt)
+        for i in 0..<250 { git(["commit", "-q", "--allow-empty", "-m", "c\(i)"], in: wt) }
+        git(["branch", "keep", "HEAD"], in: wt)
+        git(["checkout", "-q", "--detach", "main"], in: wt)
+        let log = git(["log", "-g", "--format=%H", "HEAD"], in: wt).stdout.split(separator: "\n")
+                XCTAssertGreaterThan(Set(log).count, 250)
+        let check = Worktrees.check(path: wt, repo: repo, git: Git(path: realGit), guardian: PathGuard(home: box.home), active: [], now: later)
+        XCTAssertEqual(check.headLogOnlyCommits, 1)
+        XCTAssertFalse(check.reasons.isEmpty)
+        XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 0)
+        XCTAssertTrue(exists(wt))
+        XCTAssertEqual(calls("worktree remove"), 0)
+    }
+
+    private var flagDir: URL { box.home.deletingLastPathComponent() }
+
+    func testAFailedHeadLogCommandBlocksAndNothingIsRemoved() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try addWorktree(repo, at: home("Developer/alpha-faillog"), branch: "faillog")
+        XCTAssertNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+        let flag = flagDir.appendingPathComponent("fail-log")
+        try "1".write(to: flag, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: flag) }
+        let check = Worktrees.check(path: wt, repo: repo, git: Git(path: spyPath), guardian: PathGuard(home: box.home), active: [], now: later)
+        XCTAssertTrue(check.reasons.contains("Git could not read the log of its HEAD"), "\(check.reasons)")
+        XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 0)
+        XCTAssertTrue(exists(wt))
+        XCTAssertEqual(calls("worktree remove"), 0)
+    }
+
+    func testAFailedChunkCommandBlocksAndNothingIsRemoved() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try makeLeftBehindWorktree(repo, name: "alpha-failchunk")
+        let lost = git(["rev-parse", "HEAD@{1}"], in: wt).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        git(["tag", "keep-lost", lost], in: repo)            // so that only the chunk command can block
+        XCTAssertNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+        let flag = flagDir.appendingPathComponent("fail-revlist")
+        try lost.write(to: flag, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: flag) }
+        let check = Worktrees.check(path: wt, repo: repo, git: Git(path: spyPath), guardian: PathGuard(home: box.home), active: [], now: later)
+        XCTAssertTrue(check.reasons.contains("Git could not tell if the commits in its HEAD log exist elsewhere"), "\(check.reasons)")
+        XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 0)
+        XCTAssertTrue(exists(wt))
+        XCTAssertEqual(calls("worktree remove"), 0)
+    }
+
+    func testACommitHeldOnlyByAPerWorktreeRefBlocks() throws {
+        let repo = try makeRepo("Developer/alpha")
+        for (i, ref) in ["refs/worktree/keep", "refs/bisect/bad", "refs/rewritten/x"].enumerated() {
+            let wt = try addWorktree(repo, at: home("Developer/alpha-ref\(i)"), branch: "ref\(i)")
+            XCTAssertNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+            let tree = git(["rev-parse", "HEAD^{tree}"], in: wt).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            let c = git(["commit-tree", tree, "-m", "only here"], in: wt).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            git(["update-ref", ref, c], in: wt)
+            let why = try XCTUnwrap(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+            XCTAssertTrue(why.contains("refs that only this worktree has"), why)
+            XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 0)
+            XCTAssertTrue(exists(wt))
+        }
         XCTAssertEqual(calls("worktree remove"), 0)
     }
 

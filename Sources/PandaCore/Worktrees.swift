@@ -258,6 +258,15 @@ public enum Worktrees {
             result.reasons.append("Git could not tell where its state is")
         }
 
+        // Refs that belong to this worktree only (`refs/worktree`, `refs/bisect`, `refs/rewritten`) are deleted with it.
+        // A commit that only they hold is lost. If the command fails, we cannot know, so the worktree stays.
+        let own = git.run(["for-each-ref", "refs/worktree", "refs/bisect", "refs/rewritten"], in: path)
+        if own.status != 0 || own.timedOut {
+            result.reasons.append("Git could not read the refs that belong to this worktree")
+        } else if !own.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            result.reasons.append("It has refs that only this worktree has (refs/worktree, refs/bisect, or refs/rewritten). Removing the worktree drops them")
+        }
+
         guard isCommitID(entry.head) else {
             result.reasons.append("It has no commit yet"); return result
         }
@@ -310,8 +319,8 @@ public enum Worktrees {
         }
         result.headLogOnlyCommits = lost
         if lost > 0 {
-            result.reasons.append(lost == 1 ? "Its HEAD log has 1 commit that exists nowhere else (made on a detached HEAD). Removing the worktree drops it"
-                                  : "Its HEAD log has \(lost) commits that exist nowhere else (made on a detached HEAD). Removing the worktree drops them")
+            result.reasons.append(lost == 1 ? "Its HEAD log has 1 commit that exists nowhere else (it is only in the HEAD log of this worktree, and no branch, remote or tag has it). Removing the worktree drops it"
+                                  : "Its HEAD log has \(lost) commits that exist nowhere else (they are only in the HEAD log of this worktree, and no branch, remote or tag has them). Removing the worktree drops them")
         }
     }
 
