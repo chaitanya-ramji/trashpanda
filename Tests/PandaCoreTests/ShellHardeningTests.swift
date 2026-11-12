@@ -22,7 +22,7 @@ final class ShellHardeningTests: XCTestCase {
         ("AppleScript", #"\b(?:NSAppleScript|OSAScript|OSAScriptController)\b"#),
         ("dlopen/dlsym", #"\bdl(?:open|sym|open_preflight)\b"#),
         ("name lookup by string", #"\b(?:NSClassFromString|NSSelectorFromString|NSProtocolFromString|objc_getClass|objc_lookUpClass|objc_getRequiredClass)\b"#),
-        ("symbol attribute", #"@_(?:silgen_name|extern|cdecl)\b"#),
+        ("symbol attribute", #"@\s*_(?:silgen_name|extern|cdecl)\b"#),
         ("privileged launch", #"\b(?:AuthorizationExecuteWithPrivileges|SMJobSubmit|SMJobBless)\b"#),
     ].map { ($0.0, try! NSRegularExpression(pattern: $0.1)) }
 
@@ -324,6 +324,9 @@ final class ShellHardeningTests: XCTestCase {
             "@_extern(c, \"posix_spawn\") func ps()",
             "@_cdecl(\"posix_spawn\") func ps() {}",
             "@_silgen_name  (\"x\")\nfunc f()",
+            "@ _silgen_name(\"posix_spawn\") func ps()",
+            "@\n_cdecl(\"x\") func f() {}",
+            "@/*x*/_cdecl(\"y\") func q() {}",
         ]
         for text in bad {
             XCTAssertTrue(Self.spawnProblems(in: text, relativePath: "A.swift").contains("A.swift uses symbol attribute"), text)
