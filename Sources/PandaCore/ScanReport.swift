@@ -163,6 +163,11 @@ public enum CommandLineCheck {
         if args.contains("--json") && !args.contains("--scan") && !args.contains("--clean-safe") {
             return "--json works only with --scan or with --clean-safe --dry-run"
         }
+        // `--verbose` only changes the text of the dry run. It is an error anywhere else, so that it never starts the app by chance.
+        if args.contains("--verbose") && args.contains("--json") { return "--verbose cannot be used with --json" }
+        if args.contains("--verbose") && !(args.contains("--clean-safe") && args.contains("--dry-run")) {
+            return "--verbose works only with --clean-safe --dry-run"
+        }
         return nil
     }
 

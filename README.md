@@ -198,7 +198,7 @@ To see the result without the menu, run this command. It never deletes anything.
 
 `trashpanda --scan --json` prints the same scan as one JSON object, on one line, with a new line at the end. It deletes nothing. Nothing else goes to stdout: warnings go to stderr and to the log. The format is **schema 1**. Inside schema 1 a field is never removed and never changes its meaning. A new field can be added, so ignore a key that you do not know. The keys are sorted, the report has no time, and the findings have the same order as the text output.
 
-`--json` works with `--scan` or with `--clean-safe --dry-run`. Without one of them the command prints an error to stderr and exits with 64. Exit codes: 0 for success, 64 for a wrong option.
+`--json` works with `--scan` or with `--clean-safe --dry-run`. Without one of them the command prints an error to stderr and exits with 64. `--verbose` works only with `--clean-safe --dry-run`. Exit codes: 0 for success, 64 for a wrong option.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -235,30 +235,31 @@ Each run writes a start line and an end line to the log (`~/Library/Logs/TrashPa
 
 This command shows which items a clean of the safe items would remove, and the sum. It is read-only: it deletes nothing, and it has no code that can delete. It scans, decides for each item, prints the result, and exits. The real clean does not exist yet: `--clean-safe` without `--dry-run`, and `--yes`, print an error and exit with 64.
 
-The text has one line for each item that would be cleaned (size, group, title, place), then `N items would be cleaned. Would free X`, then the number of skipped items with a count for each reason. Add `--verbose` to list each skipped item with its reason. An upper-limit item shows as `up to X`, and it adds 0 to the sum, the same as in the app. If the delete mode is `trash`, the text says that the files would move to the Trash.
+The text has one line for each item that would be cleaned (size, group, title, place), then `N items would be cleaned. Would free X`, then a line such as `3 of 5 items are checked again at clean time`, then the number of skipped items with a count for each reason. Add `--verbose` to list each skipped item with its reason, and to print a note under each item that says what was checked now and what is checked again at clean time. An upper-limit item shows as `up to X`, and it adds 0 to the sum, the same as in the app. If the delete mode is `trash`, the text says that the files would move to the Trash.
 
-An item would be cleaned only if all of these are true:
-
-- it is not an information line, and its tier is `safe`;
-- it is not blocked;
-- the path guard accepts its path now (the same guard as the clean: no link, nothing outside the home folder, no protected folder);
-- it is not on the keep list;
-- its owner app is not open (the command line cannot ask an app to quit, the menu can);
-- the one-click clean of the menu would take it. The menu and this command use the same code for this rule.
+An item would be cleaned only if all of these are true. The checks run in the order of the table below, and **only the first failing check is shown** as the skip reason.
 
 | Skip reason | Meaning |
 | --- | --- |
-| `review item` | The tier is `review`. You must choose it in the app. |
 | `info only` | The item is for information. It cannot be cleaned. |
+| `review item` | The tier is `review`. You must choose it in the app. |
 | `blocked: <reason>` | The app shows the item but cannot clean it now. The reason is the same as in the menu. |
-| `on the keep list` | The path is in your keep list. |
-| `refused by the path guard: <reason>` | The path is a link, is outside the home folder, or is protected. |
-| `owner app is open: <name>` | The app that uses the item is open. |
-| `not part of the one-click clean` | The menu would not take the item in its one-click clean. |
+| `on the keep list` | A path of the item is in your keep list. |
+| `refused by the path guard: <reason>` | The path guard refuses a path of the item: the path itself is a link, it is outside the home folder, or it is protected. |
+| `not there now` | The path is gone since the scan. |
+| `nothing to clean now` | The Cleaner finds its targets again from a fixed rule (browser caches, old logs, old test browsers, old update files). The rule finds none now. |
+| `a folder in the path is a link` | A folder above the item is a link (even if it leads to another place inside your home folder). The Cleaner refuses such a path for these items: build folders, Xcode archives, device support, update files, cache folders, browser caches, old logs, old test browsers, and installers. |
+| `not the kind of path that the clean takes` | The path does not have the shape that the Cleaner accepts for this kind of item (for example a build folder with a name that is not a build folder name). The plan calls the same functions as the Cleaner. |
+| `project is in use` | A program runs in the project of the build folder. The command line does not start a program to find out, so it checks this only when the list of working folders is known (it is not known on the command line). The Cleaner reads it again at clean time. |
+| `owner app is open (<name>)` | The app that uses the item is open. The command line cannot ask an app to quit, the menu can. |
 
-An item that runs a tool (Docker, Homebrew, and similar) has no path, so the path guard and the keep list cannot check it here. The cleaner checks it again when it runs.
+There is also a last check in the code, `not part of the one-click clean`. It is a safety net, not a real reason: it repeats the rules of `info only`, `review item`, `blocked`, and `owner app is open`, so no item can fail it alone. You should never see it.
 
-With `--json` the output is one JSON object, still **schema 1**. The finding objects are the same as for `--scan`, with two more fields. Top level fields are added too. No field of the scan report is removed or renamed.
+Every part of the path is checked, not only the last part. The path guard sees a link in the last part of the path. For a link in a parent folder, the plan uses the same function as the Cleaner (`isPlainPath`: the path is equal to its real path), but only for the items where the Cleaner uses it. For the other items (the contents of one fixed cache folder, a worktree) the Cleaner does not make this check, so the plan does not make it either. A path that the Cleaner would take is not shown as skipped.
+
+Some checks cannot run now. A tool item (Docker, Homebrew, simulator, Trash, a worktree, and similar) names no path, and a tool decides at clean time. An app can start, a program can start, and an age changes. Each finding says which checks ran now and which are repeated at clean time (see `checkedNow` and `checkedAtCleanTime` below). An item that is `checkedNow: true` with an empty `checkedAtCleanTime` is the most certain. The Cleaner always checks every item again before it deletes.
+
+With `--json` the output is one JSON object, still **schema 1**. The finding objects are the same as for `--scan`, with four more fields. Top level fields are added too. No field of the scan report is removed or renamed.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -267,10 +268,24 @@ With `--json` the output is one JSON object, still **schema 1**. The finding obj
 | `totals.wouldFree` | number | The sum of `countedBytes` of the items with `wouldClean` true, in bytes. An upper-limit item counts 0, as in the app. |
 | `findings[].wouldClean` | boolean | `true` only for an item that a clean of the safe items would take now. |
 | `findings[].skipReason` | string | One of the texts above. Empty when `wouldClean` is `true`. |
+| `findings[].checkedNow` | boolean | Always present. `true` when a path check ran at plan time (the path guard and the shape checks of the Cleaner). `false` for an item that has no path to check, such as a tool item. |
+| `findings[].checkedAtCleanTime` | string | Always present. Empty, or a short fixed text that says what the Cleaner decides again at clean time. It is always empty for an item with `wouldClean` false. More than one text are joined with `; `. |
 
-Exit codes: 0 for success, 64 for a wrong option. Wrong options include `--clean-safe` without `--dry-run`, `--dry-run` without `--clean-safe`, `--yes`, `--json` without `--scan` or `--clean-safe --dry-run`, and `--scan` together with `--clean-safe`. `--verbose` only changes the text of the dry run.
+The texts of `checkedAtCleanTime`:
 
-The run writes to the log: a start line, one `INFO` line for each item (`id`, `wouldClean`, `skipReason`, `bytes`) so that you can check the run later, and an end line with the counts, the sum, the time, and the exit code.
+| Text | Meaning |
+| --- | --- |
+| `tool decides` | A tool (Docker, Homebrew, simulator, Finder, git, and similar) does the work and decides. |
+| `app state is read again` | The owner app is read again for each item. |
+| `project use is read again` | The working folders of the running programs are read again (build folders). |
+| `age is read again` | The age of the files is read again (old logs, update files). |
+| `running programs are read again` | The programs that run are read again (old test browsers). |
+| `mounted disk images are read again` | The disk images that are mounted are read again (installers). |
+| `targets are found again` | The Cleaner finds the targets again from a fixed rule at clean time. |
+
+Exit codes: 0 for success, 64 for a wrong option. Wrong options include `--clean-safe` without `--dry-run`, `--dry-run` without `--clean-safe`, `--yes`, `--json` without `--scan` or `--clean-safe --dry-run`, and `--scan` together with `--clean-safe`. `--verbose` works only with `--clean-safe --dry-run`, and it cannot be used with `--json`: both are wrong options (exit 64). A wrong option never starts the menu bar app.
+
+The run writes to the log: a start line, one `INFO` line for each item (`id`, `wouldClean`, `skipReason`, `bytes`, `checkedNow`, `checkedAtCleanTime`) so that you can check the run later, and an end line with the counts, the sum, the time, and the exit code.
 
 ## Spinner and log
 

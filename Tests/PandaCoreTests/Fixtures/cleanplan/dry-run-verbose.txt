@@ -1,11 +1,25 @@
 5.3 GB        Xcode & Swift  Example build cache  [~/Library/Caches/Example]
+    Checked now: yes. Checked again at clean time: no
 up to 700 MB  Docker         Example upper limit  [Docker]
-2 items would be cleaned. Would free 5.3 GB
+    Checked now: yes. Checked again at clean time: no
+300 MB        Homebrew       Example tool item  [Trash]
+    Checked now: no. Checked again at clean time: tool decides
+3 items would be cleaned. Would free 5.6 GB
+1 of 3 items are checked again at clean time
 
-Skipped: 5 items
-  review item: AI agents & local models · Example models  [~/.example/models]
-  blocked: Has changes that are not committed: Git worktrees · Example blocked  [~/code/busy]
-  info only: Homebrew · Example note  [~/Library/Example]
-  on the keep list: JavaScript & TypeScript · Example kept cache  [~/Library/Caches/Kept]
-  owner app is open: Example Editor: App update downloads · Example editor cache  [~/Library/Caches/Editor]
+Skipped: 7 items
+  review item - AI agents & local models · Example models  [~/.example/models]
+      Checked now: no
+  blocked: Has changes that are not committed - Git worktrees · Example blocked  [~/code/busy]
+      Checked now: no
+  info only - Homebrew · Example note  [~/Library/Example]
+      Checked now: no
+  on the keep list - JavaScript & TypeScript · Example kept cache  [~/Library/Caches/Kept]
+      Checked now: yes
+  owner app is open (Example Editor) - App update downloads · Example editor cache  [~/Library/Caches/Editor]
+      Checked now: yes
+  refused by the path guard: path is protected (Documents) - Xcode & Swift · Example refused  [~/Documents/letter.txt]
+      Checked now: yes
+  not there now - Python · Example gone  [~/Library/Caches/Gone]
+      Checked now: yes
 Nothing was deleted.
