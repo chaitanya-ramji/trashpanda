@@ -247,14 +247,14 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Safe and review tiers, path guard, and a log
 - [x] Spinner, new icon, and a DMG release (not notarized)
 
-### Now: v0.2 Dart, Elixir, Zig
+### Done: v0.2 Dart, Elixir, Zig
 - [x] Add Dart and Flutter support ([#1](https://github.com/chaitanya-ramji/trashpanda/issues/1))
 - [x] Add Elixir and Erlang support ([#2](https://github.com/chaitanya-ramji/trashpanda/issues/2))
 - [x] Add Zig support ([#3](https://github.com/chaitanya-ramji/trashpanda/issues/3))
 - [x] Let the user set the stale limit ([#4](https://github.com/chaitanya-ramji/trashpanda/issues/4))
 - [x] Add a screenshot of the menu to the README ([#5](https://github.com/chaitanya-ramji/trashpanda/issues/5))
 
-### Next: v0.3 Docker
+### Done: v0.3 Docker
 - [x] Docker: act only on a local engine ([#6](https://github.com/chaitanya-ramji/trashpanda/issues/6))
 - [x] Docker: remove dangling images ([#7](https://github.com/chaitanya-ramji/trashpanda/issues/7))
 - [x] Docker: remove stopped containers ([#8](https://github.com/chaitanya-ramji/trashpanda/issues/8))
@@ -264,7 +264,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Docker: explain a VM disk that does not shrink ([#12](https://github.com/chaitanya-ramji/trashpanda/issues/12))
 - [x] Roadmap: keep the checkboxes correct ([#39](https://github.com/chaitanya-ramji/trashpanda/issues/39))
 
-### Next: v0.4 Xcode, app and browser caches
+### Done: v0.4 Xcode, app and browser caches (one item on hold: #43)
 - [x] Xcode: old simulator runtimes, devices, and archives (review) ([#27](https://github.com/chaitanya-ramji/trashpanda/issues/27))
 - [x] Xcode: iOS device support files, one item for each iOS version ([#41](https://github.com/chaitanya-ramji/trashpanda/issues/41))
 - [ ] Xcode: keep the device support folder of a connected device ([#43](https://github.com/chaitanya-ramji/trashpanda/issues/43))
@@ -280,7 +280,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Old test browser downloads: Cypress, Playwright, Puppeteer, Chrome for Testing ([#18](https://github.com/chaitanya-ramji/trashpanda/issues/18))
 - [x] Electron and node-gyp download caches ([#19](https://github.com/chaitanya-ramji/trashpanda/issues/19))
 
-### Later: v0.5 Insight
+### Done: v0.5 Insight
 - [x] Cache explorer: show the largest folders in Library/Caches ([#20](https://github.com/chaitanya-ramji/trashpanda/issues/20))
 - [x] Explain space that does not come back: local snapshots ([#21](https://github.com/chaitanya-ramji/trashpanda/issues/21))
 - [x] Logs and crash reports (review) ([#22](https://github.com/chaitanya-ramji/trashpanda/issues/22))
@@ -290,7 +290,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Service Worker storage: show each website by name ([#44](https://github.com/chaitanya-ramji/trashpanda/issues/44))
 - [x] Menu: show the full split of reclaimable data as an interactive bar ([#42](https://github.com/chaitanya-ramji/trashpanda/issues/42))
 
-### Later: v0.6 Old tools
+### Done: v0.6 Old tools (one item moves on: #88)
 - [x] Old language runtimes: nvm, fnm, pyenv, rustup, sdkman, mise, asdf ([#25](https://github.com/chaitanya-ramji/trashpanda/issues/25))
 - [x] Unused Homebrew packages ([#26](https://github.com/chaitanya-ramji/trashpanda/issues/26))
 - [x] Unused global JavaScript packages: npm, pnpm, Bun, Yarn ([#51](https://github.com/chaitanya-ramji/trashpanda/issues/51))
@@ -298,7 +298,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] More languages (phase 2b): Scala, Haskell, R, Julia, Nim, OCaml, Crystal, Clojure, Perl, Lua ([#29](https://github.com/chaitanya-ramji/trashpanda/issues/29))
 - [ ] Project scan: match generic folder names (lib, local) only when the marker file is present ([#88](https://github.com/chaitanya-ramji/trashpanda/issues/88))
 
-### Now: v0.7 Correct numbers and safe tools
+### Done: v0.7 Correct numbers and safe tools
 - [x] Do not count the uv cache two times in the totals ([#124](https://github.com/chaitanya-ramji/trashpanda/issues/124))
 - [x] Show one folder in one group only ([#125](https://github.com/chaitanya-ramji/trashpanda/issues/125))
 - [x] Careful dialog for a container, and the critical style for a permanent delete ([#126](https://github.com/chaitanya-ramji/trashpanda/issues/126))
@@ -314,7 +314,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Harden the CI job and the release job ([#143](https://github.com/chaitanya-ramji/trashpanda/issues/143))
 - [x] Valid bundle version and complete package data ([#144](https://github.com/chaitanya-ramji/trashpanda/issues/144))
 
-### Next: v0.8 Menu and dialogs
+### Done: v0.8 Menu and dialogs (released as 0.8.0)
 - [x] Move the menu code into a tested menu model, with no change of behavior ([#147](https://github.com/chaitanya-ramji/trashpanda/issues/147))
 - [x] Move the demo code out of the production classes ([#148](https://github.com/chaitanya-ramji/trashpanda/issues/148))
 - [x] Settings submenu with About, Help, and "Report a problem" ([#149](https://github.com/chaitanya-ramji/trashpanda/issues/149))
@@ -337,7 +337,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [x] Show the Docker disk file in a "Good to know" section ([#187](https://github.com/chaitanya-ramji/trashpanda/issues/187))
 - [x] Row "Other space on this Mac" in "Good to know" ([#188](https://github.com/chaitanya-ramji/trashpanda/issues/188))
 
-### Next: v0.9 More coverage
+### Now: v0.9 More coverage
 - [ ] Git worktrees: find the ones that tools and you left behind, and remove them safely ([#118](https://github.com/chaitanya-ramji/trashpanda/issues/118))
 - [ ] Android emulator images and virtual devices (review items) ([#189](https://github.com/chaitanya-ramji/trashpanda/issues/189))
 - [ ] Caches of conda, Deno, and Terraform ([#190](https://github.com/chaitanya-ramji/trashpanda/issues/190))
@@ -348,7 +348,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Quality gates in CI ([#195](https://github.com/chaitanya-ramji/trashpanda/issues/195))
 - [ ] Split the two largest core files ([#196](https://github.com/chaitanya-ramji/trashpanda/issues/196))
 
-### Later: v1.0 Signed and stable
+### Next: v1.0 Signed and stable
 - [ ] Notarize the app and publish signed releases ([#30](https://github.com/chaitanya-ramji/trashpanda/issues/30))
 - [ ] Homebrew cask and tap ([#31](https://github.com/chaitanya-ramji/trashpanda/issues/31))
 - [x] Check for updates ([#32](https://github.com/chaitanya-ramji/trashpanda/issues/32))

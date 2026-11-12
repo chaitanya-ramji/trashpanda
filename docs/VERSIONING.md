@@ -82,10 +82,13 @@ A beta is not made for each merge. Cut one only when all of these are true:
 
 ## History
 
-Before these rules, the betas of the milestones `v0.4`, `v0.5`, and `v0.6` all shipped as `0.4.0-beta.1` to `0.4.0-beta.6`. The tags stay as they are, because of the rule above. The notes of beta 1 to 5 say that beta 6 supersedes them. The next release is the first one that follows this page.
+Before these rules, the betas of the milestones `v0.4`, `v0.5`, and `v0.6` all shipped as `0.4.0-beta.1` to `0.4.0-beta.6`. The tags stay as they are, because of the rule above. The notes of beta 1 to 5 say that beta 6 supersedes them. The releases after them follow this page.
 
 | Release | What it is |
 | --- | --- |
 | `0.1.0` | The first release (stable, not notarized). |
 | `0.4.0-beta.1` to `0.4.0-beta.5` | Early betas of the work of milestones `v0.4` to `v0.6`. Superseded by beta 6. |
 | `0.4.0-beta.6` | The last beta of that work. |
+| `0.8.0-beta.1` | The first beta that follows this page. It finished milestone `v0.7` and began `v0.8`. |
+| `0.8.0-beta.2` | The second beta of `0.8.0`. Superseded by `0.8.0`. |
+| `0.8.0` | The first stable release since `0.1.0`. It finishes milestone `v0.8`. Not signed or notarized (#30). |
