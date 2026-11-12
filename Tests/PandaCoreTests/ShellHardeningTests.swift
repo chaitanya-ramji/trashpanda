@@ -22,6 +22,7 @@ final class ShellHardeningTests: XCTestCase {
         ("AppleScript", #"\b(?:NSAppleScript|OSAScript|OSAScriptController)\b"#),
         ("dlopen/dlsym", #"\bdl(?:open|sym|open_preflight)\b"#),
         ("name lookup by string", #"\b(?:NSClassFromString|NSSelectorFromString|NSProtocolFromString|objc_getClass|objc_lookUpClass|objc_getRequiredClass)\b"#),
+        ("symbol attribute", #"@_(?:silgen_name|extern|cdecl)\b"#),
         ("privileged launch", #"\b(?:AuthorizationExecuteWithPrivileges|SMJobSubmit|SMJobBless)\b"#),
     ].map { ($0.0, try! NSRegularExpression(pattern: $0.1)) }
 
@@ -78,7 +79,8 @@ final class ShellHardeningTests: XCTestCase {
             return nil
         }
         // Bare literal. It cannot follow a name, a number or a closing bracket, and it cannot start with a space.
-        if let p = previous, !"(,=:{[;!&|?~<>+-*%^".contains(p) { return nil }
+        // A `!` is not in this list: after a postfix `!`, a slash is a division.
+        if let p = previous, !"(,=:{[;&|?~<>+-*%^".contains(p) { return nil }
         guard let first = at(j), first != " ", first != "\t", first != "\n" else { return nil }
         var inClass = false
         while j < s.count, s[j] != "\n" {
@@ -314,6 +316,30 @@ final class ShellHardeningTests: XCTestCase {
         }
     }
 
+    func testSymbolAttributesAreCaught() {
+        let bad = [
+            "@_silgen_name(\"posix_spawn\") func ps(_ a: Int) -> Int",
+            "@_silgen_name(\"execve\") func ev()",
+            "@_silgen_name(\"system\") func sy(_ c: UnsafePointer<CChar>) -> Int32",
+            "@_extern(c, \"posix_spawn\") func ps()",
+            "@_cdecl(\"posix_spawn\") func ps() {}",
+            "@_silgen_name  (\"x\")\nfunc f()",
+        ]
+        for text in bad {
+            XCTAssertTrue(Self.spawnProblems(in: text, relativePath: "A.swift").contains("A.swift uses symbol attribute"), text)
+        }
+        // A comment or a string that names the attribute is not a hit.
+        for text in ["// @_silgen_name(\"x\")\nlet a = 1", "let s = \"@_cdecl @_extern\"", "let a = 1 /* @_silgen_name */"] {
+            XCTAssertEqual(Self.spawnProblems(in: text, relativePath: "A.swift"), [], text)
+        }
+    }
+
+    func testSlashAfterPostfixBangIsDivision() {
+        for text in ["let x = b!/2; let p = Process(); let y = 4/2", "let x = b!/\"q\"; Process()"] {
+            XCTAssertTrue(Self.spawnProblems(in: text, relativePath: "A.swift").contains("A.swift uses Process"), text)
+        }
+    }
+
     func testTypeAliasesOfProcessAreCaught() {
         for text in ["typealias Runner = Foundation.Process", "typealias R = Process\nlet r = R()",
                      "import Foundation\nextension Process { }", "let t = (Process).self", "func f(_ p: Process) {}",
@@ -344,12 +370,16 @@ final class ShellHardeningTests: XCTestCase {
 
     func testWorkspaceOpenNeedsAnAllowedFileAndAnExactCount() {
         let one = "NSWorkspace.shared.open(url)\n"
-        XCTAssertEqual(Self.spawnProblems(in: one, relativePath: "TrashPanda/Dialogs.swift"), [])
-        XCTAssertFalse(Self.spawnProblems(in: one + one, relativePath: "TrashPanda/Dialogs.swift").isEmpty)
+        XCTAssertEqual(Self.spawnProblems(in: one, relativePath: "TrashPanda/Dialogs.swift"), [],
+                       "One call in an allowed file must pass.")
+        XCTAssertFalse(Self.spawnProblems(in: one + one, relativePath: "TrashPanda/Dialogs.swift").isEmpty,
+                       "Two calls in a file that allows one must be reported.")
         XCTAssertFalse(Self.spawnProblems(in: "let x = 1", relativePath: "TrashPanda/Dialogs.swift").isEmpty,
                        "The allowance is exact. A file that no longer calls it must leave the list.")
-        XCTAssertFalse(Self.spawnProblems(in: one, relativePath: "PandaCore/Other.swift").isEmpty)
-        XCTAssertFalse(Self.spawnProblems(in: one, relativePath: "TrashPanda/Dialogs.swift.bak").isEmpty)
+        XCTAssertFalse(Self.spawnProblems(in: one, relativePath: "PandaCore/Other.swift").isEmpty,
+                       "A call in a file that is not on the list must be reported.")
+        XCTAssertFalse(Self.spawnProblems(in: one, relativePath: "TrashPanda/Dialogs.swift.bak").isEmpty,
+                       "The allowed path is exact, so a copy with a suffix must be reported.")
         XCTAssertEqual(Self.spawnProblems(in: "// NSWorkspace.shared.open(url)\nlet s = \"NSWorkspace.shared.open(\"", relativePath: "A.swift"), [])
     }
 
@@ -382,11 +412,16 @@ final class ShellHardeningTests: XCTestCase {
     }
 
     func testPackageScanFindsABadPath() {
-        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"Vendor/A\")").isEmpty)
-        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"Sources/../Vendor\")").isEmpty)
-        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"../x\")").isEmpty)
-        XCTAssertFalse(Self.packagePathProblems(in: ".binaryTarget(name: \"A\", path: \"Sources/A.xcframework\")").isEmpty)
-        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", sources: [\"../x.swift\"])").isEmpty)
+        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"Vendor/A\")").isEmpty,
+                       "A target path outside Sources must be reported.")
+        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"Sources/../Vendor\")").isEmpty,
+                       "A path that leaves Sources with .. must be reported.")
+        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", path: \"../x\")").isEmpty,
+                       "A path above the package must be reported.")
+        XCTAssertFalse(Self.packagePathProblems(in: ".binaryTarget(name: \"A\", path: \"Sources/A.xcframework\")").isEmpty,
+                       "A binary target must be reported.")
+        XCTAssertFalse(Self.packagePathProblems(in: ".target(name: \"A\", sources: [\"../x.swift\"])").isEmpty,
+                       "A sources list must be reported.")
         XCTAssertEqual(Self.packagePathProblems(in: ".target(name: \"A\", path: \"Sources/A\")\n// path: \"Vendor\""), [])
         XCTAssertEqual(Self.packagePathProblems(in: ".target(name: \"PandaCore\")"), [])
     }
