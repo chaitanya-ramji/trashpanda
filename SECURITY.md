@@ -62,11 +62,12 @@ The app is not sandboxed, because it must read developer folders. It runs with y
 
 Trash Panda removes files only when you ask. It never removes these things:
 
-- Your documents, photos, and personal files.
-- Your source code. The app can remove build folders in a project, such as `node_modules` or `target`. It never removes the files that you write.
-- Files outside your home folder.
+- Your documents, photos, and personal files. The app can empty the Trash, and it can remove old chat sessions of coding agents, after you confirm.
+- Your source code. The app can remove build folders in a project, such as `node_modules` or `target`. It never removes the files that you write. A clean git worktree can be removed. Its work stays in git.
 - Paths that you list in the `keep` file in `~/.config/trashpanda`.
-- Your settings. The app saves its own options in the `settings` file, and only when you change them in the menu or in the file.
+- Your settings. The app saves its own options in the `settings` file, and only when you change them in the menu or in the file. The one exception is at the first start. Then the app adds the line `first_start_note = shown`. That line means the first-start note was shown.
+
+The app itself never deletes files outside your home folder. Some items are removed by their own tool (brew, npm, simctl, docker). That tool decides where its files are.
 
 The app never cleans by itself. A clean starts only after you confirm it in a dialog.
 

@@ -24,6 +24,17 @@ final class SecurityPolicyTextTests: XCTestCase {
         XCTAssertTrue(try policy().contains("\n## What it never touches\n"))
     }
 
+    func testPolicyDoesNotSayThatTheAppNeverRemovesFilesOutsideTheHomeFolder() throws {
+        // Some items are removed by their own tool (brew, npm, simctl, docker), so only the app itself is limited.
+        let text = try policy()
+        XCTAssertFalse(text.contains("- Files outside your home folder."))
+        XCTAssertTrue(text.contains("The app itself never deletes files outside your home folder."))
+    }
+
+    func testPolicyNamesTheFirstStartLineInTheSettingsFile() throws {
+        XCTAssertTrue(try policy().contains("`first_start_note = shown`"))
+    }
+
     func testPolicyNamesTheDailyUpdateRequest() throws {
         let text = try policy()
         XCTAssertTrue(text.contains("api.github.com"))

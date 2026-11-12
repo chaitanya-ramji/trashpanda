@@ -87,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Shows the first-start note once. The decision is in `FirstStartNote`. The note is recorded before it shows, so a
     /// settings file that cannot be written does not bring it back in this run.
     private func showFirstStartNoteIfDue() {
-        guard firstStartNote.showNow(isDemo: false, recorded: FirstStartNote.isRecorded()) else { return }
+        guard firstStartNote.showNow(isDemo: demo != nil, recorded: FirstStartNote.isRecorded()) else { return }
         if !FirstStartNote.record() { Log.error("could not save the first-start note") }
         Log.info("first start: showed the note")
         let alert = NSAlert()
