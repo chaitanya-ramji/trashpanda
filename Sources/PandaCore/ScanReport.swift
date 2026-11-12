@@ -14,9 +14,26 @@ import Foundation
 /// - `tier`: `safe` (cheap to rebuild, in the one-click clean), `review` (the user must choose it),
 ///   or `info` (shown for information only, it cannot be cleaned).
 /// - `rebuild`: `seconds`, `minutes`, `download`, `recreate`, or `never`.
-/// - `bytes`: a whole number. It is the size of the item. For an item with tier `info`, and for an
-///   item that is only an upper limit, the size is not part of any total.
-/// - `location`: the text that the plain text output shows. It is not changed.
+/// - `bytes`: a whole number. It is the size of the item, as measured.
+/// - `blocked`: always present. `true` when the app shows the item but cannot clean it now
+///   (`Finding.blockedReason` is set at scan time).
+/// - `blockedReason`: always present. The same text as the menu shows. It is empty when `blocked` is `false`.
+/// - `upperLimit`: always present. `true` when `bytes` is only an upper limit (the menu shows "up to").
+/// - `countedBytes`: always present. The bytes that the app adds to its totals. It is 0 for an item with
+///   tier `info`, for a blocked item, and for an upper-limit item.
+/// - `location`: the text that the plain text output shows. It can hold a full path. It is not changed.
+/// - `totals.reclaimable` and `totals.reviewable`: the numbers of "Reclaim now" and "To review" in the text.
+///   The sum of `countedBytes` of the items with tier `safe` is `reclaimable`. The same is true for `review`.
+///
+/// `tier` is only the category (`safe`, `review`, `info`). It does not say if the item can be cleaned now:
+/// use `blocked` for that. An item can be cleaned by a script only when `tier` is `safe` and `blocked` is
+/// `false`. Whether the owner app is running, and the keep list, are checked at clean time. A script must never
+/// take an id as delete input.
+///
+/// Later steps (a dry run, a clean) will reuse these same entry objects and add fields to them.
+///
+/// An id is an opaque string. It is unique inside one report. It can be an absolute path when the item is
+/// outside the home folder.
 public struct ScanReport: Codable, Equatable, Sendable {
     public static let currentSchema = 1
 
@@ -33,10 +50,20 @@ public struct ScanReport: Codable, Equatable, Sendable {
         public var tier: String
         public var rebuild: String
         public var location: String
+        public var blocked: Bool
+        public var blockedReason: String
+        public var upperLimit: Bool
+        public var countedBytes: Int64
+    }
+
+    public struct Totals: Codable, Equatable, Sendable {
+        public var reclaimable: Int64
+        public var reviewable: Int64
     }
 
     public var schema: Int
     public var disk: Disk
+    public var totals: Totals
     public var findings: [Entry]
 
     /// Builds the report. `home` is the home folder. It is only used to write `~` in the ids.
@@ -44,9 +71,28 @@ public struct ScanReport: Codable, Equatable, Sendable {
         schema = Self.currentSchema
         disk = Disk(total: result.disk.total, free: result.disk.free)
         findings = result.findings.map { f in
-            Entry(id: Log.redact(f.id, home: home), group: f.ecosystem.rawValue, title: f.title, bytes: f.bytes,
-                  tier: Self.tierName(f), rebuild: f.rebuild.key, location: f.location)
+            Entry(id: Self.id(f.id, home: home), group: f.ecosystem.rawValue, title: f.title, bytes: f.bytes,
+                  tier: Self.tierName(f), rebuild: f.rebuild.key, location: f.location,
+                  blocked: f.blockedReason != nil, blockedReason: f.blockedReason ?? "",
+                  upperLimit: f.sizeIsUpperLimit, countedBytes: f.isActionable ? f.countedBytes : 0)
         }
+        totals = Totals(reclaimable: result.reclaimable, reviewable: result.reviewable)
+    }
+
+    /// Writes the home folder as `~` at the start of an id only: `~` when the id is the home folder,
+    /// `~/rest` when it starts with the home folder and a slash, else it is not changed.
+    /// So `/Users/al` does not change `/Users/alice/x`. An id can start with a kind and a colon, for example
+    /// `worktree:/Users/al/x`. The kind is kept and the rest is rewritten the same way.
+    public static func id(_ text: String, home: String) -> String {
+        guard !home.isEmpty, home != "/" else { return text }
+        if let colon = text.firstIndex(of: ":"), !text[..<colon].contains("/") {
+            let rest = String(text[text.index(after: colon)...])
+            return text[...colon] + id(rest, home: home)
+        }
+        let base = home.hasSuffix("/") ? String(home.dropLast()) : home
+        if text == base { return "~" }
+        if text.hasPrefix(base + "/") { return "~/" + text.dropFirst(base.count + 1) }
+        return text
     }
 
     /// `info` for an item that cannot be cleaned, else `safe` or `review`.
@@ -111,6 +157,14 @@ public enum CommandLineCheck {
         if !unknown.isEmpty { return "Unknown option: \(unknown.joined(separator: " "))" }
         if args.contains("--json") && !args.contains("--scan") { return "--json works only with --scan" }
         return nil
+    }
+
+    /// The options for the log. It names only the known options that are present, and counts the others.
+    /// It never holds the text of another argument (it could be a secret).
+    public static func logOptions(_ arguments: [String]) -> String {
+        let args = Array(arguments.dropFirst())
+        let known = args.filter { knownOptions.contains($0) }
+        return "options=\(known.joined(separator: " ")) other=\(args.count - known.count)"
     }
 
     /// `scan` or `scan --json`, for the log.

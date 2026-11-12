@@ -205,23 +205,31 @@ To see the result without the menu, run this command. It never deletes anything.
 | `schema` | number | The format version. Always `1`. |
 | `disk.total` | number | Size of the disk in bytes. |
 | `disk.free` | number | Free space in bytes, as Finder shows it. |
-| `findings[].id` | string | Fixed name of the item. The same item has the same id in each run. The home folder is written as `~`. |
+| `totals.reclaimable` | number | The number of "Reclaim now" in the text, in bytes. |
+| `totals.reviewable` | number | The number of "To review" in the text, in bytes. |
+| `findings[].id` | string | Fixed name of the item. The same item has the same id in each run. The home folder is written as `~` at the start of the id only. An id is an opaque string, unique inside one report. It can be an absolute path when the item is outside the home folder. |
 | `findings[].group` | string | The language or tool group, for example `swift`, `javascript`, `homebrew`, `docker`, `aiAgents`. |
 | `findings[].title` | string | The name of the item. |
-| `findings[].bytes` | number | Size in bytes, a whole number. |
-| `findings[].tier` | string | `safe` (cheap to rebuild), `review` (you must choose it), or `info` (information only, it cannot be cleaned). |
+| `findings[].bytes` | number | Size of the item in bytes, a whole number. |
+| `findings[].tier` | string | The category only: `safe` (cheap to rebuild), `review` (you must choose it), or `info` (information only, it cannot be cleaned). It does not say if the item can be cleaned now: see `blocked`. |
+| `findings[].blocked` | boolean | Always present. `true` when the app shows the item but cannot clean it now. |
+| `findings[].blockedReason` | string | Always present. The reason that the menu shows. Empty when `blocked` is `false`. |
+| `findings[].upperLimit` | boolean | Always present. `true` when `bytes` is only an upper limit (the menu shows "up to"). |
+| `findings[].countedBytes` | number | Always present. The bytes that count in the totals. It is 0 for `info`, for a blocked item, and for an upper limit. The sum for `safe` is `totals.reclaimable`, and the sum for `review` is `totals.reviewable`. |
 | `findings[].rebuild` | string | `seconds`, `minutes`, `download`, `recreate`, or `never`. |
-| `findings[].location` | string | The place, as the text output shows it. |
+| `findings[].location` | string | The place, as the text output shows it. It can hold a full path, the same as the text output. |
+
+An item can be cleaned by a script only when `tier` is `safe` and `blocked` is `false`. Whether the owner app is running, and the keep list, are checked at clean time. A script must never take an id as delete input. Later steps (a dry run and a clean) will reuse these same entry objects and add fields to them.
 
 Example (the lines are split here to read them):
 
 ```json
 {"disk":{"free":42000000000,"total":500000000000},
- "findings":[{"bytes":5300000000,"group":"swift","id":"example.cache","location":"~/Library/Caches/Example","rebuild":"minutes","tier":"safe","title":"Example build cache"}],
- "schema":1}
+ "findings":[{"blocked":false,"blockedReason":"","bytes":5300000000,"countedBytes":5300000000,"group":"swift","id":"example.cache","location":"~/Library/Caches/Example","rebuild":"minutes","tier":"safe","title":"Example build cache","upperLimit":false}],
+ "schema":1,"totals":{"reclaimable":5300000000,"reviewable":0}}
 ```
 
-Each run writes a start line and an end line to the log (`~/Library/Logs/TrashPanda/trashpanda.log`): the options, the number of items by tier, the sizes, the time, and the exit code. It does not write file contents.
+Each run writes a start line and an end line to the log (`~/Library/Logs/TrashPanda/trashpanda.log`): the known options that were present and the number of other arguments (never their text), the number of items by tier, the sizes, the time, and the exit code. It does not write file contents.
 
 ## Spinner and log
 
