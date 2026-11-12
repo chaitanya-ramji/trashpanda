@@ -48,6 +48,8 @@ public struct MenuModel: Equatable, Sendable {
         /// Ask, then quit the open owner app politely, then clean the one item of the prompt.
         case quitAndClean(Prompt)
         case openUpdate, rescan, stopClean, showLog, checkForUpdates, toggleUpdateCheck, toggleLogin, toggleTrashMode, quit
+        /// Set the limit of the low-disk alert in GB. nil turns it off.
+        case setLowDiskAlert(gb: Int?)
         case openKeepList, openRootsList, openHelp, reportProblem, showAbout
         /// Show one item in Finder. Nothing is deleted.
         case reveal(URL)
@@ -239,6 +241,10 @@ public struct MenuModel: Equatable, Sendable {
             Row(title: "Open at login", action: .toggleLogin, checked: input.loginEnabled),
             Row(title: MenuText.trashModeTitle, action: .toggleTrashMode, tooltip: MenuText.trashModeTooltip,
                 checked: input.deleteMode == .trash),
+            Row(title: LowDiskText.settingTitle, submenu: Submenu(rows:
+                ([nil] + LowDiskAlert.choices.map { Optional($0) }).map { gb in
+                    Row(title: LowDiskText.choiceTitle(gb), action: .setLowDiskAlert(gb: gb), checked: input.lowDiskAlertGB == gb)
+                }), tooltip: LowDiskText.settingTooltip),
             .separator,
             Row(title: "Open the keep list", action: .openKeepList),
             Row(title: "Open the project folders list", action: .openRootsList),
@@ -503,6 +509,8 @@ public struct MenuInput: Sendable {
     public var loginEnabled: Bool
     /// What a clean does with files: delete for good (the default) or move to the Trash.
     public var deleteMode: DeleteMode = .permanent
+    /// The limit of the low-disk alert in GB. nil: off.
+    public var lowDiskAlertGB: Int?
     /// The text of the first row during a clean. nil: "Cleaning…".
     public var cleaningTitle: String?
     /// True after the user chose to stop. The clean ends after the item that runs.
