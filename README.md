@@ -86,7 +86,7 @@ The menu shows the cost to get an item back. The cost is seconds, minutes, or a 
 
 ## Safety rules
 
-Trash Panda deletes files for good. They do not go to the Trash. These rules reduce the risk:
+By default, Trash Panda deletes files for good. They do not go to the Trash. You can change this with the `delete_mode` setting (see Settings). These rules reduce the risk:
 
 - Check for updates: once a day, and when you choose "Check for updates…", the app asks the GitHub releases of this project for the list of releases (`api.github.com`) and shows the menu line "Update available: <version>…" when a newer one exists. A beta sees newer betas and newer stable versions. A stable version sees stable versions only. The line opens the release page in your browser, and only a page on `github.com` in this repository is opened. **The app never downloads or installs an update.** The request has no body, no cookie, no id, no version, and a general name (`TrashPanda`) as user agent, and it uses a session that stores nothing, so GitHub sees an IP address and a request, as for any web page. The menu item "Check for updates every day" turns the automatic check off (it is on by default).
 - A list in a group menu that has more than 12 rows shows the first 12, and the rest open in a submenu ("N more…"), so that no row is hidden.
@@ -209,7 +209,7 @@ Settings are plain text files. Each file has one path on each line. A line that 
 - `~/.config/trashpanda/roots` lists more folders to search for projects.
 - `~/.config/trashpanda/settings` holds options as `name = value` lines.
 
-The `settings` file has one option now:
+The `settings` file has two options:
 
 ```
 # A project that changed within this many days is a review item.
@@ -219,6 +219,26 @@ stale_days = 30
 ```
 
 If the value is not valid, the app uses 30 and writes a warning to the log.
+
+```
+# What the app does with a file or a folder that it may remove.
+# permanent (the default): delete for good.
+# trash: move it to the Trash, so that you can put it back.
+delete_mode = permanent
+```
+
+You can also turn it on in the menu: **Settings**, then **Move files to the Trash**. The change is saved in the `settings` file.
+
+In `trash` mode:
+
+- Files and folders go to the Trash with the system call of macOS. The app never deletes them. If a move fails, the item is reported as failed and stays where it is. The app does not delete it for good instead.
+- **The space is not free until you empty the Trash.** The confirmation dialog, the message after a clean, and the menu bar text say "moved to the Trash", not "freed".
+- An item that a tool removes (Docker, Homebrew, the simulator, a package manager, Ollama, `hf`) is not a file delete. The tool still removes it for good, and the dialog says so. The Trash item is unchanged: it still asks Finder to empty the Trash.
+- A file that is already in the Trash is not moved again. An external disk that has no Trash gives an error for that item, and the item stays.
+- All safety checks run first, in the same order as in `permanent` mode.
+- Not checked on a real install: the move of real folders with `FileManager.trashItem`, and the error of a disk with no Trash. The tests use a fake Trash folder and never touch the real Trash.
+
+If the value is not `permanent` or `trash`, the app uses `permanent` and writes a warning to the log.
 
 The app searches these folders by default: `Developer`, `dev`, `Projects`, `Code`, `GitHub`, `Repos`, `Workspace`, `Development`, `src`, `work`, and `www`.
 
@@ -353,7 +373,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 - [ ] Homebrew cask and tap ([#31](https://github.com/chaitanya-ramji/trashpanda/issues/31))
 - [x] Check for updates ([#32](https://github.com/chaitanya-ramji/trashpanda/issues/32))
 - [ ] One-click updates (OTA) with Sparkle ([#121](https://github.com/chaitanya-ramji/trashpanda/issues/121))
-- [ ] Move to Trash delete mode ([#33](https://github.com/chaitanya-ramji/trashpanda/issues/33))
+- [x] Move to Trash delete mode ([#33](https://github.com/chaitanya-ramji/trashpanda/issues/33))
 - [ ] Low-disk alert ([#34](https://github.com/chaitanya-ramji/trashpanda/issues/34))
 - [ ] Scheduled clean (opt in) ([#35](https://github.com/chaitanya-ramji/trashpanda/issues/35))
 - [ ] Test on Intel Macs and older macOS versions ([#36](https://github.com/chaitanya-ramji/trashpanda/issues/36))

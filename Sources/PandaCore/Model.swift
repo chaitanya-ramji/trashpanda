@@ -414,7 +414,12 @@ public struct ScanResult: Sendable {
 }
 
 public struct CleanReport: Sendable {
+    /// Bytes that really left the disk: a delete for good, or a tool that removed them.
     public var freed: Int64 = 0
+    /// Bytes that moved to the Trash (trash mode). This space is not free until the Trash is emptied.
+    public var movedToTrash: Int64 = 0
+    /// The mode of this clean. It decides the words of the report.
+    public var deleteMode: DeleteMode = .permanent
     public var removed = 0
     public var skipped: [String] = []
     public var failed: [String] = []

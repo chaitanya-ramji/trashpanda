@@ -47,7 +47,7 @@ public struct MenuModel: Equatable, Sendable {
         case clean(Prompt)
         /// Ask, then quit the open owner app politely, then clean the one item of the prompt.
         case quitAndClean(Prompt)
-        case openUpdate, rescan, stopClean, showLog, checkForUpdates, toggleUpdateCheck, toggleLogin, quit
+        case openUpdate, rescan, stopClean, showLog, checkForUpdates, toggleUpdateCheck, toggleLogin, toggleTrashMode, quit
         case openKeepList, openRootsList, openHelp, reportProblem, showAbout
         /// Show one item in Finder. Nothing is deleted.
         case reveal(URL)
@@ -202,7 +202,8 @@ public struct MenuModel: Equatable, Sendable {
             if usableSafe.isEmpty && scanning {
                 rows.append(.note("Scanning…"))
             } else {
-                let main = MenuText.primary(safeCount: usableSafe.count, safeBytes: safeBytes, reviewBytes: header.totals.review)
+                let main = MenuText.primary(safeCount: usableSafe.count, safeBytes: safeBytes, reviewBytes: header.totals.review,
+                                            deleteMode: input.deleteMode)
                 if usableSafe.isEmpty {
                     rows.append(.note(main.title))
                 } else {
@@ -236,6 +237,8 @@ public struct MenuModel: Equatable, Sendable {
             Row(title: "Check for updates…", action: .checkForUpdates),
             Row(title: "Check for updates every day", action: .toggleUpdateCheck, checked: input.updateCheckEnabled),
             Row(title: "Open at login", action: .toggleLogin, checked: input.loginEnabled),
+            Row(title: MenuText.trashModeTitle, action: .toggleTrashMode, tooltip: MenuText.trashModeTooltip,
+                checked: input.deleteMode == .trash),
             .separator,
             Row(title: "Open the keep list", action: .openKeepList),
             Row(title: "Open the project folders list", action: .openRootsList),
@@ -305,7 +308,7 @@ public struct MenuModel: Equatable, Sendable {
         let safe = items.filter { $0.isActionable && $0.tier == .safe && input.blockers($0).isEmpty }
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
-            rows.append(Row(title: "Free up \(ByteText.string(total))…", action: .clean(Prompt(
+            rows.append(Row(title: DeleteModeText.bulkRow(ByteText.string(total), mode: input.deleteMode), action: .clean(Prompt(
                 findings: safe, title: "Free up \(ByteText.string(total)) of AI agents files?",
                 body: "Trash Panda will clear old build files and caches."))))
             rows.append(.separator)
@@ -330,7 +333,7 @@ public struct MenuModel: Equatable, Sendable {
 
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
-            rows.append(Row(title: "Free up \(ByteText.string(total))…", action: .clean(Prompt(
+            rows.append(Row(title: DeleteModeText.bulkRow(ByteText.string(total), mode: input.deleteMode), action: .clean(Prompt(
                 findings: safe, title: "Free up \(ByteText.string(total)) of \(ecosystem.name) files?",
                 body: "Trash Panda will clear old build files and caches."))))
         }
@@ -441,7 +444,7 @@ public struct MenuModel: Equatable, Sendable {
             row.action = .quitAndClean(Prompt(
                 findings: [f], title: c.title,
                 body: c.body + "\n\n\(names) is open. Trash Panda will ask it to quit first. If it asks to save your work, answer it.",
-                footer: c.footer, confirmTitle: "Quit \(names) and free \(ByteText.string(f.bytes))",
+                footer: c.footer, confirmTitle: DeleteModeText.quitAndClean(apps: names, bytes: f.bytes, finding: f, mode: input.deleteMode),
                 cancelIsDefault: true, cancelTitle: "Not now", revealURL: f.revealURL))
         }
         // The tooltip keeps the full name and the rebuild label, even when the row shows less.
@@ -498,6 +501,8 @@ public struct MenuInput: Sendable {
     public var updateVersion: String?
     public var updateCheckEnabled: Bool
     public var loginEnabled: Bool
+    /// What a clean does with files: delete for good (the default) or move to the Trash.
+    public var deleteMode: DeleteMode = .permanent
     /// The text of the first row during a clean. nil: "Cleaning…".
     public var cleaningTitle: String?
     /// True after the user chose to stop. The clean ends after the item that runs.

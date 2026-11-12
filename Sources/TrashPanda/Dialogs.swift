@@ -47,20 +47,21 @@ enum Dialogs {
 
     /// One short dialog. It says what happens and that it cannot be undone. Nothing more.
     /// `confirmed` is the button response that means "yes, delete". It is not always the first button.
-    static func makeAlert(for box: FindingBox) -> (alert: NSAlert, confirmed: NSApplication.ModalResponse) {
+    /// `mode` is the delete mode of the settings. The dialog names it, and in trash mode it says that the space is not free yet.
+    static func makeAlert(for box: FindingBox, mode: DeleteMode = .permanent, hfInstalled: Bool = true) -> (alert: NSAlert, confirmed: NSApplication.ModalResponse) {
         let total = box.findings.reduce(Int64(0)) { $0 + $1.bytes }
         let alert = NSAlert()
         // A dialog where Cancel is the default is for a delete that loses data. It gets the critical style.
         alert.alertStyle = box.cancelIsDefault ? .critical : .informational
-        alert.messageText = box.title
-        let footer = box.footer
-            ?? "Your code and settings are not touched. This can't be undone, but your tools will rebuild what they need."
-        alert.informativeText = box.body + "\n\n" + footer
+        alert.messageText = DeleteModeText.title(box.title, mode: mode, findings: box.findings, hfInstalled: hfInstalled)
+        let footer = DeleteModeText.footer(box.footer ?? Confirmation.defaultFooter, mode: mode, findings: box.findings, hfInstalled: hfInstalled)
+        let note = DeleteModeText.note(mode: mode, findings: box.findings, hfInstalled: hfInstalled)
+        alert.informativeText = box.body + "\n\n" + footer + (note.isEmpty ? "" : "\n\n" + note)
         if box.revealURL != nil {
             alert.showsSuppressionButton = true
             alert.suppressionButton?.title = alwaysKeepTitle
         }
-        let confirmTitle = box.confirmTitle ?? "Free up \(Format.bytes(total))"
+        let confirmTitle = box.confirmTitle ?? DeleteModeText.confirmTitle(mode: mode, bytes: total, findings: box.findings, hfInstalled: hfInstalled)
         if box.cancelIsDefault {
             // "Keep it" is first, so it is the default button. The Return key keeps the item.
             alert.addButton(withTitle: box.cancelTitle ?? "Keep it")
@@ -75,8 +76,8 @@ enum Dialogs {
     }
 
     /// Asks the user. Returns true when the user chose the button that means "yes, delete".
-    static func confirm(_ box: FindingBox) -> Bool {
-        let (alert, confirmed) = makeAlert(for: box)
+    static func confirm(_ box: FindingBox, mode: DeleteMode) -> Bool {
+        let (alert, confirmed) = makeAlert(for: box, mode: mode, hfInstalled: Shell.resolve("hf") != nil)
         NSApp.bringToFront()
         while true {
             let response = alert.runModal()

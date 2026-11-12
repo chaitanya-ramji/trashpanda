@@ -2,6 +2,11 @@ import Foundation
 
 /// Small texts of the menu and of the menu bar item, built here so that tests can check each case.
 public enum MenuText {
+    /// The Settings row for the delete mode. Checked means trash mode.
+    public static let trashModeTitle = "Move files to the Trash"
+    public static let trashModeTooltip =
+        "On: files go to the Trash, and the space is free when you empty the Trash. Off: files are deleted for good. Items that a tool removes (Docker, Homebrew) are always removed by the tool."
+
     // MARK: The menu bar item
 
     /// The button shows the panda and a short number such as "54 GB".
@@ -40,13 +45,13 @@ public enum MenuText {
     }
 
     /// `safeCount` and `safeBytes` are the items that "Free up" removes. `reviewBytes` is what stays for the user to review.
-    public static func primary(safeCount: Int, safeBytes: Int64, reviewBytes: Int64) -> Primary {
+    public static func primary(safeCount: Int, safeBytes: Int64, reviewBytes: Int64, deleteMode: DeleteMode = .permanent) -> Primary {
         guard safeCount > 0 else {
             let title = reviewBytes > 0 ? "Nothing to clean now · \(ByteText.string(reviewBytes)) to review" : "Nothing to clean now"
             return Primary(title: title, subtitle: nil, enabled: false)
         }
         let items = safeCount == 1 ? "1 safe item." : "\(safeCount) safe items."
-        return Primary(title: "Free up \(ByteText.string(safeBytes))…",
+        return Primary(title: DeleteModeText.bulkRow(ByteText.string(safeBytes), mode: deleteMode),
                        subtitle: reviewBytes > 0 ? items + " Review items stay." : items, enabled: true)
     }
 

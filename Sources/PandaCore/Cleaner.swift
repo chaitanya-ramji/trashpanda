@@ -1,8 +1,10 @@
 import Foundation
 
-/// Deletes items permanently. Every path passes the guard first.
+/// Deletes items. Every path passes the guard first. By default a delete is for good. In trash mode (`DeleteMode`),
+/// a file or a folder moves to the Trash instead, and a tool item (Docker, Homebrew, and so on) still runs its tool.
 /// The app shows a preview before it calls this.
 /// The report counts the space that really left the disk. It does not repeat the scan estimate.
+/// Bytes that moved to the Trash are counted apart (`movedToTrash`), because that space is not free yet.
 public final class Cleaner {
     public let guardian: PathGuard
     /// Measures what is left of an item after the clean. Without it, owner commands report the estimate.
@@ -38,6 +40,10 @@ public final class Cleaner {
     var sizeOf: (URL) -> Int64 = { Sizer.size(of: $0) }
     /// The one call that removes a folder or a file. A test can replace it.
     var deleteItem: (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }
+    /// What happens to a file or folder that passed every check. The default is to delete it for good.
+    public let deleteMode: DeleteMode
+    /// The one call that moves an item to the Trash (trash mode). A test replaces it, so that no test touches the real Trash.
+    var trashItem: (URL) throws -> Void = TrashMover.move
     /// Asked once before each item, never during one. When it says true, the clean ends and the items that are left
     /// are reported as skipped with the reason `stoppedReason`. The item that runs always finishes.
     public var shouldStop: @Sendable () -> Bool = { false }
@@ -60,7 +66,9 @@ public final class Cleaner {
                 ollama: (() -> Ollama?)? = nil, hfTool: (() -> String?)? = nil,
                 packageTool: ((PackageManager) -> String?)? = nil,
                 runtimeRequests: (() -> [RuntimeVersions.Request])? = nil,
-                freeSpace: @escaping (URL) -> Int64 = DiskUsage.rawFree(at:)) {
+                freeSpace: @escaping (URL) -> Int64 = DiskUsage.rawFree(at:),
+                deleteMode: DeleteMode = .permanent) {
+        self.deleteMode = deleteMode
         self.runtimeRequests = runtimeRequests
         self.freeSpace = freeSpace
         self.packageTool = packageTool ?? { Shell.resolve($0.tool) }
@@ -82,6 +90,7 @@ public final class Cleaner {
 
     public func clean(_ findings: [Finding], progress: ((String) -> Void)? = nil) -> CleanReport {
         var report = CleanReport()
+        report.deleteMode = deleteMode
         inventoryLoaded = false
         inventory = nil
         let started = Date()
@@ -420,13 +429,13 @@ public final class Cleaner {
                 report.skipped.append("\(url.path): not a plain path inside the folder"); continue
             }
             if let reason = guardian.check(url, allowingSystemCache: system) { report.skipped.append("\(url.path): \(reason)"); continue }
-            do { try FileManager.default.removeItem(at: url) } catch {
+            do { try dispose(url) } catch {
                 failures += 1
                 Log.error("remove failed \(url.path): \(error.localizedDescription)")
             }
         }
         let left = Sizer.size(of: folder)
-        report.freed += max(0, before - left)
+        count(max(0, before - left), &report)
         report.removed += 1
         Log.info("clean \(finding.id): emptied \(name), freed \(max(0, before - left)) bytes, failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.location): \(failures) items stayed") }
@@ -452,8 +461,8 @@ public final class Cleaner {
         }
         if let reason = guardian.check(version.url) { skip(finding, "\(reason)", &report); return }
         do {
-            try FileManager.default.removeItem(at: version.url)
-            report.freed += size
+            try dispose(version.url)
+            count(size, &report)
             report.removed += 1
             Log.info("clean \(finding.id): removed \(size) bytes — \(version.url.path)")
         } catch {
@@ -508,6 +517,23 @@ public final class Cleaner {
         }
     }
 
+    /// The last step of every file delete. In permanent mode it deletes for good. In trash mode it moves the item to the Trash.
+    /// It never falls back to a delete for good: when the move fails, the error goes to the report and the item stays.
+    private func dispose(_ url: URL) throws {
+        switch deleteMode {
+        case .permanent:
+            try deleteItem(url)
+        case .trash:
+            if DeleteMode.isInTrash(url, home: guardian.home) { throw TrashProblem.alreadyInTrash }
+            do { try trashItem(url) } catch { throw TrashMover.classify(error) }
+        }
+    }
+
+    /// Counts bytes of a file delete after it worked: freed in permanent mode, moved to the Trash in trash mode.
+    private func count(_ bytes: Int64, _ report: inout CleanReport) {
+        if deleteMode == .trash { report.movedToTrash += bytes } else { report.freed += bytes }
+    }
+
     /// What `removeEach` did, so that the caller can write its log line and count the item.
     struct Removal: Equatable {
         var removed = 0
@@ -553,8 +579,8 @@ public final class Cleaner {
             if let reason = keepReason?(url, measureStart) { refuse(url, reason); continue }
             if let reason = guardian.check(url, allowingSystemCache: allowingSystemCache) { refuse(url, "\(reason)"); continue }
             do {
-                try deleteItem(url)
-                report.freed += bytes
+                try dispose(url)
+                count(bytes, &report)
                 result.removed += 1
             } catch {
                 result.failures += 1
@@ -619,8 +645,8 @@ public final class Cleaner {
               LocalModels.isModelName(name, in: model.store) else { skip(finding, "not a model of the store", &report); return }
         if let reason = guardian.check(model.url) { skip(finding, "\(reason)", &report); return }
         do {
-            try FileManager.default.removeItem(at: model.url)
-            report.freed += size
+            try dispose(model.url)
+            count(size, &report)
             report.removed += 1
             Log.info("clean \(finding.id): removed \(size) bytes — \(model.url.path)")
         } catch {
@@ -642,7 +668,9 @@ public final class Cleaner {
             skip(finding, "not a repository folder of the cache", &report); return
         }
         if let reason = guardian.check(repo.folder) { skip(finding, "\(reason)", &report); return }
+        var usedTool = false
         if let tool = hfTool(), let args = HuggingFace.removeArguments(id) {
+            usedTool = true
             // The tool picks its cache from these variables. We checked the default folder, so the tool must use that one.
             let result = Shell.run(tool, args, timeout: 300, unsetEnv: ["HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "XDG_CACHE_HOME"])
             guard result.status == 0, !result.timedOut else { report.failed.append("\(finding.title): " + (result.refused ? "The tool is not safe to run" : "hf cache rm failed")); return }
@@ -652,13 +680,14 @@ public final class Cleaner {
                 report.failed.append("\(finding.title): hf did not remove the folder that was checked"); return
             }
         } else {
-            do { try FileManager.default.removeItem(at: repo.folder) } catch {
+            do { try dispose(repo.folder) } catch {
                 Log.error("remove failed \(repo.folder.path): \(error.localizedDescription)")
                 report.failed.append("\(repo.folder.path): \(error.localizedDescription)"); return
             }
         }
         let left = FileManager.default.fileExists(atPath: repo.folder.path) ? Sizer.size(of: repo.folder) : 0
-        report.freed += max(0, size - left)
+        // The `hf` tool removes for good, also in trash mode (it is a tool, not a file delete). Only our own folder delete goes to the Trash.
+        if usedTool { report.freed += max(0, size - left) } else { count(max(0, size - left), &report) }
         report.removed += 1
         Log.info("clean \(finding.id): removed \(id), freed \(max(0, size - left))")
     }
@@ -758,8 +787,8 @@ public final class Cleaner {
             report.skipped.append("\(finding.location): a program runs from it. Quit Codex and try again."); return
         }
         do {
-            try FileManager.default.removeItem(at: url)
-            report.freed += before
+            try dispose(url)
+            count(before, &report)
             report.removed += 1
             Log.info("clean \(finding.id): removed \(kind) \(before) bytes — \(url.path)")
         } catch {
@@ -823,8 +852,8 @@ public final class Cleaner {
             report.skipped.append("\(url.path): the disk image is open. Eject it and try again."); return
         }
         do {
-            try FileManager.default.removeItem(at: url)
-            report.freed += installer.bytes
+            try dispose(url)
+            count(installer.bytes, &report)
             report.removed += 1
             Log.info("clean \(finding.id): removed installer \(installer.bytes) bytes — \(url.path)")
         } catch {
@@ -896,8 +925,8 @@ public final class Cleaner {
               UpdateDownloads.isPlainPath(site.url) else { skip(finding, "not a website folder of the browser", &report); return }
         if let reason = guardian.check(site.url) { skip(finding, "\(reason)", &report); return }
         do {
-            try FileManager.default.removeItem(at: site.url)
-            report.freed += size
+            try dispose(site.url)
+            count(size, &report)
             report.removed += 1
             Log.info("clean \(finding.id): removed \(size) bytes — \(site.url.path)")
         } catch {
@@ -969,7 +998,7 @@ public final class Cleaner {
                 Log.warn("skip child \(child.path): \(reason)")
                 report.skipped.append("\(child.path): \(reason)"); continue
             }
-            do { try FileManager.default.removeItem(at: child) } catch {
+            do { try dispose(child) } catch {
                 failures += 1
                 Log.error("remove failed \(child.path): \(error.localizedDescription)")
             }
@@ -977,7 +1006,7 @@ public final class Cleaner {
         report.removed += 1
         let left = Sizer.size(of: dir)
         let freed = max(0, finding.bytes - left)
-        report.freed += freed
+        count(freed, &report)
         Log.info("clean \(finding.id): estimate \(finding.bytes), left \(left), freed \(freed), failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.location): \(failures) items stayed") }
     }

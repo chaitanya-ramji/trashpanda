@@ -25,7 +25,7 @@ final class MenuBuilderTests: XCTestCase {
         ])
         XCTAssertEqual(menu.items[4].submenu?.items.map(text), ["Free up 1.3 GB…", "---", "Safe to clean", "node_modules · app-a\t1.3 GB", "Show in Finder"])
         XCTAssertEqual(menu.items[7].submenu?.items.map(text), [
-            "Check for updates…", "Check for updates every day", "Open at login", "---", "Open the keep list",
+            "Check for updates…", "Check for updates every day", "Open at login", "Move files to the Trash", "---", "Open the keep list",
             "Open the project folders list", "---", "Show log in Finder", "Help", "Report a problem", "About Trash Panda",
         ])
         XCTAssertTrue(menu.items[4].submenu?.items.last?.isAlternate ?? false)

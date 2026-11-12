@@ -9,6 +9,8 @@ public struct Config: Sendable {
     public var roots: [String]
     /// A project that someone changed within this many days is a review item.
     public var staleDays: Int
+    /// What happens to a file that the cleaner may remove. The default is to delete it for good.
+    public var deleteMode: DeleteMode
 
     public static let defaultStaleDays = 30
     public static let staleDaysRange = 1...3650
@@ -28,7 +30,43 @@ public struct Config: Sendable {
         let parsed = parseSettings(read("settings") ?? "")
         for warning in parsed.warnings { Log.warn("settings: \(warning)") }
         Log.info("stale limit: \(parsed.staleDays) days\(parsed.fromFile ? " (from settings file)" : " (default)")")
-        return Config(keep: lines("keep"), roots: lines("roots"), staleDays: parsed.staleDays)
+        Log.info("delete mode: \(parsed.deleteMode.rawValue)")
+        return Config(keep: lines("keep"), roots: lines("roots"), staleDays: parsed.staleDays, deleteMode: parsed.deleteMode)
+    }
+
+    /// The delete mode in the settings file, read now. A clean and its dialog use this, so a change takes effect at once.
+    public static func readDeleteMode(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> DeleteMode {
+        let text = (try? String(contentsOf: home.appendingPathComponent(".config/trashpanda/settings"), encoding: .utf8)) ?? ""
+        return parseSettings(text).deleteMode
+    }
+
+    /// Writes `delete_mode = <mode>` to the settings file. The other lines stay. A line for this setting is replaced, or one is added.
+    @discardableResult
+    public static func setDeleteMode(_ mode: DeleteMode, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
+        let folder = home.appendingPathComponent(".config/trashpanda")
+        let file = folder.appendingPathComponent("settings")
+        let old = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        var lines = old.components(separatedBy: "\n")
+        if lines.last == "" { lines.removeLast() }
+        let newLine = "\(DeleteMode.settingName) = \(mode.rawValue)"
+        var replaced = false
+        lines = lines.compactMap { raw in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            let key = line.split(separator: "=", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) }
+            guard !line.hasPrefix("#"), key == DeleteMode.settingName else { return raw }
+            if replaced { return nil }          // one line only
+            replaced = true
+            return newLine
+        }
+        if !replaced { lines.append(newLine) }
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            Log.error("settings: could not write the delete mode: \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// The settings file `name` ("keep" or "roots"). When it is absent, this makes it with two comment lines that tell the format.
@@ -81,8 +119,9 @@ public struct Config: Sendable {
     }
 
     /// Reads `key = value` lines. A bad value gives a warning and the default.
-    static func parseSettings(_ text: String) -> (staleDays: Int, fromFile: Bool, warnings: [String]) {
+    static func parseSettings(_ text: String) -> (staleDays: Int, fromFile: Bool, warnings: [String], deleteMode: DeleteMode) {
         var staleDays = defaultStaleDays
+        var deleteMode = DeleteMode.permanent
         var fromFile = false
         var warnings: [String] = []
         for raw in text.split(separator: "\n") {
@@ -98,14 +137,22 @@ public struct Config: Sendable {
                 } else {
                     warnings.append("stale_days \"\(parts[1])\" is not a whole number from \(staleDaysRange.lowerBound) to \(staleDaysRange.upperBound). Using \(defaultStaleDays).")
                 }
+            case DeleteMode.settingName:
+                if let mode = DeleteMode(rawValue: parts[1].lowercased()) {
+                    deleteMode = mode
+                } else {
+                    warnings.append("delete_mode \"\(parts[1])\" is not \"permanent\" or \"trash\". Using permanent.")
+                }
             default:
                 warnings.append("unknown setting \"\(parts[0])\"")
             }
         }
-        return (staleDays, fromFile, warnings)
+        return (staleDays, fromFile, warnings, deleteMode)
     }
 
-    public init(keep: [String] = [], roots: [String] = [], staleDays: Int = Config.defaultStaleDays) {
+    public init(keep: [String] = [], roots: [String] = [], staleDays: Int = Config.defaultStaleDays,
+                deleteMode: DeleteMode = .permanent) {
+        self.deleteMode = deleteMode
         self.keep = keep
         self.roots = roots
         self.staleDays = staleDays

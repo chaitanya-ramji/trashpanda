@@ -25,13 +25,30 @@ public enum CleanSummary {
     /// True when the user must see a dialog. When nothing was left alone and nothing failed, the text in the menu bar is enough.
     /// The Docker note is also a reason, because it explains why the free space of the Mac may not grow.
     public static func needsDialog(_ report: CleanReport, dockerDiskNote: Bool) -> Bool {
-        !report.skipped.isEmpty || !report.failed.isEmpty || dockerDiskNote
+        // In trash mode the user must always read that the space is not free yet.
+        !report.skipped.isEmpty || !report.failed.isEmpty || dockerDiskNote || (report.deleteMode == .trash && report.movedToTrash > 0)
     }
 
     public static func make(_ report: CleanReport, dockerDiskNote: Bool) -> (title: String, lines: [String], buttons: [Button]) {
-        let title = report.freed > 0 ? "Freed \(ByteText.string(report.freed))" : "Nothing freed"
+        let trash = report.deleteMode == .trash
+        let title: String
+        if trash {
+            // Never "Freed" for bytes that are in the Trash.
+            if report.movedToTrash > 0 { title = "Moved \(ByteText.string(report.movedToTrash)) to the Trash" }
+            else { title = report.freed > 0 ? "Freed \(ByteText.string(report.freed))" : "Nothing moved" }
+        } else {
+            title = report.freed > 0 ? "Freed \(ByteText.string(report.freed))" : "Nothing freed"
+        }
         var lines: [String] = []
-        lines.append(report.removed == 1 ? "1 item removed." : "\(report.removed) items removed.")
+        if trash {
+            lines.append(report.removed == 1 ? "1 item done." : "\(report.removed) items done.")
+            if report.movedToTrash > 0 { lines.append(DeleteModeText.notFreeYet) }
+            if report.freed > 0 {
+                lines.append("\(ByteText.string(report.freed)) was removed for good by a tool. A tool item does not go to the Trash.")
+            }
+        } else {
+            lines.append(report.removed == 1 ? "1 item removed." : "\(report.removed) items removed.")
+        }
         // Items that the user stopped have their own line, so that the reason cannot fall off the list.
         let stopped = report.skipped.filter { reason(of: $0) == Cleaner.stoppedReason }
         let alone = report.skipped.filter { reason(of: $0) != Cleaner.stoppedReason }
@@ -46,7 +63,8 @@ public enum CleanSummary {
             let n = report.failed.count
             lines.append("\(n) \(n == 1 ? "item" : "items") failed: \(reasons(report.failed)).")
         }
-        lines.append(spaceLine(report.volumeChange))
+        // In trash mode the free space of the Mac does not grow from moved files, so this line is only for what a tool freed.
+        if !trash || report.freed > 0 { lines.append(spaceLine(report.volumeChange)) }
 
         var buttons: [Button] = [.ok]
         if !report.failed.isEmpty { buttons.append(.showLog) }
