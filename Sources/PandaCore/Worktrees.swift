@@ -24,8 +24,9 @@ public struct Git: Sendable {
 
     /// The system git, or nil when it is not installed.
     /// Without the developer tools, `/usr/bin/git` is a stub that opens an "install developer tools" prompt. We start it only when
-    /// `xcode-select -p` succeeds and prints a folder that exists. Tests replace the probe.
-    nonisolated(unsafe) static var developerToolsProbe: () -> Bool = {
+    /// `xcode-select -p` succeeds and prints a folder that exists. The probe is a parameter of `find`, so a test gives its own one
+    /// and no global state is shared. A caller that needs git many times calls `find` once and keeps the result (one scan, one clean).
+    public static let defaultDeveloperToolsProbe: @Sendable () -> Bool = {
         let r = Shell.run("/usr/bin/xcode-select", ["-p"], timeout: 10, quiet: true)
         let folder = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return r.status == 0 && !folder.isEmpty && FileManager.default.fileExists(atPath: folder)
@@ -36,9 +37,9 @@ public struct Git: Sendable {
         func first() -> Bool { lock.lock(); defer { lock.unlock() }; let was = done; done = true; return !was }
     }
 
-    public static func find() -> Git? {
+    public static func find(probe: () -> Bool = Git.defaultDeveloperToolsProbe) -> Git? {
         guard FileManager.default.isExecutableFile(atPath: systemPath) else { return nil }
-        guard developerToolsProbe() else {
+        guard probe() else {
             if logOnce.first() { Log.info("git worktrees skipped: the developer tools are not installed") }
             return nil
         }
@@ -89,6 +90,8 @@ public struct WorktreeCheck: Equatable, Sendable {
     public var mergedInto: [String] = []
     public var onRemote = false
     public var uniqueCommits: Int?
+    /// Commits in the log of the HEAD of this worktree that no branch, remote branch, or tag holds. Removing the worktree drops that log.
+    public var headLogOnlyCommits: Int?
 
     public var isRemovable: Bool { reasons.isEmpty }
 }
@@ -270,6 +273,8 @@ public enum Worktrees {
             result.reasons.append("Git could not tell if its commits exist elsewhere")
         }
 
+        if result.uniqueCommits == 0 { checkHeadLog(path: path, repo: repo, branch: entry.branch, git: git, into: &result) }
+
         let refs = git.run(["for-each-ref", "--contains", sha, "--format=%(refname)", "refs/heads", "refs/remotes"], in: repo)
         for line in refs.stdout.split(separator: "\n").map(String.init) {
             if line.hasPrefix("refs/remotes/") { result.onRemote = true }
@@ -280,6 +285,36 @@ public enum Worktrees {
         return result
     }
 
+    /// A commit that was made on a detached HEAD and then left behind is in no branch. It lives only in the log of the HEAD of this worktree
+    /// (`git log -g`), and removing the worktree drops that log. So every commit of that log must be held by a branch, a remote branch, or a tag.
+    /// We read the log in the worktree, and count the commits in the repository. The own branch is excluded, like for the HEAD commit.
+    /// This runs only when the HEAD commit itself is held elsewhere (if not, the reason is already there).
+    static func checkHeadLog(path: URL, repo: URL, branch: String?, git: Git, into result: inout WorktreeCheck) {
+        let log = git.run(["log", "-g", "--format=%H", "HEAD"], in: path, timeout: 120)
+        guard log.status == 0, !log.timedOut else {
+            result.reasons.append("Git could not read the log of its HEAD"); return
+        }
+        var seen = Set<String>()
+        let ids = log.stdout.split(separator: "\n").map(String.init).filter { isCommitID($0) && seen.insert($0).inserted }
+        var lost = 0
+        // A few ids for each command, so that the command line stays short.
+        for start in stride(from: 0, to: ids.count, by: 200) {
+            var rev = ["rev-list", "--count"] + ids[start..<min(start + 200, ids.count)] + ["--not"]
+            if let branch { rev.append("--exclude=\(branch)") }
+            rev += ["--branches", "--remotes", "--tags"]
+            let count = git.run(rev, in: repo)
+            guard count.status == 0, !count.timedOut, let n = Int(count.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                result.reasons.append("Git could not tell if the commits in its HEAD log exist elsewhere"); return
+            }
+            lost += n
+        }
+        result.headLogOnlyCommits = lost
+        if lost > 0 {
+            result.reasons.append(lost == 1 ? "Its HEAD log has 1 commit that exists nowhere else (made on a detached HEAD). Removing the worktree drops it"
+                                  : "Its HEAD log has \(lost) commits that exist nowhere else (made on a detached HEAD). Removing the worktree drops them")
+        }
+    }
+
     static let inProgressMarkers = ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"]
 
     /// True when the `status --ignored -z` output has an ignored entry that is not a plain build or dependency folder of the catalog.
@@ -287,6 +322,8 @@ public enum Worktrees {
     /// An ignored folder is allowed only when a catalog rule matches it WITH its marker file next to it (`node_modules` next to
     /// `package.json`). A loose name (`build`, `dist`, `.cache`) is not enough. Inside an allowed folder, one level is read for
     /// names that look like secrets or data (`.env*`, `*.sqlite`, `*.db`, `*.pem`, `*.key`), and they block too.
+    /// Deeper levels are not read, on purpose (#239): a dependency folder can hold 100,000 files, and its packages often ship
+    /// `.env.example` or `.pem` test files, so a deep scan is slow and blocks for no good reason. These folders are built again from the lock file.
     static func ignoredFilesOutsideCatalog(_ output: String, root: URL) -> Bool {
         let fm = FileManager.default
         for field in output.components(separatedBy: "\0") where field.hasPrefix("!! ") {
