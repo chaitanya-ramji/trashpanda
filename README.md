@@ -224,7 +224,7 @@ stale_days = 30
 
 If the value is not valid, the app uses 30 and writes a warning to the log.
 
-At the first start, the app writes `first_start_note = shown` to this file. That line means the first-start note was shown. Remove the line if you want to see the note again.
+At the first start, the app writes `first_start_note = shown` to this file. That line means the first-start note was shown. It is the only line that the app writes to this file by itself. Remove the line if you want to see the note again.
 
 ```
 # What the app does with a file or a folder that it may remove.
