@@ -77,6 +77,9 @@ public struct Confirmation: Equatable, Sendable {
         return false
     }
 
+    /// The default button of an ordinary dialog: a review item is kept when the user presses Return.
+    public static func defaultKeeps(tier: Tier) -> Bool { tier == .review }
+
     public static func forOne(_ f: Finding, staleDays: Int, now: Date = Date()) -> Confirmation {
         let detail = "\(f.title)\n\(f.location)"
         switch kind(of: f) {
@@ -196,6 +199,8 @@ public struct Confirmation: Equatable, Sendable {
                 footer: "Xcode copies them from the device again the next time you connect it. This can't be undone.",
                 confirmTitle: "Remove files", cancelIsDefault: false)
         case .ordinary:
+            // A review item is one that the user must choose, so Return must keep it. Only a safe item may delete on Return.
+            let keeps = defaultKeeps(tier: f.tier)
             var text = "\(f.title)\n\(f.rebuild.label)."
             if case .removeArtifact = f.action, f.tier == .review, let d = f.lastActivity {
                 let days = max(0, Int(now.timeIntervalSince(d) / 86_400))
@@ -205,10 +210,10 @@ public struct Confirmation: Equatable, Sendable {
                 // The tool decides what it removes. Say so, and show the size as the estimate that it is.
                 if let note = f.note { text += " \(note)" }
                 return Confirmation(title: "Clean up, \(f.sizeText)?", body: text, footer: nil,
-                                    confirmTitle: "Clean up", cancelIsDefault: false)
+                                    confirmTitle: "Clean up", cancelIsDefault: keeps)
             }
             return Confirmation(title: "Free up \(ByteText.string(f.bytes))?", body: text, footer: nil,
-                                confirmTitle: nil, cancelIsDefault: false)
+                                confirmTitle: nil, cancelIsDefault: keeps)
         }
     }
 }
