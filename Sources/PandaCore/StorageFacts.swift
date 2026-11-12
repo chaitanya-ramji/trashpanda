@@ -47,7 +47,19 @@ public enum StorageFacts {
                 tooltip: ["Cannot be cleaned here.", f.note].compactMap { $0 }.joined(separator: " "))
     }
 
-    /// The rows for a scan, at most `maxRows`. The order is fixed: Docker, snapshots, space that macOS frees.
+    /// "2 git worktrees stay". Only when no worktree can be removed: then the group has no row, and this tells the user that they exist.
+    /// Each reason is on the worktree item itself (see `trashpanda --scan`).
+    public static func worktrees(_ findings: [Finding]) -> InfoRow? {
+        let all = findings.filter { $0.ecosystem == .worktrees && $0.bytes > 0 }
+        let blocked = all.filter { $0.blockedReason != nil }
+        guard !blocked.isEmpty, blocked.count == all.count else { return nil }
+        let size = ByteText.string(blocked.reduce(Int64(0)) { $0 + $1.bytes })
+        return InfoRow(title: "\(blocked.count) git \(blocked.count == 1 ? "worktree stays" : "worktrees stay"): \(size)",
+                       detail: "Changes, new commits, a lock, or a running program",
+                       tooltip: "Cannot be cleaned here. Trash Panda removes a worktree only when git can do it without force: no changes that are not committed, no commit that exists nowhere else, no lock, and no program that runs in it.")
+    }
+
+    /// The rows for a scan, at most `maxRows`. The order is fixed: Docker, snapshots, worktrees, space that macOS frees.
     /// Only one Docker row is ever shown. One scan reads one engine (the active one), and if a list has two disk
     /// findings anyway, the first one wins.
     public static func rows(from findings: [Finding], disk: DiskUsage = DiskUsage(total: 0, free: 0)) -> [InfoRow] {
@@ -57,6 +69,7 @@ public enum StorageFacts {
             rows.append(row)
         }
         if let f = findings.first(where: { $0.id == "snapshots.local" && !$0.isActionable }) { rows.append(snapshots(f)) }
+        if let row = worktrees(findings) { rows.append(row) }
         if let row = purgeable(disk.purgeable) { rows.append(row) }
         return Array(rows.prefix(maxRows))
     }

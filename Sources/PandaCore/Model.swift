@@ -33,7 +33,7 @@ public enum Rebuild: Sendable {
 
 /// Language or tool group. Phase 1 groups ship now. Phase 2 groups are planned.
 public enum Ecosystem: String, CaseIterable, Sendable {
-    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash, installers, logs, scala, haskell, r, julia, nim, ocaml, crystal, clojure, perl, lua, aiAgents, runtimes, snapshots, cacheExplorer
+    case swift, javascript, python, jvm, dotnet, cpp, go, rust, php, ruby, dart, elixir, zig, homebrew, docker, apps, browsers, trash, installers, logs, scala, haskell, r, julia, nim, ocaml, crystal, clojure, perl, lua, aiAgents, runtimes, snapshots, cacheExplorer, worktrees
 
     /// A short name for places with little room, such as the legend of the bar.
     public var shortName: String {
@@ -62,6 +62,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .runtimes: return "Runtimes"
         case .snapshots: return "Snapshots"
         case .cacheExplorer: return "Caches"
+        case .worktrees: return "Worktrees"
         case .lua: return "Lua"
         case .perl: return "Perl"
         case .clojure: return "Clojure"
@@ -101,6 +102,7 @@ public enum Ecosystem: String, CaseIterable, Sendable {
         case .runtimes: return "Old language runtimes"
         case .snapshots: return "Time Machine local snapshots"
         case .cacheExplorer: return "Largest caches"
+        case .worktrees: return "Git worktrees"
         case .lua: return "Lua"
         case .perl: return "Perl"
         case .clojure: return "Clojure"
@@ -251,6 +253,8 @@ public enum SimulatorAction: Sendable, Equatable {
 }
 
 public enum Action: Sendable {
+    /// One worktree of a repository, or the stale records of a repository. The tool removes it (a fixed command, never forced). The cleaner checks it again first.
+    case worktree(WorktreeAction)
     /// The contents of one folder in `~/Library/Caches`, by its name. The cleaner checks the name, the labels, and the app again. The folder stays.
     case removeCacheFolderContents(name: String)
     /// One version of a language runtime that a version manager installed. The cleaner decides again whether it may go.
@@ -316,9 +320,12 @@ public struct Finding: Identifiable, Sendable {
     public let sizeIsUpperLimit: Bool
     /// For an information line about a disk file: the bytes of data inside the file. nil for any other item.
     public let insideBytes: Int64?
+    /// Why the item is shown but cannot be removed (a worktree with changes, for example). nil for an item that can be removed.
+    /// The cleaner does not read this text. It checks the real state again.
+    public let blockedReason: String?
 
-    /// The bytes that a total adds up. An upper limit is not counted, so no byte is counted two times.
-    public var countedBytes: Int64 { sizeIsUpperLimit ? 0 : bytes }
+    /// The bytes that a total adds up. An upper limit is not counted, so no byte is counted two times. An item that cannot be removed frees nothing.
+    public var countedBytes: Int64 { sizeIsUpperLimit || blockedReason != nil ? 0 : bytes }
 
     /// The size as the menu shows it. An upper limit starts with "up to".
     public var sizeText: String { sizeIsUpperLimit ? "up to \(ByteText.string(bytes))" : ByteText.string(bytes) }
@@ -339,6 +346,10 @@ public struct Finding: Identifiable, Sendable {
         case .removeCacheFolderContents(let name):
             guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0") else { return nil }
             return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Caches/\(name)", isDirectory: true)
+        case .worktree(.remove(_, let path)):
+            return path
+        case .worktree(.prune):
+            return nil
         case .removeRuntime, .globalPackage, .agent, .brew, .removeOldLogs, .emptyTrash, .simulator, .removeOldTestBrowsers,
              .removeServiceWorkerSite, .removeServiceWorkerStorage, .removeBrowserCaches, .inform, .docker, .owner:
             return nil
@@ -347,7 +358,8 @@ public struct Finding: Identifiable, Sendable {
 
     public init(id: String, ecosystem: Ecosystem, title: String, location: String, bytes: Int64,
                 tier: Tier, rebuild: Rebuild, action: Action, lastActivity: Date? = nil,
-                note: String? = nil, helpURL: URL? = nil, owner: AppOwner? = nil, sizeIsUpperLimit: Bool = false, insideBytes: Int64? = nil) {
+                note: String? = nil, helpURL: URL? = nil, owner: AppOwner? = nil, sizeIsUpperLimit: Bool = false, insideBytes: Int64? = nil, blockedReason: String? = nil) {
+        self.blockedReason = blockedReason
         self.insideBytes = insideBytes
         self.sizeIsUpperLimit = sizeIsUpperLimit
         self.note = note

@@ -363,6 +363,15 @@ public struct MenuModel: Equatable, Sendable {
                 rows += listRows(system, input, groupBytes: groupBytes, labels: system.map { _ in nil },
                                  header: "Apple caches · empty with care", widths: &widths)
             }
+        } else if ecosystem == .worktrees, review.contains(where: { $0.blockedReason != nil }) {
+            // A worktree that cannot be removed is shown, with the reason, in its own section. It has no action.
+            let removable = review.filter { $0.blockedReason == nil }
+            let blocked = review.filter { $0.blockedReason != nil }
+            if !removable.isEmpty { section(removable, "Review first", safeAll.isEmpty) }
+            if !safeAll.isEmpty || !removable.isEmpty { rows.append(.separator) }
+            rows.append(.section("Stays · cannot be removed here"))
+            rows += listRows(blocked, input, groupBytes: groupBytes, labels: blocked.map { _ in nil },
+                             header: "Stays · cannot be removed here", widths: &widths)
         } else if ecosystem == .docker, case let images = review.filter({ $0.id.hasPrefix("docker.image:") }),
                   !images.isEmpty, images.allSatisfy({ $0.rebuild == .download }) {
             // Images come back by download, so they have their own section. The other items keep their own labels.
@@ -438,6 +447,13 @@ public struct MenuModel: Equatable, Sendable {
         }
         var row = Row(kind: .columns, title: title, size: f.sizeText, subtitle: subtitle,
                       icon: .item(owner: f.owner, agentTitle: f.ecosystem == .aiAgents ? f.title : nil))
+        if let why = f.blockedReason {
+            // Shown, but it cannot be chosen: the row has no action. The reason is the second line and the tooltip.
+            row.enabled = false
+            row.subtitle = why
+            row.tooltip = (title == f.title ? "" : "\(f.title)\n") + "\(place)\n\(why)\nTrash Panda does not remove it."
+            return row
+        }
         let open = input.blockers(f)
         let c = Confirmation.forOne(f, staleDays: input.staleDays, now: input.now)
         if open.isEmpty {
