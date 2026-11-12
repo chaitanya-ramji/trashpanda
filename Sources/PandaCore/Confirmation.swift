@@ -38,10 +38,14 @@ public struct Confirmation: Equatable, Sendable {
         case cacheFolder
         case containerWithVolumes
         case runningContainer
+        case worktree
+        case worktreeRecords
     }
 
     public static func kind(of f: Finding) -> Kind {
         switch f.action {
+        case .worktree(.remove): return .worktree
+        case .worktree(.prune): return .worktreeRecords
         case .docker(.removeContainer): return .container
         case .docker(.removeVolume): return .volume
         case .docker(.removeStoppedContainerWithVolumes): return .containerWithVolumes
@@ -76,6 +80,16 @@ public struct Confirmation: Equatable, Sendable {
     public static func forOne(_ f: Finding, staleDays: Int, now: Date = Date()) -> Confirmation {
         let detail = "\(f.title)\n\(f.location)"
         switch kind(of: f) {
+        case .worktree:
+            return Confirmation(
+                title: "Remove this git worktree?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))\n\(f.note ?? "")",
+                footer: "Git removes the folder of this worktree with git worktree remove. It never forces the removal, so git refuses when the worktree has changes or a lock. Files that git ignores are deleted too. The branch stays. The main checkout and your other worktrees are not touched. Trash Panda reads the state again just before it removes the folder, but a tool such as Claude Code or Codex can still want this folder. This can't be undone. You can make a new worktree from the branch.",
+                confirmTitle: "Remove worktree", cancelIsDefault: true)
+        case .worktreeRecords:
+            return Confirmation(
+                title: "Delete the records of missing worktrees?", body: "\(f.title)\n\(f.location)",
+                footer: "The folders of these worktrees are gone. Git deletes only its own records of them, with git worktree prune. No file of a project is touched, and no branch is deleted. This can't be undone.",
+                confirmTitle: "Delete records", cancelIsDefault: true)
         case .volume:
             return Confirmation(
                 title: "Delete this volume?", body: detail,

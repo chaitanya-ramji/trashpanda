@@ -30,6 +30,8 @@ public final class Cleaner {
     private let ollama: () -> Ollama?
     /// Finds the `hf` tool at clean time. Tests give a fake one. nil means that the folder is removed directly.
     private let hfTool: () -> String?
+    /// Finds `git` at clean time. Tests give a fake one. nil means that no worktree is removed.
+    private let gitTool: () -> Git?
     /// Finds a JavaScript package manager at clean time. Tests give fake ones.
     private let packageTool: (PackageManager) -> String?
     /// The version requests of the projects, read now. nil means that we cannot tell, and then no runtime is removed.
@@ -51,6 +53,9 @@ public final class Cleaner {
     public static let stoppedReason = "Stopped by you"
     /// The working folders of the running programs. A test can replace it.
     var activeDirectories: () -> [String] = { Shell.activeDirectories() }
+    /// The clock, and the stale limit of the settings. A worktree that changed inside the limit is not removed. Tests replace the clock.
+    var now: () -> Date = Date.init
+    public var staleDays = Config.defaultStaleDays
     /// The newest list of working folders, and when we read it (`systemUptime`). A build folder is checked again after the measuring.
     /// We read the list again if the last read is not newer than the start of that measuring, so the list is never older than the measuring.
     private var activeSnapshot: (list: [String], at: TimeInterval) = ([], -.infinity)
@@ -67,7 +72,8 @@ public final class Cleaner {
                 packageTool: ((PackageManager) -> String?)? = nil,
                 runtimeRequests: (() -> [RuntimeVersions.Request])? = nil,
                 freeSpace: @escaping (URL) -> Int64 = DiskUsage.rawFree(at:),
-                deleteMode: DeleteMode = .permanent) {
+                deleteMode: DeleteMode = .permanent, git: (() -> Git?)? = nil) {
+        self.gitTool = git ?? { Git.find() }
         self.deleteMode = deleteMode
         self.runtimeRequests = runtimeRequests
         self.freeSpace = freeSpace
@@ -194,6 +200,9 @@ public final class Cleaner {
 
             case .emptyTrash:
                 runEmptyTrash(finding: finding, into: &report)
+
+            case .worktree(let action):
+                runWorktree(action, finding: finding, into: &report)
 
             case .inform:
                 skip(finding, "this item is information only", &report)
@@ -493,6 +502,59 @@ public final class Cleaner {
         Log.info("clean \(finding.id): \(manager.tool) removed \(name), freed \(before.bytes)")
     }
 
+    // MARK: Worktrees
+
+    private var worktreeGit: Git? { gitTool() }
+
+    private func runWorktree(_ action: WorktreeAction, finding: Finding, into report: inout CleanReport) {
+        guard let git = worktreeGit else { skip(finding, "git not found", &report); return }
+        switch action {
+        case .remove(let repo, let path): removeWorktree(repo: repo, path: path, git: git, finding: finding, into: &report)
+        case .prune(let repo, let paths): pruneWorktrees(repo: repo, paths: paths, git: git, finding: finding, into: &report)
+        }
+    }
+
+    /// One worktree. The state is read at the start of the item (the dialog was open, and the finding can be old) and again right before
+    /// the delete, after the measuring. The removal is `git worktree remove <path>`. It is never forced, and a failed command is a failure:
+    /// we never delete the files in another way.
+    private func removeWorktree(repo: URL, path: URL, git: Git, finding: Finding, into report: inout CleanReport) {
+        let first = Worktrees.check(path: path, repo: repo, git: git, guardian: guardian, active: activeDirectories(),
+                                    now: now(), staleDays: staleDays)
+        if !first.isRemovable { skip(finding, first.reasons.joined(separator: ". "), &report); return }
+        var main = first.main ?? repo.path
+        let done = removeEach([path], of: finding, into: &report, notTarget: "not a worktree folder", isTarget: {
+            Worktrees.isFolderShape($0)
+        }, linkText: "a folder in the path is a link", keepReason: { url, measureStart in
+            if self.activeSnapshot.at <= measureStart {
+                self.activeSnapshot = (self.activeDirectories(), ProcessInfo.processInfo.systemUptime)
+            }
+            let now = Worktrees.check(path: url, repo: repo, git: git, guardian: self.guardian, active: self.activeSnapshot.list,
+                                       now: self.now(), staleDays: self.staleDays)
+            main = now.main ?? main
+            return now.isRemovable ? nil : now.reasons.joined(separator: ". ")
+        }, perform: { url in
+            try Worktrees.remove(path: url, mainCheckout: main, git: git)
+        })
+        if done.removed > 0 {
+            report.removed += 1
+            Log.info("clean \(finding.id): removed one worktree through git")
+        }
+    }
+
+    /// The stale records of one repository. Git prunes all of them, so we run it only when they are the ones of the preview.
+    private func pruneWorktrees(repo: URL, paths: [String], git: Git, finding: Finding, into report: inout CleanReport) {
+        guard let entries = Worktrees.list(git, in: repo) else { skip(finding, "git could not list the worktrees", &report); return }
+        if let why = Worktrees.pruneBlocker(entries: entries, previewed: paths, guardian: guardian) { skip(finding, why, &report); return }
+        let main = URL(fileURLWithPath: entries[0].path, isDirectory: true)
+        let r = git.run(["worktree", "prune"], in: main, timeout: 120)
+        guard r.status == 0, !r.timedOut else { report.failed.append("\(finding.title): git worktree prune failed"); return }
+        guard let after = Worktrees.list(git, in: main), Worktrees.staleRecords(after).isEmpty else {
+            report.failed.append("\(finding.title): git exited 0, but a stale record is still there"); return
+        }
+        report.removed += 1
+        Log.info("clean \(finding.id): pruned \(paths.count) stale records")
+    }
+
     // MARK: AI agents
 
 
@@ -558,7 +620,8 @@ public final class Cleaner {
     func removeEach(_ targets: [URL], of finding: Finding, into report: inout CleanReport, notTarget: String,
                     isTarget: (URL) -> Bool, linkText: String? = nil,
                     keepReason: ((URL, TimeInterval) -> String?)? = nil,
-                    allowingSystemCache: String? = nil) -> Removal {
+                    allowingSystemCache: String? = nil,
+                    perform: ((URL) throws -> Void)? = nil) -> Removal {
         var result = Removal()
         func exists(_ url: URL) -> Bool { (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil }
         func refuse(_ url: URL, _ reason: String) {
@@ -579,8 +642,14 @@ public final class Cleaner {
             if let reason = keepReason?(url, measureStart) { refuse(url, reason); continue }
             if let reason = guardian.check(url, allowingSystemCache: allowingSystemCache) { refuse(url, "\(reason)"); continue }
             do {
-                try dispose(url)
-                count(bytes, &report)
+                if let perform {
+                    // A tool removes it (for example git for a worktree). It is not a file delete, so the Trash is not used in either mode.
+                    try perform(url)
+                    report.freed += bytes
+                } else {
+                    try dispose(url)
+                    count(bytes, &report)
+                }
                 result.removed += 1
             } catch {
                 result.failures += 1

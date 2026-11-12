@@ -226,6 +226,10 @@ public final class DiskScanner {
     /// The programs that run now, with their full paths. A runtime that a program starts from stays.
     private let programPaths: () -> [String]
     private let tmutilOverride: String?
+    /// Path of the git tool. Tests set it. The default is the system git.
+    private let gitOverride: String?
+    /// The working folders of the running programs. A worktree that a program uses cannot be removed. Tests give a list.
+    private let activeDirectories: () -> [String]
     /// The program files that `claude` processes execute now. Tests give a list. nil means that we cannot tell.
     private let openClaudeBinaries: ([String]) -> [String]?
     /// The current time. Tests set a fixed time, so that ages do not change from day to day.
@@ -237,7 +241,10 @@ public final class DiskScanner {
                 useOwnerTools: Bool = true, dockerPath: String? = nil,
                 isSocket: @escaping (String) -> Bool = DockerEngine.isUnixSocket,
                 now: @escaping () -> Date = Date.init, xcrunPath: String? = nil, brewPath: String? = nil, ollamaPath: String? = nil, programPaths: @escaping () -> [String] = TestBrowsers.runningProgramPaths, tmutilPath: String? = nil, openClaudeBinaries: @escaping ([String]) -> [String]? = ClaudeVersions.openBinaryPaths(among:),
-                appName: @escaping (String) -> String? = UpdateDownloads.systemAppName(for:)) {
+                appName: @escaping (String) -> String? = UpdateDownloads.systemAppName(for:),
+                gitPath: String? = nil, activeDirectories: @escaping () -> [String] = { Shell.activeDirectories() }) {
+        self.gitOverride = gitPath
+        self.activeDirectories = activeDirectories
         self.now = now
         self.appName = appName
         self.xcrunOverride = xcrunPath
@@ -281,6 +288,7 @@ public final class DiskScanner {
             { add(self.scanLogs()) },
             { add(self.scanAgents()) },
             { add(self.scanRuntimes()) },
+            { add(self.scanWorktrees()) },
         ]
         if useOwnerTools {
             jobs += [
@@ -300,7 +308,10 @@ public final class DiskScanner {
 
         // Tiny items add noise to the menu and free almost nothing.
         // Information lines are not part of any total, so they are always shown.
-        let sorted = Self.removeOverlap(findings, home: home, now: now()).filter { $0.bytes >= Self.minimumBytes || !$0.isActionable }.sorted { $0.bytes > $1.bytes }
+        // A record of a missing worktree has no size. It stays in the list, as the only item of its kind that has none.
+        let sorted = Self.removeWorktreeOverlap(Self.removeOverlap(findings, home: home, now: now())).filter {
+            $0.bytes >= Self.minimumBytes || !$0.isActionable || { if case .worktree(.prune) = $0.action { return true }; return false }($0)
+        }.sorted { $0.bytes > $1.bytes }
         let result = ScanResult(findings: sorted, disk: DiskUsage.current(for: home))
         for f in sorted {
             Log.info("found [\(f.tier == .safe ? "safe" : "review")] \(f.id) \(f.bytes) bytes — \(f.location)")
@@ -399,6 +410,10 @@ public final class DiskScanner {
                 guard let devices = simctl.devices() else { return finding.bytes }
                 return devices.contains { $0.udid == udid } ? finding.bytes : 0
             }
+        case .worktree(.remove(_, let path)):
+            return FileManager.default.fileExists(atPath: path.path) ? Sizer.size(of: path) : 0
+        case .worktree(.prune):
+            return 0
         case .inform:
             return finding.bytes
         case .owner(let command):
@@ -1171,6 +1186,8 @@ public final class DiskScanner {
             return FixedFolders.app(id: id).map { FixedFolders.targets(of: $0, home: home) } ?? []
         case .agent(.removeCodexRuntime(let u)):
             return [u]
+        case .worktree(.remove(_, let path)):
+            return [path]
         default:
             return []
         }
@@ -1219,6 +1236,21 @@ public final class DiskScanner {
             return Finding(id: f.id, ecosystem: f.ecosystem, title: f.title, location: f.location, bytes: f.bytes - overlap, tier: f.tier,
                            rebuild: f.rebuild, action: f.action, lastActivity: f.lastActivity,
                            note: "\(f.note ?? "") Not counted here: \(ByteText.string(overlap)) of \(names.joined(separator: ", ")).", helpURL: f.helpURL, owner: f.owner)
+        }
+    }
+
+    /// A build folder inside a worktree that can be removed is part of that worktree. The worktree item counts it, so the build folder
+    /// item is dropped: one folder is in one item only. A worktree that cannot be removed keeps the items of its build folders.
+    static func removeWorktreeOverlap(_ findings: [Finding]) -> [Finding] {
+        let roots: [String] = findings.compactMap { f in
+            if case .worktree(.remove(_, let path)) = f.action, f.blockedReason == nil { return path.standardizedFileURL.path + "/" }
+            return nil
+        }
+        guard !roots.isEmpty else { return findings }
+        return findings.filter { f in
+            guard case .removeArtifact(let url) = f.action else { return true }
+            let path = url.standardizedFileURL.path
+            return !roots.contains { path.hasPrefix($0) }
         }
     }
 
@@ -1273,6 +1305,14 @@ public final class DiskScanner {
                            bytes: v.bytes, tier: .review, rebuild: .download, action: .removeRuntime(storeID: v.store.id, tool: v.tool, name: v.name),
                            note: "Scripts, editors, and projects outside the scanned folders can still use it.")
         }
+    }
+
+    /// Git worktrees: the ones that git lists for each repository in the scanned folders, and the ones in the folders of Codex.
+    /// One review item for each worktree. A worktree that cannot be removed is listed with the reason.
+    func scanWorktrees() -> [Finding] {
+        guard let path = gitOverride ?? Git.find()?.path else { return [] }
+        return WorktreeScanner(home: home, roots: projectRoots(), guardian: guardian, git: Git(path: path), now: now(),
+                               staleDays: config.staleDays, activeDirectories: activeDirectories).scan()
     }
 
     func scanProjects() -> [Finding] {

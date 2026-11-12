@@ -411,7 +411,7 @@ final class TrashModeTests: XCTestCase {
         }
         // Every kind of dialog that holds a file delete is in the list.
         let toolKinds: Set<Confirmation.Kind> = [.container, .volume, .simulatorRuntime, .simulatorDevice, .trash, .brewPackage,
-                                                 .globalPackage, .containerWithVolumes, .runningContainer]
+                                                 .globalPackage, .containerWithVolumes, .runningContainer, .worktree, .worktreeRecords]
         XCTAssertEqual(kinds.union(toolKinds), Set(Confirmation.Kind.allCases))
     }
 

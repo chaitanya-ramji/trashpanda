@@ -98,6 +98,7 @@ final class CleanCoordinator {
         let cleaner = Cleaner(guardian: scanner.guardian, remaining: scanner.remainingBytes(of:),
                               runningApps: runningApps, runtimeRequests: scanner.runtimeRequests,
                               deleteMode: mode)
+        cleaner.staleDays = scanner.config.staleDays
         let stop = self.stop
         cleaner.shouldStop = { stop.isRequested }
         let total = findings.count
