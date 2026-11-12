@@ -57,6 +57,48 @@ public struct SplitSegment: Equatable, Sendable {
         return text
     }
 
+    /// The hover text in five lengths, from the longest. The menu picks the longest one that fits its line.
+    /// Every wording that says what blocks the part gives the blocked amount when only part of the part is blocked.
+    public enum HoverWording: CaseIterable, Sendable {
+        case full, shortName, compact, shortest, bare
+    }
+
+    public func hoverText(_ wording: HoverWording) -> String {
+        switch wording {
+        case .full: return hoverText
+        case .shortName: return hoverText(shortName: true)
+        case .compact: return compactHoverText
+        case .shortest: return shortestHoverText
+        case .bare: return bareHoverText
+        }
+    }
+
+    /// The short name, the size, the share, and the apps that block the part. The safe and review clauses are left out.
+    private var compactHoverText: String {
+        var text = "\(shortName) · \(ByteText.string(bytes)) · \(percentText)"
+        if let blocked = blockedText { text += " · \(blocked)" }
+        return text
+    }
+
+    /// The blocked part of a shorter line. A part that is blocked in full keeps its size, which is also the blocked amount.
+    /// A part that is blocked in part drops its size (it would read as if all of it is blocked) and keeps the blocked amount.
+    private func shortLine(apps: String) -> String {
+        guard blockedBytes > 0 else { return "\(shortName) · \(ByteText.string(bytes))" }
+        if isBlockedOnly { return "\(shortName) · \(ByteText.string(bytes)) · quit \(apps) to clean" }
+        return "\(shortName) · quit \(apps) to clean \(ByteText.string(blockedBytes))"
+    }
+
+    /// The shortest line: the apps by name.
+    private var shortestHoverText: String { shortLine(apps: appsText) }
+
+    /// The last resort, for a narrow menu with long names: the number of apps, or "the open app" for one app.
+    /// It is the shortest line that is ever shown, so a long app name never reaches the edge of the menu.
+    private var bareHoverText: String {
+        let count = blockingApps.count
+        let apps = count > 1 ? "\(count) apps" : (count == 1 ? "the open app" : "the open apps")
+        return shortLine(apps: apps)
+    }
+
     /// What VoiceOver says.
     public var accessibilityLabel: String {
         let pct = share < 0.01 ? "less than 1 percent" : "\(Int((share * 100).rounded())) percent"

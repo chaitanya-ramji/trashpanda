@@ -13,10 +13,13 @@ final class HeaderRenderTests: XCTestCase {
 
     /// Draws the header and returns the bitmap and the view.
     private func render(_ findings: [Finding], blocked: Set<Ecosystem>, width: CGFloat = 372, settings: HeaderSettings = HeaderSettings(),
-                        name: String? = nil, hover: Int? = nil, activity: MenuModel.Activity = .idle, hasResult: Bool = true)
+                        name: String? = nil, hover: Int? = nil, activity: MenuModel.Activity = .idle, hasResult: Bool = true,
+                        apps: [String] = ["Some App"], blockedIDs: Set<String>? = nil)
         -> (NSBitmapImageRep, StorageHeaderView, [SplitSegment]) {
-        let segments = SplitBar.segments(from: findings, blockers: { blocked.contains($0.ecosystem) ? ["Some App"] : [] })
-        let totals = SplitBar.totals(from: findings, blockers: { blocked.contains($0.ecosystem) ? ["Some App"] : [] })
+        // Either every finding of the blocked groups, or only the findings with these ids (part of a group).
+        let isBlocked: (Finding) -> Bool = { f in blockedIDs.map { $0.contains(f.id) } ?? blocked.contains(f.ecosystem) }
+        let segments = SplitBar.segments(from: findings, blockers: { isBlocked($0) ? apps : [] })
+        let totals = SplitBar.totals(from: findings, blockers: { isBlocked($0) ? apps : [] })
         let view = StorageHeaderView(frame: .zero)
         // The picture must not depend on the accessibility settings or on the appearance of the machine.
         view.settingsOverride = settings
@@ -195,6 +198,61 @@ final class HeaderRenderTests: XCTestCase {
             XCTAssertLessThan(alpha(rep, Int(cx * scale), Int((view.bounds.height - cy) * scale)), 0.05, "the outline sticks out at the corner")
         }
         XCTAssertGreaterThan(alpha(rep, Int((bar.minX + 40) * scale), Int((view.bounds.height - bar.maxY + 0.5) * scale)), 0.5, "the outline is drawn along the top")
+    }
+
+    /// The hover text of a blocked part must fit the menu. A line that does not fit ends with an ellipsis, which cuts a word.
+    /// Short names and long names, at the narrowest width and at a wider one, in light and dark mode.
+    func testTheHoverTextOfABlockedPartFitsTheMenu() throws {
+        let font = NSFont.preferredFont(forTextStyle: .subheadline)
+        let cases: [([String], String)] = [
+            (["Some App"], "one-short"),
+            (["Visual Studio Code - Insiders"], "one-long"),
+            (["Microsoft Remote Desktop Beta Preview"], "one-very-long"),
+            (["Claude Desktop", "Visual Studio Code"], "two"),
+        ]
+        for width in [CGFloat(300), 380] {
+            for (apps, label) in cases {
+                for dark in [false, true] {
+                    let (rep, view, segments) = render(ownerCase, blocked: [.aiAgents, .browsers], width: width,
+                                                       settings: HeaderSettings(darkMode: dark),
+                                                       name: "hover-\(label)-\(Int(width))-\(dark ? "dark" : "light")",
+                                                       hover: 0, apps: apps)
+                    XCTAssertGreaterThan(segments[0].blockedBytes, 0, "part 0 is blocked, so its hover text says which app")
+                    let text = view.detailText
+                    XCTAssertTrue(text.contains("quit"), "\(label) \(width): \(text)")
+                    let room = view.bounds.width - StorageHeaderView.inset - StorageHeaderView.rightInset
+                    XCTAssertLessThanOrEqual(text.size(withAttributes: [.font: font]).width, room,
+                                             "\(label) \(width) dark \(dark): '\(text)' is wider than the line")
+                    // The pixels: the ink of the line ends inside the right inset, and the line is drawn.
+                    let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+                    let top = Int((view.bounds.height - view.detailRowRect.maxY) * scale)
+                    let bottom = Int((view.bounds.height - view.detailRowRect.minY) * scale)
+                    var rightmost = 0
+                    for y in top..<bottom { for x in 0..<rep.pixelsWide where alpha(rep, x, y) > 0.1 { rightmost = max(rightmost, x) } }
+                    XCTAssertGreaterThan(rightmost, 0, "\(label) \(width): the hover line is drawn")
+                    XCTAssertLessThanOrEqual(CGFloat(rightmost) / scale, view.bounds.width - StorageHeaderView.rightInset + 1,
+                                             "\(label) \(width): the hover line runs over the right inset")
+                }
+            }
+        }
+    }
+
+    /// Every group, with a long app name and only part of the group blocked, at the narrowest width: the line fits.
+    func testEveryGroupsHoverTextFitsTheNarrowestMenuWhenPartOfItIsBlocked() throws {
+        let font = NSFont.preferredFont(forTextStyle: .subheadline)
+        let room = StorageHeaderView.minimumWidth - StorageHeaderView.inset - StorageHeaderView.rightInset
+        for ecosystem in Ecosystem.allCases {
+            let findings = [finding("a", ecosystem, 979, .review), finding("b", ecosystem, 300, .safe)]
+            let (_, view, segments) = render(findings, blocked: [], width: StorageHeaderView.minimumWidth,
+                                             hover: 0, apps: ["Microsoft Remote Desktop Beta Preview"], blockedIDs: ["a"])
+            XCTAssertEqual(segments.count, 1)
+            XCTAssertGreaterThan(segments[0].blockedBytes, 0)
+            XCTAssertFalse(segments[0].isBlockedOnly, "\(ecosystem): part of the group is blocked")
+            let text = view.detailText
+            XCTAssertTrue(text.contains("quit"), "\(ecosystem): \(text)")
+            XCTAssertFalse(text.contains("…"), "\(ecosystem): \(text)")
+            XCTAssertLessThanOrEqual(text.size(withAttributes: [.font: font]).width, room, "\(ecosystem): '\(text)' is wider than the line")
+        }
     }
 
     /// The legend ends with "+N more" when parts are not named: the pixels right of the last entry are not empty.

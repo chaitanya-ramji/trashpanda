@@ -249,6 +249,76 @@ final class SplitBarTests: XCTestCase {
         XCTAssertTrue(parts[1].accessibilityLabel.hasPrefix("Xcode & Swift, 14 GB, 45 percent"))
     }
 
+    /// A narrow menu uses the shorter lines. Each one keeps the apps that block a part, and each is no longer than the one before.
+    func testTheShorterHoverWordsKeepTheAppsThatBlockAPart() throws {
+        let (findings, blockers) = reportedMenu()
+        let parts = SplitBar.segments(from: findings, blockers: blockers)
+        let browsers = try XCTUnwrap(parts.first { $0.ecosystems == [.browsers] })
+        XCTAssertEqual(browsers.hoverText(.full), "Browser caches · 298 MB · 9% · quit Safari to clean")
+        XCTAssertEqual(browsers.hoverText(.shortName), "Browsers · 298 MB · 9% · quit Safari to clean")
+        XCTAssertEqual(browsers.hoverText(.compact), "Browsers · 298 MB · 9% · quit Safari to clean")
+        XCTAssertEqual(browsers.hoverText(.shortest), "Browsers · 298 MB · quit Safari to clean", "blocked in full: the size is the blocked amount")
+        XCTAssertEqual(browsers.hoverText(.bare), "Browsers · 298 MB · quit the open app to clean")
+
+        let agents = try XCTUnwrap(parts.first { $0.ecosystems == [.aiAgents] })
+        XCTAssertEqual(agents.hoverText(.compact), "AI agents · 193 MB · 6% · quit Claude to clean 100 MB", "the safe clause is left out")
+        XCTAssertEqual(agents.hoverText(.shortest), "AI agents · quit Claude to clean 100 MB", "blocked in part: the total is left out, the blocked amount stays")
+        XCTAssertEqual(agents.hoverText(.bare), "AI agents · quit the open app to clean 100 MB")
+
+        let js = parts[0]
+        XCTAssertEqual(js.hoverText(.compact), "JavaScript · 2.8 GB · 84%", "no quit words when no app blocks it")
+        XCTAssertEqual(js.hoverText(.shortest), "JavaScript · 2.8 GB")
+
+        for part in parts {
+            let lengths = [SplitSegment.HoverWording.full, .shortName, .compact, .shortest].map { part.hoverText($0).count }
+            XCTAssertEqual(lengths, lengths.sorted(by: >), "\(part.name): each wording is no longer than the one before")
+        }
+    }
+
+    /// When only part of a part is blocked, every wording that names the blocking apps ends with the blocked amount. The size is never
+    /// the only number next to "quit".
+    func testEveryWordingThatSaysWhatBlocksAPartGivesTheBlockedAmount() throws {
+        let (findings, blockers) = reportedMenu()
+        let parts = SplitBar.segments(from: findings, blockers: blockers)
+        let agents = try XCTUnwrap(parts.first { $0.ecosystems == [.aiAgents] })
+        XCTAssertFalse(agents.isBlockedOnly)
+        for wording in SplitSegment.HoverWording.allCases where agents.hoverText(wording).contains("quit") {
+            XCTAssertTrue(agents.hoverText(wording).hasSuffix("to clean 100 MB"), "\(wording): \(agents.hoverText(wording)) must give the blocked amount")
+        }
+    }
+
+    /// Several apps: the shortest line names two apps, more than two become "the open apps", and the last resort counts them.
+    func testTheShortestWordingNamesTwoAppsAndThenSaysTheOpenApps() {
+        let parts = SplitBar.segments(from: [item(.docker, 500 * mib), item(.docker, 100 * mib, tier: .review)],
+                                      blockers: { f in f.tier == .review ? ["Visual Studio Code", "Claude"] : ["Claude"] })
+        XCTAssertEqual(parts.count, 1)
+        XCTAssertEqual(parts[0].hoverText(.shortest), "Docker · 600 MB · quit Claude and Visual Studio Code to clean")
+        XCTAssertEqual(parts[0].hoverText(.bare), "Docker · 600 MB · quit 2 apps to clean", "the last resort counts the apps")
+        let many = SplitBar.segments(from: [item(.docker, 500 * mib)], blockers: { _ in ["A", "B", "C"] })
+        XCTAssertEqual(many[0].hoverText(.shortest), "Docker · 500 MB · quit the open apps to clean")
+        XCTAssertEqual(many[0].hoverText(.bare), "Docker · 500 MB · quit 3 apps to clean", "the last resort counts three or more apps")
+    }
+
+    /// The last resort is the shortest line of all when the app name is long. It never names one app that is too long.
+    func testTheLastResortIsShorterThanEveryOtherWordingForALongAppName() throws {
+        let long = "Microsoft Remote Desktop Beta Preview"
+        let parts = SplitBar.segments(from: [item(.aiAgents, 979 * mib, tier: .review), item(.aiAgents, 300 * mib, tier: .safe)],
+                                      blockers: { f in f.tier == .review ? [long] : [] })
+        let part = try XCTUnwrap(parts.first)
+        let bare = part.hoverText(.bare)
+        XCTAssertEqual(bare, "AI agents · quit the open app to clean 979 MB")
+        for wording in SplitSegment.HoverWording.allCases where wording != .bare {
+            XCTAssertGreaterThan(part.hoverText(wording).count, bare.count, "\(wording) is longer than the last resort")
+        }
+    }
+
+    /// Every group name is short, so the line without app names is short for every group.
+    func testEveryGroupHasAShortName() {
+        for ecosystem in Ecosystem.allCases {
+            XCTAssertLessThanOrEqual(ecosystem.shortName.count, 12, "\(ecosystem) has the short name \(ecosystem.shortName)")
+        }
+    }
+
     func testPercentRoundsAndSaysLessThanOne() {
         func share(_ s: Double) -> SplitSegment {
             SplitSegment(ecosystems: [.go], name: "Go", shortName: "Go", bytes: 1, safeBytes: 1, share: s, isOther: false)

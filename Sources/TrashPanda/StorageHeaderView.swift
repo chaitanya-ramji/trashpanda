@@ -63,7 +63,7 @@ final class StorageHeaderView: NSView {
     static let minimumWidth: CGFloat = width
     static let inset: CGFloat = 16
     /// The chevrons of the rows below end about 20 points from the right edge of the menu. The bar ends there too.
-    private static let rightInset: CGFloat = 20
+    static let rightInset: CGFloat = 20
     private static let splitBarHeight: CGFloat = 14
 
     /// The menu is wider than the first size of this view, so the bar follows the real width.
@@ -258,17 +258,20 @@ final class StorageHeaderView: NSView {
     /// The line under the title. When the long words do not fit the menu, it uses the short words.
     private var detail: String {
         let room = bounds.width - Self.inset - Self.rightInset
-        func fit(_ long: String, _ short: String) -> String {
-            long.size(withAttributes: [.font: Self.detailFont]).width <= room ? long : short
-        }
+        func fits(_ text: String) -> Bool { text.size(withAttributes: [.font: Self.detailFont]).width <= room }
         if let i = hovered, segments.indices.contains(i) {
-            return fit(segments[i].hoverText, segments[i].hoverText(shortName: true))
+            // Five lengths of the hover text, the longest first. The shortest keeps the name and the apps that block the part.
+            let texts = SplitSegment.HoverWording.allCases.map { segments[i].hoverText($0) }
+            return texts.first(where: fits) ?? texts[texts.count - 1]
         }
         if let text = content.detail { return text }
         // Three lengths of the same line. The longest one that fits is used. The short one keeps all three numbers.
         let tiers = SplitTotals.Wording.allCases.map { totals.summary($0) }
         return tiers.first { $0.size(withAttributes: [.font: Self.detailFont]).width <= room } ?? tiers[tiers.count - 1]
     }
+
+    /// The text of the detail line now. Internal, so that a test can measure it.
+    var detailText: String { detail }
 
     /// Where the detail line is drawn. Internal, so that a test can look at the pixels in it.
     var detailRowRect: NSRect {
