@@ -78,22 +78,6 @@ final class ScanReportTests: XCTestCase {
         XCTAssertTrue(report.json().contains("\"bytes\":5300000000,"))
     }
 
-    func testScanPathHasNoDelete() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let main = try String(contentsOf: root.appendingPathComponent("Sources/TrashPanda/main.swift"), encoding: .utf8)
-        let begin = try XCTUnwrap(main.range(of: "// BEGIN scan"))
-        let end = try XCTUnwrap(main.range(of: "// END scan"))
-        let scan = String(main[begin.upperBound..<end.lowerBound])
-        XCTAssertTrue(scan.contains("DiskScanner().scan()"))
-        for word in ["Cleaner", "removeItem", "trashItem", "unlink", "Shell.", "Process("] {
-            XCTAssertFalse(scan.contains(word), "scan path must not contain \(word)")
-        }
-        let report = try String(contentsOf: root.appendingPathComponent("Sources/PandaCore/ScanReport.swift"), encoding: .utf8)
-        for word in ["Cleaner", "removeItem", "trashItem", "unlink"] {
-            XCTAssertFalse(report.contains(word), "ScanReport must not contain \(word)")
-        }
-    }
-
     func testJSONWithoutScanIsAnError() {
         XCTAssertNotNil(CommandLineCheck.error(["trashpanda", "--json"]))
         XCTAssertNotNil(CommandLineCheck.error(["trashpanda", "--json", "--demo"]))

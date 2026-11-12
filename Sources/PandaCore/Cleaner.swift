@@ -142,8 +142,7 @@ public final class Cleaner {
                 if let reason = guardian.check(url) {
                     skip(finding, "\(reason)", &report); continue
                 }
-                let project = url.deletingLastPathComponent().resolvingSymlinksInPath().path
-                if active.contains(where: { $0 == project || $0.hasPrefix(project + "/") }) {
+                if CleanRules.projectInUse(artifact: url, active: active) {
                     skip(finding, "project is in use", &report); continue
                 }
                 removeArtifact(url, finding: finding, into: &report)
@@ -403,7 +402,7 @@ public final class Cleaner {
         let home = URL(fileURLWithPath: guardian.home)
         let before = report.freed
         let done = removeEach([url], of: finding, into: &report, notTarget: "not an Xcode archive in the archives folder") {
-            XcodeArchives.isArchive($0, home: home) && UpdateDownloads.isPlainPath($0)
+            CleanRules.isArchiveTarget($0, home: home)
         }
         if done.removed > 0 {
             report.removed += 1
@@ -414,17 +413,17 @@ public final class Cleaner {
     /// The contents of one folder in `~/Library/Caches` (the cache explorer). We check the name, the labels, the type, and every child.
     /// The folder stays, because apps expect it. If the folder is owned by an app that runs, the owner check at the top of `clean` has skipped it.
     private func removeCacheFolderContents(_ name: String, finding: Finding, into report: inout CleanReport) {
-        guard CacheExplorer.isFolderName(name) else { skip(finding, "not the name of one cache folder", &report); return }
-        guard !CacheExplorer.catalogNames().contains(name) else { skip(finding, "\(name) has its own item in the group of its tool", &report); return }
         let home = URL(fileURLWithPath: guardian.home)
-        let folder = home.appendingPathComponent("Library/Caches", isDirectory: true).appendingPathComponent(name, isDirectory: true)
-        guard (try? FileManager.default.attributesOfItem(atPath: folder.path))?[.type] as? FileAttributeType == .typeDirectory,
-              UpdateDownloads.isPlainPath(folder), UpdateDownloads.isPlainPath(folder.deletingLastPathComponent()) else {
-            skip(finding, "not a plain folder", &report); return
+        let (folder, problem) = CleanRules.cacheFolder(named: name, home: home)
+        switch problem {
+        case .badName?: skip(finding, "not the name of one cache folder", &report); return
+        case .hasOwnItem?: skip(finding, "\(name) has its own item in the group of its tool", &report); return
+        case .notPlainFolder?: skip(finding, "not a plain folder", &report); return
+        case nil: break
         }
         // A folder of iCloud or macOS is emptied only because the owner chose it, with the strongest dialog. The guard still refuses
         // `Library/Caches` itself and everything else.
-        let system: String? = CacheExplorer.keepReason(name) != nil ? name : nil
+        let system = CleanRules.systemCacheName(name)
         if let reason = guardian.check(folder, allowingSystemCache: system) { skip(finding, "\(reason)", &report); return }
         guard let children = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else {
             report.failed.append("\(folder.path): cannot read folder"); return
@@ -629,7 +628,7 @@ public final class Cleaner {
                     allowingSystemCache: String? = nil,
                     perform: ((URL) throws -> Void)? = nil) -> Removal {
         var result = Removal()
-        func exists(_ url: URL) -> Bool { (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil }
+        func exists(_ url: URL) -> Bool { CleanRules.exists(url) }
         func refuse(_ url: URL, _ reason: String) {
             Log.warn("skip \(url.path): \(reason)")
             report.skipped.append("\(shown(url)): \(reason)")
@@ -903,7 +902,7 @@ public final class Cleaner {
         let home = URL(fileURLWithPath: guardian.home)
         let targets = OldLogs.entries(kind, home: home, now: Date()).map(\.url)
         let done = removeEach(targets, of: finding, into: &report, notTarget: "not an old log file") { url in
-            OldLogs.kind(of: url, home: home) == kind && UpdateDownloads.isPlainPath(url)
+            CleanRules.isOldLogTarget(url, kind: kind, home: home)
         }
         if done.removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(done.removed) old files, failures \(done.failures)")
@@ -963,7 +962,7 @@ public final class Cleaner {
         var readAt: TimeInterval = -.infinity
         let done = removeEach(TestBrowsers.oldVersions(of: tool, home: home), of: finding, into: &report,
                               notTarget: "not a version folder of the tool", isTarget: { url in
-            TestBrowsers.isVersionFolder(url, of: tool, home: home) && UpdateDownloads.isPlainPath(url)
+            CleanRules.isTestBrowserTarget(url, of: tool, home: home)
         }, keepReason: { url, measureStart in
             // Ask again after the measuring: a program may have started from this version in the meantime.
             // Read again if the last read is not newer than the start of this measuring.
@@ -1016,7 +1015,7 @@ public final class Cleaner {
         let home = URL(fileURLWithPath: guardian.home)
         let done = removeEach(BrowserCaches.targets(of: browser, home: home), of: finding, into: &report,
                               notTarget: "not a cache folder of the browser") { url in
-            BrowserCaches.isTarget(url, of: browser, home: home) && UpdateDownloads.isPlainPath(url)
+            CleanRules.isBrowserCacheTarget(url, of: browser, home: home)
         }
         if done.removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(done.removed) cache folders, failures \(done.failures)")
@@ -1026,17 +1025,12 @@ public final class Cleaner {
     /// Only the children of two folders can go. Nothing else in the cache of the app is touched.
     private func removeUpdateDownloads(_ sparkle: URL, finding: Finding, into report: inout CleanReport) {
         let home = URL(fileURLWithPath: guardian.home)
-        guard UpdateDownloads.isSparkleFolder(sparkle, home: home), UpdateDownloads.isPlainPath(sparkle) else {
+        guard CleanRules.isSparkleTarget(sparkle, home: home) else {
             skip(finding, "not the update folder of an app", &report); return
         }
-        let sparklePrefix = sparkle.standardizedFileURL.path + "/"
         let done = removeEach(UpdateDownloads.staleItems(in: sparkle, now: Date()), of: finding, into: &report,
                               notTarget: "not an old update item of the app") { url in
-            // One of the cleaned folders, then one child of it. Nothing deeper, and no link on the way.
-            let path = url.standardizedFileURL.path
-            let parts = path.hasPrefix(sparklePrefix) ? path.dropFirst(sparklePrefix.count).split(separator: "/").map(String.init) : []
-            return UpdateDownloads.isSparkleFolder(sparkle, home: home) && parts.count == 2
-                && UpdateDownloads.cleanedFolders.contains(parts[0]) && UpdateDownloads.isPlainPath(url)
+            CleanRules.isUpdateItemTarget(url, sparkle: sparkle, home: home)
         }
         if done.removed > 0 { report.removed += 1 }
         Log.info("clean \(finding.id): removed \(done.removed) old update items, failures \(done.failures)")
@@ -1047,7 +1041,7 @@ public final class Cleaner {
         let home = URL(fileURLWithPath: guardian.home)
         let before = report.freed
         let done = removeEach([url], of: finding, into: &report, notTarget: "not a device support folder of Xcode") {
-            DeviceSupport.isDeviceSupport($0, home: home) && UpdateDownloads.isPlainPath($0)
+            CleanRules.isDeviceSupportTarget($0, home: home)
         }
         if done.removed > 0 {
             report.removed += 1
@@ -1091,13 +1085,12 @@ public final class Cleaner {
     private func removeArtifact(_ url: URL, finding: Finding, into report: inout CleanReport) {
         let before = report.freed
         let done = removeEach([url], of: finding, into: &report, notTarget: "not a known build folder", isTarget: {
-            UpdateDownloads.isPlainPath($0) && Catalog.isArtifactFolder($0)
+            CleanRules.isArtifactTarget($0)
         }, linkText: "a folder in the path is a link", keepReason: { url, measureStart in
             if self.activeSnapshot.at <= measureStart {
                 self.activeSnapshot = (self.activeDirectories(), ProcessInfo.processInfo.systemUptime)
             }
-            let project = url.deletingLastPathComponent().resolvingSymlinksInPath().path
-            return self.activeSnapshot.list.contains(where: { $0 == project || $0.hasPrefix(project + "/") }) ? "project is in use" : nil
+            return CleanRules.projectInUse(artifact: url, active: self.activeSnapshot.list) ? "project is in use" : nil
         })
         if done.removed > 0 {
             report.removed += 1

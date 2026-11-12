@@ -1,11 +1,15 @@
 5.3 GB        Xcode & Swift  Example build cache  [~/Library/Caches/Example]
 up to 700 MB  Docker         Example upper limit  [Docker]
-2 items would be cleaned. Would free 5.3 GB
+300 MB        Homebrew       Example tool item  [Trash]
+3 items would be cleaned. Would free 5.6 GB
+1 of 3 items are checked again at clean time
 
-Skipped: 5 items
+Skipped: 7 items
   1  blocked: Has changes that are not committed
   1  info only
+  1  not there now
   1  on the keep list
-  1  owner app is open: Example Editor
+  1  owner app is open (Example Editor)
+  1  refused by the path guard: path is protected (Documents)
   1  review item
 Nothing was deleted.
