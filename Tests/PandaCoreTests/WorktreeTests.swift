@@ -49,7 +49,7 @@ final class WorktreeTests: XCTestCase {
         let dir = box.home.appendingPathComponent(rel)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         git(["init", "-q"], in: dir)
-        try write(".gitignore", in: dir, text: "node_modules/\n")
+        try write(".gitignore", in: dir, text: "node_modules/\n.build/\n.env\n*.sqlite\n")
         try write("readme.txt", in: dir, text: "hello\n")
         git(["add", "-A"], in: dir)
         git(["commit", "-q", "-m", "first"], in: dir)
@@ -74,15 +74,23 @@ final class WorktreeTests: XCTestCase {
         git(["branch", "--format=%(refname:short)"], in: repo).stdout.split(separator: "\n").map(String.init).sorted()
     }
 
-    func scanner(active: [String] = [], useSpy: Bool = false) -> DiskScanner {
-        DiskScanner(home: box.home, config: Config(), useOwnerTools: false, gitPath: useSpy ? spyPath : realGit, activeDirectories: { active })
-    }
-    func scan(active: [String] = []) -> [Finding] { scanner(active: active).scan().findings.filter { $0.ecosystem == .worktrees } }
+    /// A clock 90 days ahead, so that a worktree that the test just made is not "changed in the last 30 days".
+    /// A test of the recency rule passes `recent: true` for the real clock.
+    var later: Date { Date().addingTimeInterval(90 * 86_400) }
 
-    func cleaner(spy: Bool = true, active: @escaping () -> [String] = { [] }, mode: DeleteMode = .permanent) -> Cleaner {
+    func scanner(active: [String] = [], useSpy: Bool = false, recent: Bool = false) -> DiskScanner {
+        DiskScanner(home: box.home, config: Config(), useOwnerTools: false, now: { recent ? Date() : self.later },
+                    gitPath: useSpy ? spyPath : realGit, activeDirectories: { active })
+    }
+    func scan(active: [String] = [], recent: Bool = false) -> [Finding] {
+        scanner(active: active, recent: recent).scan().findings.filter { $0.ecosystem == .worktrees }
+    }
+
+    func cleaner(spy: Bool = true, active: @escaping () -> [String] = { [] }, mode: DeleteMode = .permanent, recent: Bool = false) -> Cleaner {
         let c = Cleaner(guardian: PathGuard(home: box.home), runningApps: FakeRunning(apps: []).provider, programPaths: { [] },
                         openClaudeBinaries: { _ in [] }, deleteMode: mode, git: { Git(path: spy ? self.spyPath : self.realGit) })
         c.activeDirectories = active
+        c.now = { recent ? Date() : self.later }
         return c
     }
 
@@ -339,6 +347,7 @@ final class WorktreeTests: XCTestCase {
         let c = Cleaner(guardian: PathGuard(home: box.home), runningApps: FakeRunning(apps: []).provider, programPaths: { [] },
                         openClaudeBinaries: { _ in [] }, git: { Git(path: slowSpy) })
         c.activeDirectories = { [] }
+        c.now = { self.later }
         let report = c.clean([forged(repo, wt)])
         XCTAssertEqual(report.removed, 0)
         XCTAssertEqual(report.failed.count, 1, "\(report.failed)")
@@ -638,6 +647,120 @@ final class WorktreeTests: XCTestCase {
         XCTAssertEqual(DeleteModeText.note(mode: .permanent, findings: [ok]), "")
     }
 
+    // MARK: Hidden data (review of #118)
+
+    func testUntrackedFilesAreSeenWhenTheRepositoryHidesThem() throws {
+        for setting in ["no", "normal", "all"] {
+            let repo = try makeRepo("Developer/alpha-\(setting)")
+            git(["config", "status.showUntrackedFiles", setting], in: repo)
+            let wt = try addWorktree(repo, at: home("Developer/wt-\(setting)"), branch: "b-\(setting)")
+            try write("notes.txt", in: wt, text: "my work\n")
+            let f = try XCTUnwrap(finding(for: wt, in: scan()), setting)
+            XCTAssertTrue((f.blockedReason ?? "").contains("changes that are not committed"), "\(setting): \(f.blockedReason ?? "nil")")
+            XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 0, setting)
+            XCTAssertTrue(exists(wt.appendingPathComponent("notes.txt")), setting)
+        }
+    }
+
+    func testGitItselfRefusesAnUntrackedFileEvenWhenTheRepositoryHidesIt() throws {
+        let repo = try makeRepo("Developer/alpha")
+        git(["config", "status.showUntrackedFiles", "no"], in: repo)
+        let wt = try addWorktree(repo, at: home("Developer/alpha-hidden"), branch: "hidden")
+        try write("notes.txt", in: wt, text: "my work\n")
+        XCTAssertThrowsError(try Worktrees.remove(path: wt, mainCheckout: repo.path, git: Git(path: realGit)))
+        XCTAssertTrue(exists(wt.appendingPathComponent("notes.txt")), "the last line of defense: git refused")
+    }
+
+    func testIgnoredFilesThatAreNotBuildFoldersBlockTheItem() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let env = try addWorktree(repo, at: home("Developer/alpha-env"), branch: "env")
+        try write(".env", in: env, text: "SECRET=1\n")
+        let f = try XCTUnwrap(finding(for: env, in: scan()))
+        XCTAssertEqual(f.blockedReason, "Contains files that git ignores (for example .env). Move them first")
+        XCTAssertEqual(cleaner().clean([forged(repo, env)]).removed, 0)
+        XCTAssertTrue(exists(env.appendingPathComponent(".env")))
+        let db = try addWorktree(repo, at: home("Developer/alpha-db"), branch: "db")
+        try write("data/local.sqlite", in: db, bytes: 100)
+        XCTAssertNotNil(try XCTUnwrap(finding(for: db, in: scan())).blockedReason)
+    }
+
+    func testIgnoredBuildFoldersOnlyDoNotBlock() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try addWorktree(repo, at: home("Developer/alpha-deps"), branch: "deps")      // has an ignored node_modules
+        try write(".build/x.bin", in: wt, bytes: 100)          // a second ignored build folder from the catalog
+        XCTAssertNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+        XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 1)
+    }
+
+    func testTheDialogSaysThatIgnoredFilesAreDeleted() {
+        let (ok, _) = sampleFindings()
+        XCTAssertTrue((Confirmation.forOne(ok, staleDays: 30).footer ?? "").contains("Files that git ignores are deleted too."))
+    }
+
+    func testAWorktreeThatChangedInTheLastDaysIsBlocked() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try addWorktree(repo, at: home("Developer/alpha-fresh"), branch: "fresh")
+        let f = try XCTUnwrap(finding(for: wt, in: scan(recent: true)))
+        XCTAssertTrue((f.blockedReason ?? "").contains("Changed in the last 30 days"), f.blockedReason ?? "")
+        let c = cleaner(recent: true)
+        XCTAssertEqual(c.clean([forged(repo, wt)]).removed, 0)
+        XCTAssertTrue(exists(wt))
+        XCTAssertEqual(calls("worktree remove"), 0)
+        // The same worktree, 90 days later, is not blocked.
+        XCTAssertNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+    }
+
+    func testEachRecencySourceCountsOnItsOwn() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try addWorktree(repo, at: home("Developer/alpha-mtime"), branch: "mtime")
+        let gitDir = git(["rev-parse", "--absolute-git-dir"], in: wt).stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let old = Date().addingTimeInterval(-100 * 86_400)
+        let files = [wt.path, gitDir + "/index", gitDir + "/HEAD", gitDir + "/logs/HEAD"]
+        func setAll(except fresh: String?) {
+            for f in files { try? FileManager.default.setAttributes([.modificationDate: f == fresh ? Date() : old], ofItemAtPath: f) }
+        }
+        let tool = Git(path: realGit)
+        let guardian = PathGuard(home: box.home)
+        setAll(except: nil)
+        XCTAssertEqual(Worktrees.check(path: wt, repo: repo, git: tool, guardian: guardian, active: []).reasons, [])
+        for fresh in files {
+            setAll(except: fresh)
+            let r = Worktrees.check(path: wt, repo: repo, git: tool, guardian: guardian, active: []).reasons
+            XCTAssertTrue(r.contains { $0.hasPrefix("Changed in the last 30 days") }, "\(fresh): \(r)")
+        }
+    }
+
+    func testARebaseMergeBisectOrCherryPickInProgressBlocks() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let wt = try addWorktree(repo, at: home("Developer/alpha-busy-git"), branch: "busygit")
+        let gitDir = URL(fileURLWithPath: git(["rev-parse", "--absolute-git-dir"], in: wt).stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        for marker in Worktrees.inProgressMarkers {
+            let url = gitDir.appendingPathComponent(marker)
+            if marker.hasPrefix("rebase") { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+            else { try Data().write(to: url) }
+            let f = try XCTUnwrap(finding(for: wt, in: scan()), marker)
+            XCTAssertTrue((f.blockedReason ?? "").contains("in progress"), "\(marker): \(f.blockedReason ?? "nil")")
+            XCTAssertEqual(cleaner().clean([forged(repo, wt)]).removed, 0, marker)
+            try FileManager.default.removeItem(at: url)
+        }
+        XCTAssertNil(try XCTUnwrap(finding(for: wt, in: scan())).blockedReason)
+    }
+
+    func testEveryGitVariableAndDeveloperDirAreRemovedFromTheEnvironment() {
+        setenv("GIT_TRASHPANDA_TEST_VAR", "1", 1)
+        defer { unsetenv("GIT_TRASHPANDA_TEST_VAR") }
+        XCTAssertTrue(Git.unsetVariables.contains("GIT_TRASHPANDA_TEST_VAR"))
+        XCTAssertTrue(Git.unsetVariables.contains("DEVELOPER_DIR"))
+    }
+
+    func testThePruneTextWarnsAboutAMovedWorktree() throws {
+        let repo = try makeRepo("Developer/alpha")
+        let gone = try addWorktree(repo, at: home("Developer/alpha-gone"), branch: "gone")
+        try FileManager.default.removeItem(at: gone)
+        let prune = try XCTUnwrap(scan().first { if case .worktree(.prune) = $0.action { return true }; return false })
+        XCTAssertTrue((prune.note ?? "").contains("If you moved a worktree to another place, git cannot repair it after this."))
+    }
+
     // MARK: Source scan
 
     private func source(_ name: String) throws -> String {
@@ -658,6 +781,8 @@ final class WorktreeTests: XCTestCase {
             XCTAssertFalse(text.contains("\"-D\""), name)
             XCTAssertFalse(text.contains("\"branch\", \"-"), "a branch is never deleted: \(name)")
         }
+        let worktrees = try source("Worktrees.swift")
+        for word in ["removeItem", "trashItem", "unlink", "rmdir"] { XCTAssertFalse(worktrees.contains(word), "Worktrees.swift: \(word)") }
         XCTAssertFalse(section.contains("removeItem"), "the worktree handler never deletes files itself")
         XCTAssertFalse(section.contains("dispose("), "the worktree handler never deletes files itself")
         XCTAssertFalse(section.contains("trashItem"))
@@ -668,7 +793,8 @@ final class WorktreeTests: XCTestCase {
         for word in ["\"checkout\"", "\"reset\"", "\"clean\"", "\"gc\"", "\"push\"", "\"commit\"", "\"stash\"", "\"rm\"", "\"branch\""] {
             XCTAssertFalse(text.contains("run([\(word)"), word)
         }
-        XCTAssertTrue(Shell.systemTools["git"] == "/usr/bin/git", "git has one fixed path")
+        XCTAssertEqual(Git.systemPath, "/usr/bin/git", "git has one fixed path")
+        XCTAssertEqual(Git.find()?.path, "/usr/bin/git")
     }
 
     func testGitIsStartedWithoutTheVariablesThatPointToAnotherRepository() {

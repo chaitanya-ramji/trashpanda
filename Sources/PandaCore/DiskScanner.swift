@@ -1310,9 +1310,9 @@ public final class DiskScanner {
     /// Git worktrees: the ones that git lists for each repository in the scanned folders, and the ones in the folders of Codex.
     /// One review item for each worktree. A worktree that cannot be removed is listed with the reason.
     func scanWorktrees() -> [Finding] {
-        guard let path = gitOverride ?? Shell.resolve("git") else { return [] }
+        guard let path = gitOverride ?? Git.find()?.path else { return [] }
         return WorktreeScanner(home: home, roots: projectRoots(), guardian: guardian, git: Git(path: path), now: now(),
-                               activeDirectories: activeDirectories).scan()
+                               staleDays: config.staleDays, activeDirectories: activeDirectories).scan()
     }
 
     func scanProjects() -> [Finding] {

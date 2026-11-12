@@ -18,12 +18,21 @@ public struct Git: Sendable {
 
     public init(path: String) { self.path = path }
 
-    /// The system git, or nil when it is not installed.
-    public static func find() -> Git? { Shell.resolve("git").map(Git.init(path:)) }
+    /// The one path of the system git. We never search for it, so a file with the same name in a folder that the user can write to is never used.
+    /// (`Shell.resolve("git")` still searches, for the tools that use it that way. Worktrees do not.)
+    public static let systemPath = "/usr/bin/git"
 
-    /// Variables that can point git at another repository. We remove them, so that `-C` decides.
-    static let unsetVariables = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
-                                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX"]
+    /// The system git, or nil when it is not installed.
+    public static func find() -> Git? { FileManager.default.isExecutableFile(atPath: systemPath) ? Git(path: systemPath) : nil }
+
+    /// Variables that can point the tool at another repository or toolchain. We remove every variable that starts with `GIT_`
+    /// (read from the environment now) and `DEVELOPER_DIR`, so that `-C` decides.
+    static var unsetVariables: [String] {
+        let fixed = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX", "DEVELOPER_DIR"]
+        let present = ProcessInfo.processInfo.environment.keys.filter { $0.hasPrefix("GIT_") }
+        return Array(Set(fixed + present))
+    }
 
     /// Runs `git -C <dir> <args>`. `--no-optional-locks` keeps a read from writing the index. `core.fsmonitor=false` keeps a
     /// repository setting from starting a program.
@@ -139,7 +148,8 @@ public enum Worktrees {
     /// Everything that decides if one worktree may be removed now. It is read again at each call: the scan, the start of the item,
     /// and right before the delete. The reasons are plain sentences for the user.
     /// - `active` are the working folders of the running programs.
-    public static func check(path: URL, repo: URL, git: Git, guardian: PathGuard, active: [String]) -> WorktreeCheck {
+    public static func check(path: URL, repo: URL, git: Git, guardian: PathGuard, active: [String],
+                             now: Date = Date(), staleDays: Int = Config.defaultStaleDays) -> WorktreeCheck {
         var result = WorktreeCheck()
         let target = path.standardizedFileURL.path
 
@@ -188,11 +198,33 @@ public enum Worktrees {
             result.reasons.append("A running program uses this folder")
         }
 
-        let status = git.run(["status", "--porcelain"], in: path)
+        // A setting of the repository can hide untracked files (status.showUntrackedFiles=no), so we ask for all of them.
+        let status = git.run(["-c", "status.showUntrackedFiles=all", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"], in: path)
         if status.status != 0 || status.timedOut {
             result.reasons.append("Git could not read its changes")
         } else if !status.stdout.isEmpty {
             result.reasons.append("It has changes that are not committed")
+        }
+
+        // Files that git ignores (.env, a local database) are deleted with the folder. Plain build and dependency folders are expected.
+        let ignored = git.run(["status", "--porcelain", "-z", "--ignored", "--untracked-files=normal"], in: path)
+        if ignored.status != 0 || ignored.timedOut {
+            result.reasons.append("Git could not read its ignored files")
+        } else if ignoredFilesOutsideCatalog(ignored.stdout) {
+            result.reasons.append("Contains files that git ignores (for example .env). Move them first")
+        }
+
+        // The git folder of this worktree: a rebase, merge, bisect, or cherry-pick in progress, and recent activity.
+        let gd = git.run(["rev-parse", "--absolute-git-dir"], in: path)
+        let gitDir = gd.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if gd.status == 0, gitDir.hasPrefix("/") {
+            for marker in inProgressMarkers where type(of: gitDir + "/" + marker) != nil {
+                result.reasons.append("A rebase, merge, bisect, or cherry-pick is in progress"); break
+            }
+            let days = recentDays(path: target, gitDir: gitDir, now: now, staleDays: staleDays)
+            if let days { result.reasons.append(days == 0 ? "Changed in the last \(staleDays) days (today)" : "Changed in the last \(staleDays) days (\(days) days ago)") }
+        } else {
+            result.reasons.append("Git could not tell where its state is")
         }
 
         guard isCommitID(entry.head) else {
@@ -220,6 +252,31 @@ public enum Worktrees {
         return result
     }
 
+    static let inProgressMarkers = ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"]
+
+    /// True when the `status --ignored -z` output has an ignored entry that is not a plain build or dependency folder of the catalog.
+    /// With `--untracked-files=normal`, an ignored folder is one entry that ends with a slash.
+    static func ignoredFilesOutsideCatalog(_ output: String) -> Bool {
+        for field in output.components(separatedBy: "\0") where field.hasPrefix("!! ") {
+            let path = String(field.dropFirst(3))
+            guard path.hasSuffix("/") else { return true }
+            let name = path.dropLast().split(separator: "/").last.map(String.init) ?? ""
+            if !(Catalog.isSpecificArtifactName(name) || Catalog.skipDescend.contains(name)) || name == ".git" { return true }
+        }
+        return false
+    }
+
+    /// Days since the newest change of the index, HEAD, the log of HEAD, or the folder itself, when that is inside the stale window.
+    static func recentDays(path: String, gitDir: String, now: Date, staleDays: Int) -> Int? {
+        var newest: Date?
+        for file in [path, gitDir + "/index", gitDir + "/HEAD", gitDir + "/logs/HEAD"] {
+            if let d = (try? FileManager.default.attributesOfItem(atPath: file))?[.modificationDate] as? Date, newest == nil || d > newest! { newest = d }
+        }
+        guard let newest else { return nil }
+        let days = max(0, Int(now.timeIntervalSince(newest) / 86_400))
+        return now.timeIntervalSince(newest) < Double(staleDays) * 86_400 ? days : nil
+    }
+
     // MARK: Remove
 
     public struct Problem: Error, LocalizedError, Equatable {
@@ -230,7 +287,7 @@ public enum Worktrees {
     /// Runs `git worktree remove <path>` from the main checkout. Never forced: git refuses a worktree that has changes or a lock.
     /// A failed command is a failure. The files are never deleted in another way.
     static func remove(path: URL, mainCheckout: String, git: Git) throws {
-        let r = git.run(["worktree", "remove", path.standardizedFileURL.path], in: URL(fileURLWithPath: mainCheckout), timeout: 900)
+        let r = git.run(["-c", "status.showUntrackedFiles=normal", "worktree", "remove", path.standardizedFileURL.path], in: URL(fileURLWithPath: mainCheckout), timeout: 900)
         guard r.status == 0, !r.timedOut else {
             let why = r.refused ? "The tool is not safe to run"
                 : (r.stderr.split(whereSeparator: \.isNewline).last.map(String.init) ?? "git worktree remove failed")
@@ -289,6 +346,7 @@ struct WorktreeScanner {
     let guardian: PathGuard
     let git: Git
     let now: Date
+    var staleDays = Config.defaultStaleDays
     let activeDirectories: () -> [String]
     var maxDepth = 6
 
@@ -368,13 +426,13 @@ struct WorktreeScanner {
                 location: stale.map { tilde($0.path) }.joined(separator: ", "),
                 bytes: 0, tier: .review, rebuild: .seconds,
                 action: .worktree(.prune(repo: mainURL, paths: stale.map(\.path))),
-                note: "Git keeps a record for each worktree. The folder of these is gone. Git deletes only its own records. No file of a project is touched."))
+                note: "Git keeps a record for each worktree. The folder of these is gone. Git deletes only its own records. No file of a project is touched. If you moved a worktree to another place, git cannot repair it after this."))
         }
 
         for entry in entries.dropFirst() where Worktrees.staleRecords([main, entry]).isEmpty {
             let url = URL(fileURLWithPath: entry.path, isDirectory: true)
             guard Worktrees.isFolderShape(url) else { continue }          // a link or a strange folder is never listed
-            let c = Worktrees.check(path: url, repo: mainURL, git: git, guardian: guardian, active: active.value)
+            let c = Worktrees.check(path: url, repo: mainURL, git: git, guardian: guardian, active: active.value, now: now, staleDays: staleDays)
             guard !c.isMain else { continue }
             let bytes = Sizer.size(of: url)
             guard bytes > 0 else { continue }

@@ -53,6 +53,9 @@ public final class Cleaner {
     public static let stoppedReason = "Stopped by you"
     /// The working folders of the running programs. A test can replace it.
     var activeDirectories: () -> [String] = { Shell.activeDirectories() }
+    /// The clock, and the stale limit of the settings. A worktree that changed inside the limit is not removed. Tests replace the clock.
+    var now: () -> Date = Date.init
+    public var staleDays = Config.defaultStaleDays
     /// The newest list of working folders, and when we read it (`systemUptime`). A build folder is checked again after the measuring.
     /// We read the list again if the last read is not newer than the start of that measuring, so the list is never older than the measuring.
     private var activeSnapshot: (list: [String], at: TimeInterval) = ([], -.infinity)
@@ -515,7 +518,8 @@ public final class Cleaner {
     /// the delete, after the measuring. The removal is `git worktree remove <path>`. It is never forced, and a failed command is a failure:
     /// we never delete the files in another way.
     private func removeWorktree(repo: URL, path: URL, git: Git, finding: Finding, into report: inout CleanReport) {
-        let first = Worktrees.check(path: path, repo: repo, git: git, guardian: guardian, active: activeDirectories())
+        let first = Worktrees.check(path: path, repo: repo, git: git, guardian: guardian, active: activeDirectories(),
+                                    now: now(), staleDays: staleDays)
         if !first.isRemovable { skip(finding, first.reasons.joined(separator: ". "), &report); return }
         var main = first.main ?? repo.path
         let done = removeEach([path], of: finding, into: &report, notTarget: "not a worktree folder", isTarget: {
@@ -524,7 +528,8 @@ public final class Cleaner {
             if self.activeSnapshot.at <= measureStart {
                 self.activeSnapshot = (self.activeDirectories(), ProcessInfo.processInfo.systemUptime)
             }
-            let now = Worktrees.check(path: url, repo: repo, git: git, guardian: self.guardian, active: self.activeSnapshot.list)
+            let now = Worktrees.check(path: url, repo: repo, git: git, guardian: self.guardian, active: self.activeSnapshot.list,
+                                       now: self.now(), staleDays: self.staleDays)
             main = now.main ?? main
             return now.isRemovable ? nil : now.reasons.joined(separator: ". ")
         }, perform: { url in

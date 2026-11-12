@@ -83,7 +83,7 @@ public struct Confirmation: Equatable, Sendable {
         case .worktree:
             return Confirmation(
                 title: "Remove this git worktree?", body: "\(f.title)\n\(f.location)\n\(ByteText.string(f.bytes))\n\(f.note ?? "")",
-                footer: "Git removes the folder of this worktree with git worktree remove. It never forces the removal, so git refuses when the worktree has changes or a lock. The branch stays. The main checkout and your other worktrees are not touched. Trash Panda reads the state again just before it removes the folder, but a tool such as Claude Code or Codex can still want this folder. This can't be undone. You can make a new worktree from the branch.",
+                footer: "Git removes the folder of this worktree with git worktree remove. It never forces the removal, so git refuses when the worktree has changes or a lock. Files that git ignores are deleted too. The branch stays. The main checkout and your other worktrees are not touched. Trash Panda reads the state again just before it removes the folder, but a tool such as Claude Code or Codex can still want this folder. This can't be undone. You can make a new worktree from the branch.",
                 confirmTitle: "Remove worktree", cancelIsDefault: true)
         case .worktreeRecords:
             return Confirmation(
