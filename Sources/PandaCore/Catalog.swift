@@ -27,9 +27,14 @@ struct ArtifactRule {
     /// `.safe` means safe when the project is stale. `.review` means the user must always choose.
     let tier: Tier
     let rebuild: Rebuild
+    /// True for a common folder name (such as `lib`). The project walk enters such a folder,
+    /// and lists it only when a marker file sits next to it.
+    let generic: Bool
 
     init(_ names: [String], prefixes: [String] = [], markers: [String], inner: [String] = [],
-         _ ecosystem: Ecosystem, _ label: String, tier: Tier = .safe, rebuild: Rebuild = .minutes) {
+         _ ecosystem: Ecosystem, _ label: String, tier: Tier = .safe, rebuild: Rebuild = .minutes,
+         generic: Bool = false) {
+        self.generic = generic
         self.names = names
         self.namePrefixes = prefixes
         self.markers = markers
@@ -313,9 +318,15 @@ enum Catalog {
         ArtifactRule([".shadow-cljs"],
                      markers: ["shadow-cljs.edn"], .clojure, "shadow-cljs cache", rebuild: .seconds),
 
+        // Crystal
+        ArtifactRule(["lib"],
+                     markers: ["shard.yml"], .crystal, "Shards packages", tier: .review, rebuild: .download, generic: true),
+
         // Perl
         ArtifactRule(["blib"],
                      markers: ["Makefile.PL", "Build.PL", "dist.ini"], .perl, "Build output"),
+        ArtifactRule(["local"],
+                     markers: ["cpanfile"], .perl, "Carton packages", tier: .review, rebuild: .download, generic: true),
 
         // Lua
         ArtifactRule(["lua_modules"],
@@ -328,8 +339,50 @@ enum Catalog {
     static let artifactNames: Set<String> = Set(artifacts.flatMap { $0.names })
     static let artifactPrefixes: [String] = artifacts.flatMap { $0.namePrefixes }
 
+    /// Names of rules that are generic (`lib`, `local`). A folder with such a name is an artifact
+    /// only when its marker file sits next to it, so the project walk must still enter it.
+    static let genericNames: Set<String> = Set(artifacts.filter { $0.generic }.flatMap { $0.names })
+
     static func isArtifactName(_ name: String) -> Bool {
         artifactNames.contains(name) || artifactPrefixes.contains { name.hasPrefix($0) }
+    }
+
+    /// The rule that makes the folder `url` an artifact, or nil. `siblings` are the names in the project folder.
+    static func matchingRule(name: String, url: URL, siblings: Set<String>) -> ArtifactRule? {
+        for rule in artifacts where rule.matches(name: name) {
+            guard markerPresent(rule.markers, in: siblings) else { continue }
+            if !rule.innerMarkers.isEmpty {
+                let inner = Set((try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? [])
+                guard rule.innerMarkers.contains(where: inner.contains) else { continue }
+            }
+            return rule
+        }
+        return nil
+    }
+
+    static func markerPresent(_ markers: [String], in names: Set<String>) -> Bool {
+        markers.contains { marker in
+            if marker.hasPrefix("*") {
+                let suffix = String(marker.dropFirst())
+                return names.contains { $0.hasSuffix(suffix) }
+            }
+            return names.contains(marker)
+        }
+    }
+
+    /// Delete-time check. A known name is enough, except a generic name (`lib`, `local`):
+    /// then a rule must match now, so its marker file must still sit next to the folder.
+    static func isArtifactFolder(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        guard isArtifactName(name) else { return false }
+        guard genericNames.contains(name) else { return true }
+        let siblings = Set((try? FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)) ?? [])
+        return matchingRule(name: name, url: url, siblings: siblings) != nil
+    }
+
+    /// Like `isArtifactName`, but false for a generic name. Use it where a walk decides to skip a folder.
+    static func isSpecificArtifactName(_ name: String) -> Bool {
+        isArtifactName(name) && !genericNames.contains(name)
     }
 
     /// Folders that a project walk never enters.
