@@ -37,7 +37,12 @@ final class ShellHardeningTests: XCTestCase {
     /// `NSWorkspace` can open a file or an app, and a `.command` file then runs in Terminal. These are the only
     /// files that may call it, with the exact number of calls. A new call site must be added here on purpose.
     static let workspaceOpenAllowed: [String: Int] = [
-        "TrashPanda/AppDelegate.swift": 3,
+        // AppDelegate.swift has 4 calls that open something:
+        //   line ~100: the first-start note's link to SECURITY.md
+        //   line ~322: the help link
+        //   line ~325: the report-a-problem link
+        //   line ~337: opens the keep or roots list in TextEdit
+        "TrashPanda/AppDelegate.swift": 4,
         "TrashPanda/Dialogs.swift": 1,
         "TrashPanda/UpdateController.swift": 1,
     ]
