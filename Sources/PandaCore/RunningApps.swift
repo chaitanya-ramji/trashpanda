@@ -38,10 +38,14 @@ public struct RunningApp: Sendable, Equatable {
 public struct RunningSnapshot: Sendable {
     public let apps: [RunningApp]
     public let processes: Set<String>
+    /// False when the list of programs could not be read (for example `ps` did not start). `processes` is then empty, and an empty
+    /// list does not mean that nothing runs. The unattended clean uses this to skip every item that has an owner app.
+    public let processListRead: Bool
 
-    public init(apps: [RunningApp], processes: Set<String> = []) {
+    public init(apps: [RunningApp], processes: Set<String> = [], processListRead: Bool = true) {
         self.apps = apps
         self.processes = processes
+        self.processListRead = processListRead
     }
 
     /// The names of the programs of `owner` that run now. The list is empty when none runs.
@@ -84,7 +88,8 @@ public struct RunningApps: Sendable {
     }
 
     public static let system = RunningApps {
-        RunningSnapshot(apps: systemApps(), processes: systemProcesses())
+        let list = systemProcesses()
+        return RunningSnapshot(apps: systemApps(), processes: list.names, processListRead: list.read)
     }
 
     private static func systemApps() -> [RunningApp] {
@@ -98,8 +103,11 @@ public struct RunningApps: Sendable {
         return Thread.isMainThread ? read() : DispatchQueue.main.sync(execute: read)
     }
 
-    private static func systemProcesses() -> Set<String> {
+    /// The names of the programs, and whether `ps` gave a list. A `ps` that did not start, did not end, failed, or gave nothing is
+    /// "not read". There is always at least one program, so an empty answer is not trusted.
+    private static func systemProcesses() -> (names: Set<String>, read: Bool) {
         let r = Shell.run("/bin/ps", ["-axo", "comm="], timeout: 5, quiet: true)
-        return Set(r.stdout.split(separator: "\n").map { ($0 as NSString).lastPathComponent })
+        let names = Set(r.stdout.split(separator: "\n").map { ($0 as NSString).lastPathComponent })
+        return (names, r.status == 0 && !r.timedOut && !r.refused && !names.isEmpty)
     }
 }

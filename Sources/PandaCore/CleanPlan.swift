@@ -197,6 +197,9 @@ public struct CleanPlan: Sendable {
         return i
     }
 
+    /// The reason of an item with an owner app when the list of running programs could not be read (unattended clean only).
+    static let processListUnreadReason = "running programs could not be read, so the owner app is not known"
+
     /// nil when the item would be cleaned. Else the short reason. The order of the checks is fixed (see the type comment).
     static func skipReason(_ f: Finding, guardian: PathGuard, running: RunningSnapshot, active: [String]? = nil, now: Date = Date(),
                            unattended: Bool = false) -> String? {
@@ -240,6 +243,8 @@ public struct CleanPlan: Sendable {
         if let artifact = i.artifact, let active, CleanRules.projectInUse(artifact: artifact, active: active) {
             return stop("project is in use", checked: true)
         }
+        // The unattended clean fails closed: when the list of programs could not be read, an empty list proves nothing.
+        if unattended, f.owner != nil, !running.processListRead { return stop(processListUnreadReason, checked: checked) }
         let blockers = f.owner.map { running.running($0) } ?? []
         if !blockers.isEmpty { return stop("owner app is open (\(blockers.joined(separator: " and ")))", checked: checked) }
         if !isOneClickSafe(f, blockers: blockers) { return stop(safetyNetReason, checked: checked) }

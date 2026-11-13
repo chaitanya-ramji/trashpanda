@@ -15,7 +15,8 @@ final class LogPrivacyTests: XCTestCase {
     }
 
     func testRedactLeavesOtherPathsAndEmptyHome() {
-        XCTAssertEqual(Log.redact("/Users/tester/x", home: "/Users/test"), "~er/x")
+        // A longer name that starts with the home text is another folder: it is not changed (it was "~er/x" before).
+        XCTAssertEqual(Log.redact("/Users/tester/x", home: "/Users/test"), "/Users/tester/x")
         XCTAssertEqual(Log.redact("/opt/x", home: ""), "/opt/x")
     }
 
