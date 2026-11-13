@@ -116,19 +116,24 @@ enum Catalog {
         CacheSpec(id: "conda.pkgs", title: "conda package cache", ecosystem: .python,
                   paths: ["miniconda3/pkgs", "anaconda3/pkgs", "miniforge3/pkgs", "mambaforge/pkgs", ".conda/pkgs"],
                   tier: .review, rebuild: .download,
-                  note: "Environments are not touched. conda downloads the packages again when you need them."),
+                  note: "Environments keep their files, unless conda was set to use soft links. conda downloads the packages again; offline installs need them."),
 
-        // Deno. Only the folders that Deno builds again: `deps`, `npm`, and `gen`. `location_data` holds the localStorage
-        // data of your scripts, so the folder `deno` itself is not cleaned. Not checked on a real install.
-        CacheSpec(id: "deno.cache", title: "Deno module cache", ecosystem: .javascript,
-                  paths: ["Library/Caches/deno/deps", "Library/Caches/deno/npm", "Library/Caches/deno/gen"],
-                  tier: .safe, rebuild: .download),
+        // Deno. Only the folders that Deno builds again. `gen` is compiled code, so it is safe. `remote` (Deno 2), `deps` (Deno 1),
+        // and `npm` hold downloaded modules, so they are a review item. `location_data` (localStorage of your scripts), `registries`,
+        // `dl`, `deno_history.txt` (REPL history), and the `*_v2` databases are never listed, so the folder `deno` itself is not cleaned.
+        // Not checked on a real install.
+        CacheSpec(id: "deno.gen", title: "Deno compiled code cache", ecosystem: .javascript,
+                  paths: ["Library/Caches/deno/gen"], tier: .safe, rebuild: .seconds),
+        CacheSpec(id: "deno.modules", title: "Deno module downloads", ecosystem: .javascript,
+                  paths: ["Library/Caches/deno/remote", "Library/Caches/deno/deps", "Library/Caches/deno/npm"],
+                  tier: .review, rebuild: .download,
+                  note: "Deno downloads them again. A script that runs offline, or a module whose web address is gone, needs them."),
 
         // Terraform. The shared provider cache exists only when the user made it. A project `.terraform` folder is left out:
         // it can hold state. Never touch ~/.terraform.d/credentials.tfrc.json (see PathGuard). Not checked on a real install.
         CacheSpec(id: "terraform.plugincache", title: "Terraform provider cache", ecosystem: .terraform,
                   paths: [".terraform.d/plugin-cache"], tier: .review, rebuild: .download,
-                  note: "Terraform downloads the providers again. A project that works offline needs them."),
+                  note: "Each project needs `terraform init` again, which downloads the providers. A project that works offline needs them."),
 
         // Java and Kotlin
         CacheSpec(id: "gradle.caches", title: "Gradle cache", ecosystem: .jvm,
