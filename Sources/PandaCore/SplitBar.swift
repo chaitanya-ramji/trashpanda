@@ -144,15 +144,12 @@ public struct SplitTotals: Equatable, Sendable {
     /// long "You can free 1.5 GB now · 1.4 GB to look through · 491 MB when apps quit",
     /// compact "Free 1.5 GB now · 1.4 GB to review · 491 MB in open apps",
     /// short "Free 1.5 GB · 1.4 GB review · 491 MB in apps". The short one keeps all three numbers.
-    public func summary(_ wording: Wording) -> String {
+    /// In trash mode (`mode`), the first part says "clean" and not "free" (see `DeleteModeText.headerClause`).
+    public func summary(_ wording: Wording, mode: DeleteMode = .permanent) -> String {
         guard all > 0 else { return "All tidy." }
         var parts: [String] = []
         if free > 0 {
-            switch wording {
-            case .long: parts.append("You can free \(ByteText.string(free)) now")
-            case .compact: parts.append("Free \(ByteText.string(free)) now")
-            case .short: parts.append("Free \(ByteText.string(free))")
-            }
+            parts.append(DeleteModeText.headerClause(ByteText.string(free), wording: wording, mode: mode))
         }
         if review > 0 {
             switch wording {

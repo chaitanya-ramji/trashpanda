@@ -137,6 +137,8 @@ public struct MenuModel: Equatable, Sendable {
         public let segments: [SplitSegment]
         /// What the header shows: the bar or the skeleton, the detail text, and how strong the bar is drawn.
         public let content: HeaderContent
+        /// The delete mode. The line under the title says "clean" and not "free" in trash mode.
+        public let deleteMode: DeleteMode
     }
 
     public let header: Header
@@ -193,7 +195,8 @@ public struct MenuModel: Equatable, Sendable {
         let header = Header(disk: input.disk, totals: SplitBar.totals(from: findings, blockers: input.blockers),
                             activity: input.activity, segments: segments,
                             content: HeaderContent.make(activity: input.activity, hasResult: input.hasResult, hasParts: !segments.isEmpty,
-                                                        progress: input.cleaningTitle))
+                                                        progress: input.cleaningTitle),
+                            deleteMode: input.deleteMode)
 
         var rows: [Row] = [Row(kind: .header), .separator]
         if cleaning {
@@ -211,7 +214,8 @@ public struct MenuModel: Equatable, Sendable {
                     rows.append(.note(main.title))
                 } else {
                     rows.append(Row(title: main.title, action: .clean(Prompt(
-                        findings: usableSafe, title: "Free up \(ByteText.string(safeBytes))?",
+                        findings: usableSafe,
+                        title: DeleteModeText.title("Free up \(ByteText.string(safeBytes))?", mode: input.deleteMode, findings: usableSafe),
                         body: "Trash Panda will clear old build files and caches from \(names(of: usableSafe)).")),
                         subtitle: main.subtitle))
                 }
@@ -316,7 +320,8 @@ public struct MenuModel: Equatable, Sendable {
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
             rows.append(Row(title: DeleteModeText.bulkRow(ByteText.string(total), mode: input.deleteMode), action: .clean(Prompt(
-                findings: safe, title: "Free up \(ByteText.string(total)) of AI agents files?",
+                findings: safe,
+                title: DeleteModeText.title("Free up \(ByteText.string(total)) of AI agents files?", mode: input.deleteMode, findings: safe),
                 body: "Trash Panda will clear old build files and caches."))))
             rows.append(.separator)
         }
@@ -341,13 +346,15 @@ public struct MenuModel: Equatable, Sendable {
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
             rows.append(Row(title: DeleteModeText.bulkRow(ByteText.string(total), mode: input.deleteMode), action: .clean(Prompt(
-                findings: safe, title: "Free up \(ByteText.string(total)) of \(ecosystem.name) files?",
+                findings: safe,
+                title: DeleteModeText.title("Free up \(ByteText.string(total)) of \(ecosystem.name) files?", mode: input.deleteMode, findings: safe),
                 body: "Trash Panda will clear old build files and caches."))))
         }
         var widths: [String] = []
         func section(_ list: [Finding], _ name: String, _ first: Bool) {
             if !first { rows.append(.separator) }
-            let notes = MenuText.rebuildNotes(list.map(\.rebuild))
+            let notes = MenuText.rebuildNotes(list.map(\.rebuild), movesFiles: list.map { DeleteMode.movesFiles($0.action) },
+                                              mode: input.deleteMode)
             let title = header(name, notes)
             rows.append(.section(title))
             rows += listRows(list, input, groupBytes: groupBytes, labels: notes.rowLabels, header: title, widths: &widths)
@@ -456,7 +463,7 @@ public struct MenuModel: Equatable, Sendable {
             return row
         }
         let open = input.blockers(f)
-        let c = Confirmation.forOne(f, staleDays: input.staleDays, now: input.now)
+        let c = Confirmation.forOne(f, staleDays: input.staleDays, now: input.now, mode: input.deleteMode)
         if open.isEmpty {
             row.action = .clean(Prompt(findings: [f], title: c.title, body: c.body, footer: c.footer,
                                        confirmTitle: c.confirmTitle, cancelIsDefault: c.cancelIsDefault,
@@ -478,7 +485,7 @@ public struct MenuModel: Equatable, Sendable {
             // The reason of the dialog, and the warning that the dialog also gives: never a text that sounds harmless.
             reason = why.contains("not synced") ? why : why + " Data that is not synced yet can be lost."
         }
-        let rebuild = system ? reason : f.rebuild.label
+        let rebuild = system ? reason : DeleteModeText.rebuildLabel(f, mode: input.deleteMode)
         var tip = (title == f.title ? "" : "\(f.title)\n") + "\(place)\n\(rebuild)"
         // (the full title above is the original one; the dialogs use it too)
         if isProject(f), let days = f.lastActivity.map({ max(0, Int(input.now.timeIntervalSince($0) / 86_400)) }) {

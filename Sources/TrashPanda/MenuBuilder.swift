@@ -34,7 +34,8 @@ final class MenuBuilder: NSObject {
         if model == lastBuiltModel { return nil }
         lastBuiltModel = model
         let header = StorageHeaderView(frame: .zero)
-        header.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content, segments: model.header.segments)
+        header.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content, segments: model.header.segments,
+                      deleteMode: model.header.deleteMode)
         header.onSelect = onSelect
         populate(menu, model: model, header: header)
         return header

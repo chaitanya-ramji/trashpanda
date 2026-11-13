@@ -14,7 +14,7 @@ final class HeaderRenderTests: XCTestCase {
     /// Draws the header and returns the bitmap and the view.
     private func render(_ findings: [Finding], blocked: Set<Ecosystem>, width: CGFloat = 372, settings: HeaderSettings = HeaderSettings(),
                         name: String? = nil, hover: Int? = nil, activity: MenuModel.Activity = .idle, hasResult: Bool = true,
-                        apps: [String] = ["Some App"], blockedIDs: Set<String>? = nil)
+                        apps: [String] = ["Some App"], blockedIDs: Set<String>? = nil, mode: DeleteMode = .permanent)
         -> (NSBitmapImageRep, StorageHeaderView, [SplitSegment]) {
         // Either every finding of the blocked groups, or only the findings with these ids (part of a group).
         let isBlocked: (Finding) -> Bool = { f in blockedIDs.map { $0.contains(f.id) } ?? blocked.contains(f.ecosystem) }
@@ -25,7 +25,8 @@ final class HeaderRenderTests: XCTestCase {
         view.settingsOverride = settings
         view.appearance = NSAppearance(named: settings.darkMode ? .darkAqua : .aqua)
         view.update(disk: DiskUsage(total: 245_000_000_000, free: 137_000_000_000), totals: totals,
-                    content: HeaderContent.make(activity: activity, hasResult: hasResult, hasParts: !segments.isEmpty), segments: segments)
+                    content: HeaderContent.make(activity: activity, hasResult: hasResult, hasParts: !segments.isEmpty), segments: segments,
+                    deleteMode: mode)
         view.setFrameSize(NSSize(width: width, height: view.preferredHeight))
         view.setHovered(hover)
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
@@ -253,6 +254,38 @@ final class HeaderRenderTests: XCTestCase {
             XCTAssertFalse(text.contains("…"), "\(ecosystem): \(text)")
             XCTAssertLessThanOrEqual(text.size(withAttributes: [.font: font]).width, room, "\(ecosystem): '\(text)' is wider than the line")
         }
+    }
+
+    /// Trash mode says "clean" and not "free" in the line under the title (#226). The line must still fit at every menu width,
+    /// in the longest wording that fits, and it is drawn (the pixels in its row are not empty).
+    func testTheTrashModeLineFitsTheMenuAtEveryWidth() throws {
+        let font = NSFont.preferredFont(forTextStyle: .subheadline)
+        // Safe, review and blocked items together: the longest line there is.
+        let findings = [finding("a", .docker, 1_500, .safe), finding("b", .javascript, 1_400, .review), finding("c", .browsers, 491, .safe)]
+        for width in [StorageHeaderView.minimumWidth, 307, 372, 380] {
+            for dark in [false, true] {
+                let (rep, view, _) = render(findings, blocked: [.browsers], width: width, settings: HeaderSettings(darkMode: dark),
+                                            name: "trash-mode-\(Int(width))-\(dark ? "dark" : "light")", mode: .trash)
+                let text = view.detailText
+                let room = view.bounds.width - StorageHeaderView.inset - StorageHeaderView.rightInset
+                XCTAssertTrue(text.contains("lean"), "\(width): \(text)")
+                XCTAssertFalse(text.lowercased().contains("free"), "\(width): \(text)")
+                XCTAssertFalse(text.contains("…"), "\(width): \(text)")
+                XCTAssertLessThanOrEqual(text.size(withAttributes: [.font: font]).width, room, "\(width): '\(text)' is wider than the line")
+                // The three numbers stay, in every wording.
+                XCTAssertEqual(text.components(separatedBy: " · ").count, 3, "\(width): \(text)")
+                let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+                let top = Int((view.bounds.height - view.detailRowRect.maxY) * scale)
+                let bottom = Int((view.bounds.height - view.detailRowRect.minY) * scale)
+                var rightmost = 0
+                for y in top..<bottom { for x in 0..<rep.pixelsWide where alpha(rep, x, y) > 0.1 { rightmost = max(rightmost, x) } }
+                XCTAssertGreaterThan(rightmost, 0, "\(width): the line is drawn")
+                XCTAssertLessThanOrEqual(CGFloat(rightmost) / scale, view.bounds.width - StorageHeaderView.rightInset + 1)
+            }
+        }
+        // The same data in permanent mode keeps its old words.
+        let (_, perm, _) = render(findings, blocked: [.browsers], width: 372, mode: .permanent)
+        XCTAssertTrue(perm.detailText.lowercased().contains("free"), perm.detailText)
     }
 
     /// The legend ends with "+N more" when parts are not named: the pixels right of the last entry are not empty.
