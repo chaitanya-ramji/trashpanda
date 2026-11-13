@@ -42,10 +42,10 @@ Trash Panda looks in two places:
 | Language or tool | Global caches | Project folders |
 | --- | --- | --- |
 | Swift, Obj-C, Xcode | Build data, simulator caches, Swift packages, CocoaPods. Review: simulator runtimes, old simulators, archives, device support files (one item for each OS version; the newest of each device model is kept). | `.build`, `Pods` |
-| JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright (old browser versions), Electron and node-gyp downloads | `node_modules`, `.next`, `.nuxt`, `.turbo` |
+| JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright (old browser versions), Electron and node-gyp downloads. Deno: the `deps`, `npm`, and `gen` folders of its cache (safe; the data of your scripts in `location_data` stays). Not checked on a real install. | `node_modules`, `.next`, `.nuxt`, `.turbo` |
 | Old language runtimes | Versions installed by nvm, fnm, pyenv, rustup, SDKMAN, asdf, and mise: one review item for each version that is not the default, not the newest, not asked for by a scanned project, and not running. | None |
 | JavaScript global packages | Packages that you installed with `npm install -g`, `pnpm add -g`, `yarn global add`, or `bun add -g`: one review item for each. The manager removes it. | None |
-| Python | pip, uv, pre-commit, Poetry, Hugging Face, PyTorch | `.venv`, `.tox`, `.nox` |
+| Python | pip, uv, pre-commit, Poetry, Hugging Face, PyTorch. conda and mamba: the `pkgs` folder of miniconda3, anaconda3, miniforge3, mambaforge, and `~/.conda` (review). Your environments (`envs`) stay. Not checked on a real install. | `.venv`, `.tox`, `.nox` |
 | Java, Kotlin | Gradle, Maven, Android, Kotlin/Native, JetBrains | `target`, `build`, `.gradle` |
 | C#, .NET | NuGet | `obj`, `bin`, `.vs` |
 | C, C++ | ccache, clangd, vcpkg, Conan | CMake and Meson build folders |
@@ -66,6 +66,7 @@ Trash Panda looks in two places:
 | Clojure | Git libraries (review). `~/.m2` is already covered under Java. | `target`, `.cpcache`, `.shadow-cljs` |
 | Perl | cpanm and CPAN build folders and downloads (safe). | `blib`, `local` (Carton, review; needs `cpanfile`) |
 | Lua | None (no global cache path could be confirmed on macOS). | `lua_modules` (review) |
+| Terraform | Provider cache `~/.terraform.d/plugin-cache`, only if you have one (review). State, `.terraform` project folders, and your login stay. Not checked on a real install. | None |
 | Homebrew | Downloads and old versions (safe). Review: each package that no other package needs (`brew leaves`), with its install date. Brew removes it. | None |
 | Browsers | Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi, Opera, Dia): cache, code cache, and GPU caches. Firefox and Zen: `cache2` and `startupCache`. Dia and Zen are not checked on a real install yet. Review: Service Worker storage. | None |
 | Other apps | Old update downloads of apps that use the Sparkle updater (older than 7 days) | None |
@@ -593,7 +594,7 @@ We work from the pinned [Roadmap issue](https://github.com/chaitanya-ramji/trash
 ### Now: v0.9 More coverage
 - [x] Git worktrees: find the ones that tools and you left behind, and remove them safely ([#118](https://github.com/chaitanya-ramji/trashpanda/issues/118))
 - [ ] Android emulator images and virtual devices (review items) ([#189](https://github.com/chaitanya-ramji/trashpanda/issues/189))
-- [ ] Caches of conda, Deno, and Terraform ([#190](https://github.com/chaitanya-ramji/trashpanda/issues/190))
+- [x] Caches of conda, Deno, and Terraform ([#190](https://github.com/chaitanya-ramji/trashpanda/issues/190))
 - [ ] The two Xcode folders of G-06 ([#191](https://github.com/chaitanya-ramji/trashpanda/issues/191))
 - [ ] Trim the build folder of an active Rust project ([#192](https://github.com/chaitanya-ramji/trashpanda/issues/192))
 - [ ] Show what grew since the last week (size history with an off setting) ([#193](https://github.com/chaitanya-ramji/trashpanda/issues/193))

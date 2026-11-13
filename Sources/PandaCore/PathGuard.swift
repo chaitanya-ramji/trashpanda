@@ -47,6 +47,8 @@ public struct PathGuard: Sendable {
         ".mix", ".hex/hex.config",
         // Interpreters and tools that uv installed (`uv python install`, `uv tool install`). Deleting them breaks commands.
         ".local/share/uv/python", ".local/share/uv/tools",
+        // conda environments. They are the work of the user. Only `pkgs` is a cache.
+        ".conda/envs", "miniconda3/envs", "anaconda3/envs", "miniforge3/envs", "mambaforge/envs",
     ]
 
     /// Files that hold a login or a secret. Neither the file nor any folder that contains it may be deleted.
@@ -56,6 +58,8 @@ public struct PathGuard: Sendable {
         ".cache/huggingface/token", ".cache/huggingface/stored_tokens",
         // The login of Codex and of Claude Code.
         ".codex/auth.json", ".claude/.credentials.json",
+        // The Terraform login.
+        ".terraform.d/credentials.tfrc.json",
     ]
 
     /// Folders in `~/Library/Caches` that we never delete. Lower case, because the file system ignores the case.
