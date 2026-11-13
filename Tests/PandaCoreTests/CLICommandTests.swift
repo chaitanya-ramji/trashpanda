@@ -319,6 +319,9 @@ final class CLICommandTests: XCTestCase {
         "isClean": "pure", "needsAPerson": "pure: reads the one list of DeleteMode", "movesFiles": "DeleteMode: a pure table of actions",
         "CLICleanEnvironment": "a value type with the options of the real clean; it does nothing by itself",
         "CLIClean": "the file of the real clean (CLIClean.swift). It has its own source tests; this file only hands the run over",
+        "homeError": "pure: checks the text of the home values", "homeValues": "the hook of the caller: reads the environment, changes nothing",
+        "canLog": "the hook of the caller: says if the log file is in an absolute place", "isPlainAbsolute": "pure: reads the text of a path",
+        "processListRead": "a flag of the snapshot",
         // Log lines
         "info": "writes a log line (the log function of the caller)", "warn": "writes a log line (the log function of the caller)",
         // Types, enum cases, and properties that the regular expression sees as calls. None of them runs anything.

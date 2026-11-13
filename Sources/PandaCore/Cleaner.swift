@@ -58,6 +58,9 @@ public final class Cleaner {
     /// The clock, and the stale limit of the settings. A worktree that changed inside the limit is not removed. Tests replace the clock.
     var now: () -> Date = Date.init
     public var staleDays = Config.defaultStaleDays
+    /// When true, an item that has an owner app is skipped if the list of running programs could not be read. Only the unattended
+    /// command line clean sets it. The default is false, so the menu works as before.
+    public var requireProgramList = false
     /// The newest list of working folders, and when we read it (`systemUptime`). A build folder is checked again after the measuring.
     /// We read the list again if the last read is not newer than the start of that measuring, so the list is never older than the measuring.
     private var activeSnapshot: (list: [String], at: TimeInterval) = ([], -.infinity)
@@ -123,7 +126,14 @@ public final class Cleaner {
             // Nothing is cleaned while the app that uses it runs. We look again for each item,
             // because the user can start the app while the clean runs.
             if let owner = finding.owner {
-                let running = runningApps.take().running(owner)
+                let snapshot = runningApps.take()
+                // The unattended clean sets this. The menu does not: a person looks at the app and decides.
+                if requireProgramList, !snapshot.processListRead {
+                    Log.warn("skip \(finding.id): the list of running programs could not be read")
+                    report.skipped.append("\(finding.location): \(CleanPlan.processListUnreadReason)")
+                    continue
+                }
+                let running = snapshot.running(owner)
                 if !running.isEmpty {
                     let names = running.joined(separator: " and ")
                     Log.warn("skip \(finding.id): \(names) is running")

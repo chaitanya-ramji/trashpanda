@@ -110,6 +110,30 @@ final class CleanerDeleteTests: XCTestCase {
         XCTAssertTrue((report.skipped.first ?? "").contains("link"), "\(report.skipped)")
     }
 
+    /// The guard after the measuring is a check of its own. Here the last folder becomes a link that points to ITSELF: the shape check
+    /// of the whole path (`isPlain`) accepts it (the path is equal to its resolved path, because nothing can be resolved), and only the
+    /// guard refuses it. If the second `guardian.check` is removed, the run goes on, cannot read the folder, and the report has a
+    /// failure and no guard reason. The test fails then.
+    func testRemoveContentsSecondGuardRefusesWhatIsPlainAcceptsAfterTheMeasuring() throws {
+        let box = try Sandbox()
+        let target = try box.file("Library/Caches/Demo/a.bin", bytes: 10).deletingLastPathComponent()
+        let keep = try box.file("Documents/letter.txt", bytes: 10)
+        let events = Events()
+        let cleaner = recorder(box, events: events) {
+            try? FileManager.default.removeItem(at: target)
+            try? FileManager.default.createSymbolicLink(atPath: target.path, withDestinationPath: "Demo")
+        }
+        cleaner.activeDirectories = { [] }
+        let report = cleaner.clean([contentsFinding(target)])
+        XCTAssertTrue(isPlain(target), "isPlain accepts this link, so only the guard can refuse it")
+        XCTAssertEqual(events.list, ["sizeOf"], "nothing is deleted")
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertTrue(report.failed.isEmpty, "\(report.failed)")
+        XCTAssertEqual(report.skipped.count, 1, "\(report.skipped)")
+        XCTAssertTrue(report.skipped.first?.hasSuffix("path is a symbolic link") == true, "\(report.skipped)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: keep.path))
+    }
+
     // MARK: A target that becomes a link
 
     /// A parent folder becomes a link while we measure. The path now leads somewhere else in the home folder. The guard cannot tell,

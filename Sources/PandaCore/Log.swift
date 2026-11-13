@@ -12,7 +12,34 @@ public enum Log {
     public static var fileURL: URL = defaultFileURL()
 
     static func defaultFileURL(underTest: Bool = isRunningUnderXCTest) -> URL {
-        chooseDefault(underTest: underTest, home: FileManager.default.homeDirectoryForCurrentUser, temp: NSTemporaryDirectory())
+        chooseDefault(underTest: underTest, home: realHome(), temp: NSTemporaryDirectory())
+    }
+
+    /// True for a path that starts with `/`, has no zero byte, and is not empty. A path like `~`, `.`, `sub`, or `` is not plain.
+    /// This check reads the text only. It never expands `~` and it never standardizes the path.
+    static func isPlainAbsolute(_ path: String) -> Bool {
+        path.hasPrefix("/") && !path.contains("\0")
+    }
+
+    /// The home folder for the log file. `CFFIXED_USER_HOME` and `HOME` are read as text first. When one of them is set but is not a
+    /// plain absolute path (for example `~`), the system calls that expand it are NOT used: `FileManager.homeDirectoryForCurrentUser`
+    /// asks the home folder, expands the `~` in the answer, and asks again, so it calls itself until the stack is full (SIGSEGV).
+    /// The home folder from the user database is used instead. `normal` is the usual way, and a test can replace it.
+    static func realHome(cffixed: String? = environmentValue("CFFIXED_USER_HOME"), home: String? = environmentValue("HOME"),
+                         passwd: () -> String? = passwdHome,
+                         normal: () -> URL = { FileManager.default.homeDirectoryForCurrentUser }) -> URL {
+        let plain = [cffixed, home].allSatisfy { $0 == nil || isPlainAbsolute($0 ?? "") }
+        if plain { return normal() }
+        // `fileURLWithPath` with a plain absolute path does not expand anything.
+        let fallback = passwd().flatMap { isPlainAbsolute($0) ? $0 : nil } ?? "/var/empty"
+        return URL(fileURLWithPath: fallback, isDirectory: true)
+    }
+
+    private static func environmentValue(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
+
+    private static func passwdHome() -> String? {
+        guard let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir else { return nil }
+        return String(cString: dir)
     }
 
     /// The pure rule, with the inputs given. A test can call it with `underTest: false` and see the path of the real app.
@@ -112,19 +139,35 @@ public enum Log {
 
     // MARK: Privacy helpers
 
-    /// Replaces the home folder with `~`.
+    /// Replaces the home folder with `~`. It replaces the home only where a path starts: not in the middle of a longer path
+    /// (the home `/tmp/x` is not replaced in `/private/tmp/x`), and not when the home is the start of a longer name (`/tmp/xyz`).
     public static func redact(_ text: String, home: String) -> String {
         guard !home.isEmpty, home != "/" else { return text }
         let base = home.hasSuffix("/") ? String(home.dropLast()) : home
-        return text.replacingOccurrences(of: base + "/", with: "~/")
-            .replacingOccurrences(of: base, with: "~")
+        guard !base.isEmpty else { return text }
+        func isNameCharacter(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "-" }
+        var out = ""
+        var rest = text[...]
+        var before: Character?   // the character just before `rest`
+        while let hit = rest.range(of: base) {
+            out += rest[rest.startIndex..<hit.lowerBound]
+            let last = hit.lowerBound > rest.startIndex ? rest[rest.index(before: hit.lowerBound)] : before
+            let next = hit.upperBound < rest.endIndex ? rest[hit.upperBound] : nil
+            let afterNext = next.flatMap { _ in rest.index(after: hit.upperBound) < rest.endIndex ? rest[rest.index(after: hit.upperBound)] : nil }
+            let startsPath = last.map { !isNameCharacter($0) && !"/.~".contains($0) } ?? true
+            let endsPath = next.map { $0 == "/" || !(isNameCharacter($0) || ($0 == "." && afterNext.map(isNameCharacter) == true)) } ?? true
+            out += startsPath && endsPath ? "~" : String(rest[hit])
+            before = rest[hit].last
+            rest = rest[hit.upperBound...]
+        }
+        return out + rest
     }
 
     /// The last 200 lines of the log, for a person to read before sharing.
     /// Each path keeps its first two parts under the home folder. The rest becomes a count.
     public static func exportForReport() -> String {
         flush()
-        return exportForReport(from: fileURL, home: FileManager.default.homeDirectoryForCurrentUser.path)
+        return exportForReport(from: fileURL, home: realHome().path)
     }
 
     static func exportForReport(from url: URL, home: String, maxLines: Int = 200) -> String {

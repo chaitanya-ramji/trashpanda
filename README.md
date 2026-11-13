@@ -264,6 +264,7 @@ An item would be cleaned only if all of these are true. The checks run in the or
 | `nothing to clean now` | The Cleaner finds its targets again from a fixed rule (browser caches, old logs, old test browsers, old update files). The rule finds none now. |
 | `project is in use` | A program runs in the project of the build folder. The command line does not start a program to find out, so it checks this only when the list of working folders is known (it is not known on the command line). The Cleaner reads it again at clean time. |
 | `owner app is open (<name>)` | The app that uses the item is open. The command line cannot ask an app to quit, the menu can. |
+| `running programs could not be read, so the owner app is not known` | The item has an owner app, and the list of running programs could not be read (for example `ps` did not start). The command line fails closed and skips the item. The menu is not changed. |
 | `needs a person (tool item)` | The item is not a file delete that the Cleaner does alone: a tool removes it, or it needs the project list of the app. The command line never runs a tool. See "What the command line cleans" below. This check runs last, so each other reason keeps its text. |
 
 A folder with children that cannot be deleted (for example a folder with mode `0o555`) can still show `wouldClean`. The plan only checks that the folder can be listed. The real clean then reports a partial result for it (`failed`, with the real reason, and the bytes that did leave the disk).
@@ -323,7 +324,7 @@ This command removes the safe items that the dry run lists. It asks nothing, so 
 
 How it works:
 
-1. It refuses to run as root (exit 77), because `~` would be the home folder of root. It needs a home folder that exists (else exit 1). It never falls back to `/`.
+1. It refuses to run as root (exit 77), because `~` would be the home folder of root. It needs a home folder that exists, that is a plain folder (not a link, and with no link in its path), and whose path is absolute (else exit 1). It never falls back to `/`. It checks all of this before it writes any log line and before it scans, so it never makes a missing home folder.
 2. It takes a lock (see below). If another run holds it, it exits with 75.
 3. It makes a **fresh scan** in the same run (the scan can take about 30 seconds), and the unattended plan from it. The command line takes no id, no path, and no item from the arguments, from a file, or from the environment. There is no such option.
 4. For each item with `wouldClean` true, in the order of the scan, it gives the item to the real `Cleaner`, one item at a time. The Cleaner has all the checks of the app: the shape of the path, the measuring, "gone again", the keep list, the path guard, the marker files, the owner app (read again right before each item), and the link checks. A skipped item never reaches the Cleaner. The command line has no delete rule of its own.
@@ -339,7 +340,7 @@ With `--json` the output is one JSON object, still **schema 1**, with the findin
 | --- | --- | --- |
 | `mode` | string | Always `clean`. |
 | `deleteMode` | string | `permanent` or `trash`, from your settings. |
-| `stopped` | boolean | `true` when SIGINT or SIGTERM stopped the run. The items that were left are `skipped` with the reason `stopped by signal`. |
+| `stopped` | boolean | `true` when SIGINT, SIGQUIT, or SIGTERM stopped the run. The items that were left are `skipped` with the reason `stopped by signal`. |
 | `note` | string | In trash mode: `The space is not free yet. It is free when you empty the Trash.` Empty in permanent mode. |
 | `totals.cleaned`, `totals.skipped`, `totals.failed` | number | The number of items for each result. |
 | `totals.freedBytes` | number | Bytes that really left the disk, as the Cleaner measured them. Never the estimate. |
@@ -364,15 +365,15 @@ With `--json` the output is one JSON object, still **schema 1**, with the findin
 
 **Partial results.** A folder with children that cannot be deleted (for example mode `0o555`) is reported as `failed`, with the real reason (`N items stayed`) and the bytes that did leave. The other items go on. A folder whose children were all skipped (for example by the keep list) is `skipped`, not `cleaned`.
 
-**One clean at a time (lock).** The run takes an exclusive, non-blocking `flock` on `~/Library/Logs/TrashPanda/clean.lock` (mode 0600, in the 0700 log folder). If another run holds it, this run exits at once with 75 and does not wait. The system frees the lock when the program ends, also after a crash. The lock file must be a plain file with one name: a link, a pipe, or a file with a second hard link is refused (exit 1). If the lock cannot be opened, the run does not go on. The menu app does **not** take this lock: a clean from the menu can run at the same time as a command line clean. (Both use the Cleaner, which checks each path right before it deletes.)
+**One clean at a time (lock).** The run takes an exclusive, non-blocking `flock` on `~/Library/Logs/TrashPanda/clean.lock` (mode 0600, in the 0700 log folder). A lock file that already exists with another mode (for example 0644) is fixed to 0600 with `fchmod` on the open file. If it cannot be fixed, the run does not go on (exit 1). If another run holds it, this run exits at once with 75 and does not wait. The system frees the lock when the program ends, also after a crash. The lock file must be a plain file with one name: a link, a pipe, or a file with a second hard link is refused (exit 1). If the lock cannot be opened, the run does not go on. The menu app does **not** take this lock: a clean from the menu can run at the same time as a command line clean. (Both use the Cleaner, which checks each path right before it deletes.)
 
-**Signals.** SIGINT (Ctrl-C) and SIGTERM do not act at once. They take effect when the scan ends (the scan can take about 30 seconds) and after the current item. An item that runs always finishes. When the run sees the signal it logs `stopped by signal`, prints the report (`stopped: true`, every item that did not start is `skipped` with exactly the reason `stopped by signal`, and it is not counted as tried), and exits with 130 (SIGINT) or 143 (SIGTERM). A signal that arrives during the last item still gives 130 or 143, and the text says that all items were finished. A second Ctrl-C is ignored: it does not stop the item and it does not end the run sooner. SIGKILL cannot be caught: an item can then stop in the middle, as with any program.
+**Signals.** SIGINT (Ctrl-C), SIGTERM, and SIGQUIT do not act at once. SIGHUP (the terminal closes) is ignored: the run goes on and finishes, and no item is cut in the middle. The three stop signals take effect when the scan ends (the scan can take about 30 seconds) and after the current item. An item that runs always finishes. When the run sees the signal it logs `stopped by signal`, prints the report (`stopped: true`, every item that did not start is `skipped` with exactly the reason `stopped by signal`, and it is not counted as tried), and exits with 130 (SIGINT), 131 (SIGQUIT), or 143 (SIGTERM). A signal that arrives during the last item still gives 130, 131, or 143, and the text says that all items were finished. A second Ctrl-C is ignored: it does not stop the item and it does not end the run sooner. SIGKILL cannot be caught: an item can then stop in the middle, as with any program.
 
 **Time limit.** The clean itself has no time limit: a large folder takes the time that the disk needs. The read-only tools of the scan, and `ps`, `lsof`, and `hdiutil info` for each item, have their own time limits. None of them changes anything.
 
 **Owner app check.** The command line never runs the main run loop of the app. So before each read of the running apps (once for the plan, and again for each item that has an owner app) it runs the main run loop for 50 ms, so that the list of macOS is as fresh as it can be. An app that starts in the last moments before an item can still be missed: the check is best effort, and the Cleaner also checks again right before each item. Apps that are known only by their bundle id (browsers, Electron apps) depend on this list.
 
-**Home folder.** The run exits with 1, and scans nothing, when `CFFIXED_USER_HOME` or `HOME` is set but not an absolute path, or when the home is `/`, does not exist, or is not a folder.
+**Home folder.** The run exits with 1, and scans nothing, when `CFFIXED_USER_HOME` or `HOME` is set but is not a plain absolute path (`~`, a text that starts with `~`, `.`, a relative path, or an empty text), or when the home is `/`, does not exist, is not a folder, or is a link (or has a link in its path). The checks read the text only: a `~` is never expanded. `--scan` and `--clean-safe --dry-run` refuse a bad value of these variables in the same way. A refused home is written to the log only when the log file is in an absolute place, never in the current folder. A home that does not exist gets no log line, because the log would make it.
 
 **Root.** `trashpanda --clean-safe --yes` exits with 77 when the effective user is root. Run it as the user whose caches you want to clean. The dry run does not check this: it only reads.
 
@@ -392,6 +393,7 @@ With `--json` the output is one JSON object, still **schema 1**, with the findin
 | 75 | Another `--clean-safe --yes` run holds the lock. Nothing was cleaned. |
 | 77 | `--clean-safe --yes` was started as root. Nothing was cleaned. |
 | 130 | Stopped by SIGINT (`--clean-safe --yes`). |
+| 131 | Stopped by SIGQUIT (`--clean-safe --yes`). |
 | 143 | Stopped by SIGTERM (`--clean-safe --yes`). |
 
 Wrong options include a value, an empty text, a repeated option, or `-psn_...` given to `--clean-safe --yes` or `--clean-safe --dry-run` (they take only their own options, each one at most once), `--clean-safe` alone, `--dry-run` without `--clean-safe`, `--yes` without `--clean-safe`, `--yes` together with `--dry-run`, `--scan`, `--demo`, `--write-icons`, `--dialog`, `--submenu`, `--hover`, `--click`, `--backdrop`, `--version`, or `--help`, `--json` without `--scan` or `--clean-safe`, `--scan` together with `--clean-safe`, `--write-icons` without a folder, and `--demo` together with `--scan`, `--clean-safe`, or `--dry-run`. `--verbose` works only with `--clean-safe --dry-run` and `--clean-safe --yes`, and it cannot be used with `--json`. A wrong option never starts the menu bar app.

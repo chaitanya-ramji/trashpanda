@@ -154,7 +154,8 @@ public enum CommandLineCheck {
     public static func error(_ arguments: [String]) -> String? {
         let args = arguments.dropFirst()
         let unknown = args.filter { $0.hasPrefix("-") && !knownOptions.contains($0) && !$0.hasPrefix("-psn_") }
-        if !unknown.isEmpty { return "Unknown option: \(unknown.joined(separator: " "))" }
+        // The message never repeats the text of an argument: it could be a secret (`--password=...`, `-psn_...`).
+        if !unknown.isEmpty { return "Unknown option" }
         // `--yes` is for the real clean (`--clean-safe --yes`). It deletes, so it mixes with nothing else.
         if args.contains("--yes") {
             if !args.contains("--clean-safe") { return "--yes works only with --clean-safe" }
@@ -201,8 +202,23 @@ public enum CommandLineCheck {
             return "\(command) takes no value. Only these options are allowed: \(allowed.sorted().joined(separator: " "))"
         }
         let foreign = args.filter { !allowed.contains($0) }
-        if !foreign.isEmpty { return "\(command) cannot be used with \(foreign.joined(separator: " "))" }
+        if !foreign.isEmpty {
+            // Only an option that this program knows is named. Any other argument (for example `-psn_...`) is never repeated.
+            let known = foreign.filter { knownOptions.contains($0) }
+            return "\(command) cannot be used with \(known.isEmpty ? "other arguments" : known.joined(separator: " "))"
+        }
         if let twice = args.first(where: { option in args.filter { $0 == option }.count > 1 }) { return "\(twice) was given more than once" }
+        return nil
+    }
+
+    /// nil when the home values are fine. Else the message for stderr (exit code 1). `CFFIXED_USER_HOME` and `HOME` must be not set or
+    /// plain absolute paths, and the home of the system must be a plain absolute path. A value like `~`, `.`, `sub`, or an empty text
+    /// is refused. This reads text only: it never expands `~` and never standardizes a path (that can call itself without end).
+    public static func homeError(_ values: (cffixedUserHome: String?, home: String?, resolved: String)) -> String? {
+        let bad = [values.cffixedUserHome, values.home].contains { $0 != nil && !Log.isPlainAbsolute($0 ?? "") }
+        if bad || !Log.isPlainAbsolute(values.resolved) {
+            return "CFFIXED_USER_HOME, HOME, or the home folder is not an absolute path. Nothing was cleaned."
+        }
         return nil
     }
 

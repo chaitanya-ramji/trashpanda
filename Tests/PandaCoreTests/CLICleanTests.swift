@@ -293,6 +293,7 @@ final class CLICleanTests: XCTestCase {
             XCTAssertEqual(result?.exitCode, 1, home.path)
             XCTAssertTrue(result?.stderr.contains("home folder could not be found") == true, home.path)
             XCTAssertFalse(logs.contains { $0.contains("plan:") }, "no scan, no plan")
+            XCTAssertEqual(logs, [], "no log line before the home is known to exist: the log would make it")
         }
         XCTAssertEqual(snapshot(box.home), before)
     }
@@ -1059,6 +1060,311 @@ final class CLICleanTests: XCTestCase {
         let skipLines = logs.filter { $0.hasPrefix("clean plan-skip id=") }
         XCTAssertEqual(skipLines.count, skippedInPlan.count)
         XCTAssertTrue(skipLines.allSatisfy { $0.contains("reason=\"") })
+    }
+
+    // MARK: Follow-ups of #252
+
+    /// A scanner on any folder, also one that does not exist.
+    private func scanner(at home: URL) -> DiskScanner {
+        DiskScanner(home: home, config: Config(keep: [], deleteMode: .permanent), useOwnerTools: false, programPaths: { [] },
+                    openClaudeBinaries: { _ in [] }, appName: { _ in nil }, activeDirectories: { [] })
+    }
+
+    private func command(_ args: [String], home: URL, values: (String?, String?, String),
+                         box: Sandbox, canLog: Bool = true, log: @escaping (CLILogLevel, String) -> Void) -> (CLIResult?, Int) {
+        var built = 0
+        var env = environment(box)
+        env.homeValues = { values }
+        env.canLog = { canLog }
+        let result = CLICommand.run(arguments: ["t"] + args, scanner: { built += 1; return self.scanner(at: home) }(),
+                                    runningApps: RunningApps { RunningSnapshot(apps: []) }, clean: env, log: log)
+        return (result, built)
+    }
+
+    /// F1. The REAL log is pointed at a file below the missing home. A log line would make the missing home folder.
+    /// An injected log closure cannot show this, so the test uses `Log` itself.
+    func testAMissingHomeIsNeverMadeByTheRealLogAndGivesExit1() throws {
+        let box = try makeHome()
+        let missing = box.home.deletingLastPathComponent().appendingPathComponent("missing-home")
+        let saved = Log.fileURL
+        Log.fileURL = missing.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+        defer { Log.fileURL = saved }
+        for args in [["--clean-safe", "--yes"], ["--clean-safe", "--yes", "--json"]] {
+            let (result, _) = command(args, home: missing, values: (missing.path, missing.path, missing.path), box: box) { level, text in
+                switch level { case .info: Log.info(text); case .warn: Log.warn(text) }
+            }
+            Log.flush()
+            XCTAssertEqual(result?.exitCode, 1)
+            XCTAssertEqual(result?.stdout, "")
+            XCTAssertTrue(result?.stderr.contains("home folder could not be found") == true)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path), "the missing home folder must NOT be made")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: lockFolder(box).path), "no lock is made")
+        }
+    }
+
+    func testAMissingHomeGivesNoLogLineAndNoScan() throws {
+        let box = try makeHome()
+        let missing = box.home.appendingPathComponent("nope")
+        var logs: [String] = []
+        let (result, _) = command(["--clean-safe", "--yes"], home: missing, values: (nil, nil, missing.path), box: box) { _, t in logs.append(t) }
+        XCTAssertEqual(result?.exitCode, 1)
+        XCTAssertEqual(logs, [], "a log line would make the missing folders")
+    }
+
+    /// F2. The values are text only. The system home is never asked when a value is bad (that call can recurse without end).
+    func testAHomeValueWithATildeOrEmptyIsRefusedBeforeAnythingElse() throws {
+        let box = try makeHome()
+        let before = snapshot(box.home)
+        let bad: [(String?, String?, String)] = [("~", box.home.path, box.home.path), (box.home.path, "~", box.home.path), ("~/x", nil, ""),
+                                                 ("~user", nil, ""), ("", nil, ""), (nil, "", ""), (nil, nil, "~"), (nil, nil, "")]
+        for values in bad {
+            for args in [["--clean-safe", "--yes"], ["--clean-safe", "--dry-run"], ["--scan"]] {
+                var logs: [String] = []
+                let (result, built) = command(args, home: box.home, values: values, box: box) { _, t in logs.append(t) }
+                XCTAssertEqual(result?.exitCode, 1, "\(values) \(args)")
+                XCTAssertEqual(result?.stdout, "")
+                XCTAssertTrue(result?.stderr.contains("not an absolute path") == true)
+                XCTAssertEqual(built, 0, "\(values) \(args): no scanner")
+                XCTAssertFalse(logs.contains { $0.hasPrefix("cli plan") || $0.hasPrefix("cli lock") })
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lockFolder(box).path))
+        XCTAssertEqual(snapshot(box.home), before)
+    }
+
+    func testLogDoesNotAskTheSystemForAHomeThatIsNotPlain() {
+        var asked = 0
+        let normal: () -> URL = { asked += 1; return URL(fileURLWithPath: "/never") }
+        for value in ["~", "~/x", "~root", "", ".", "sub", ".."] {
+            let url = Log.realHome(cffixed: value, home: "/Users/example", passwd: { "/Users/example" }, normal: normal)
+            XCTAssertEqual(url.path, "/Users/example", value)
+            let other = Log.realHome(cffixed: nil, home: value, passwd: { "/Users/example" }, normal: normal)
+            XCTAssertEqual(other.path, "/Users/example", value)
+        }
+        XCTAssertEqual(asked, 0, "the system call that recurses is never made for a bad value")
+        // A bad value and no usable passwd home: a fixed folder, never a relative one.
+        XCTAssertEqual(Log.realHome(cffixed: "~", home: nil, passwd: { nil }, normal: normal).path, "/var/empty")
+        XCTAssertEqual(Log.realHome(cffixed: "~", home: nil, passwd: { "relative" }, normal: normal).path, "/var/empty")
+        // Plain values use the usual way.
+        XCTAssertEqual(Log.realHome(cffixed: "/Users/example", home: nil, passwd: { "/x" }, normal: normal).path, "/never")
+        XCTAssertEqual(asked, 1)
+        XCTAssertTrue(Log.isPlainAbsolute("/Users/example"))
+        for value in ["~", "", ".", "x", "~/a", "/a\u{0}b"] { XCTAssertFalse(Log.isPlainAbsolute(value), value) }
+    }
+
+    /// F3. No log line is written when the log file is not in an absolute place.
+    func testARefusedHomeIsLoggedOnlyWhenTheLogFileIsAbsolute() throws {
+        let box = try makeHome()
+        for canLog in [false, true] {
+            var logs: [String] = []
+            let (result, _) = command(["--clean-safe", "--yes"], home: box.home, values: (".", nil, box.home.path), box: box, canLog: canLog) { _, t in logs.append(t) }
+            XCTAssertEqual(result?.exitCode, 1)
+            if canLog {
+                XCTAssertTrue(logs.contains { $0.contains("home folder is not a plain absolute path, exit 1") }, "\(logs)")
+            } else {
+                XCTAssertEqual(logs, [], "no log line is written under a relative path")
+            }
+            var scanLogs: [String] = []
+            _ = command(["--scan"], home: box.home, values: ("sub", nil, box.home.path), box: box, canLog: canLog) { _, t in scanLogs.append(t) }
+            XCTAssertEqual(scanLogs.isEmpty, !canLog)
+        }
+        // The real default says no when the log file is relative.
+        let saved = Log.fileURL
+        defer { Log.fileURL = saved }
+        Log.fileURL = URL(fileURLWithPath: "/tmp/x/trashpanda.log")
+        XCTAssertTrue(CLICleanEnvironment().canLog())
+        Log.fileURL = URL(string: "relative/trashpanda.log") ?? saved
+        XCTAssertEqual(CLICleanEnvironment().canLog(), Log.isPlainAbsolute(Log.fileURL.path))
+    }
+
+    /// F4. A value of an argument is never printed.
+    func testNoArgumentValueIsRepeatedOnStderr() throws {
+        let box = try makeHome()
+        let long = String(repeating: "A", count: 5000)
+        let secret = "hunter2SECRET"
+        let sets: [[String]] = [["--clean-safe", "--yes", "-psn_\(secret)"], ["--clean-safe", "--yes", "--password=\(secret)"],
+                                ["--clean-safe", "--dry-run", "--password=\(secret)"], ["--scan", "--token=\(secret)"],
+                                ["--clean-safe", "--yes", long], ["--clean-safe", "--yes", "--" + long], ["--nope=\(secret)"],
+                                ["-psn_\(secret)", "--clean-safe", "--dry-run"], ["--clean-safe", "--yes", "-x\(secret)"]]
+        for args in sets {
+            let r = run(args, box)
+            let err = try XCTUnwrap(r.result?.stderr, "\(args)")
+            XCTAssertEqual(r.result?.exitCode, 64, "\(args)")
+            XCTAssertFalse(err.contains(secret), "\(args): \(err)")
+            XCTAssertFalse(err.contains("AAAA"), "\(args)")
+            XCTAssertFalse(r.logs.joined().contains(secret), "\(args)")
+            XCTAssertLessThan(err.count, 2000, "\(args)")
+        }
+        XCTAssertTrue(try XCTUnwrap(run(["--nope"], box).result?.stderr).hasPrefix("Unknown option\n"))
+        XCTAssertTrue(try XCTUnwrap(run(["--clean-safe", "--yes", "--scan"], box).result?.stderr).hasPrefix("--yes cannot be used with --scan\n"))
+        XCTAssertTrue(try XCTUnwrap(run(["--clean-safe", "--yes", "-psn_1"], box).result?.stderr)
+            .hasPrefix("--clean-safe --yes cannot be used with other arguments\n"))
+    }
+
+    /// F5. An old lock file with a wide mode is fixed to 0600.
+    func testAnExistingLockFileWithAWideModeIsFixedTo0600() throws {
+        let box = try Sandbox()
+        let folder = box.home.deletingLastPathComponent().appendingPathComponent("lock-mode")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("clean.lock")
+        try Data().write(to: file)
+        for mode in [0o644, 0o666, 0o640, 0o755] {
+            XCTAssertEqual(chmod(file.path, mode_t(mode)), 0)
+            let lock = try CLILock.acquire(in: folder).get()
+            let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+            XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o600, "from \(String(mode, radix: 8))")
+            lock.release()
+        }
+        // A file that we cannot open for writing (mode 0400) is refused, and its mode is not changed.
+        XCTAssertEqual(chmod(file.path, 0o400), 0)
+        XCTAssertNotNil(CLILock.acquire(in: folder).failureValue)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? NSNumber)?.intValue, 0o400)
+        // A link in place of the file is still refused, and the file behind it keeps its mode.
+        let target = try box.file("victim.txt", bytes: 5)
+        XCTAssertEqual(chmod(target.path, 0o644), 0)
+        let linked = box.home.deletingLastPathComponent().appendingPathComponent("lock-mode-link")
+        try FileManager.default.createDirectory(at: linked, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linked.appendingPathComponent("clean.lock"), withDestinationURL: target)
+        XCTAssertNotNil(CLILock.acquire(in: linked).failureValue)
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? NSNumber)?.intValue, 0o644)
+    }
+
+    /// F6. The home is replaced only at the start of a path.
+    func testRedactReplacesTheHomeOnlyAtTheStartOfAPath() {
+        XCTAssertEqual(Log.redact("/private/tmp/x/a", home: "/tmp/x"), "/private/tmp/x/a")
+        XCTAssertEqual(Log.redact("/tmp/xyz/a", home: "/tmp/x"), "/tmp/xyz/a")
+        XCTAssertEqual(Log.redact("/tmp/x.bak", home: "/tmp/x"), "/tmp/x.bak")
+        XCTAssertEqual(Log.redact("/tmp/x/Library/a", home: "/tmp/x"), "~/Library/a")
+        XCTAssertEqual(Log.redact("/tmp/x", home: "/tmp/x"), "~")
+        XCTAssertEqual(Log.redact("id=/tmp/x/a and \"/tmp/x/b\" (/tmp/x). /tmp/x.", home: "/tmp/x"), "id=~/a and \"~/b\" (~). ~.")
+        XCTAssertEqual(Log.redact("a /tmp/x/a /private/tmp/x/b /tmp/x/c", home: "/tmp/x"), "a ~/a /private/tmp/x/b ~/c")
+        XCTAssertEqual(Log.redact("/Users/example/Library/x", home: "/Users/example/"), "~/Library/x")
+        XCTAssertEqual(Log.redact("/Users/exampleuser/x", home: "/Users/example"), "/Users/exampleuser/x")
+        XCTAssertEqual(Log.redact("nothing", home: "/"), "nothing")
+        XCTAssertEqual(Log.redact("nothing", home: ""), "nothing")
+    }
+
+    /// F7. A signal during the last item: the log does not say that items are left.
+    func testTheSignalLogLineIsRightWhenTheSignalComesDuringTheLastItem() throws {
+        let box = try makeHome()
+        let planned = try dryRunReport(try makeHome()).findings.filter(\.wouldClean).count
+        let stopLast = CLIStop()
+        var count = 0
+        let last = run(["--clean-safe", "--yes"], box, stop: stopLast) { _ in count += 1; if count == planned { stopLast.request(signal: SIGTERM) } }
+        let line = try XCTUnwrap(last.logs.first { $0.hasPrefix("cli stopped by signal") }, "\(last.logs)")
+        XCTAssertEqual(last.logs.filter { $0.hasPrefix("cli stopped by signal") }.count, 1)
+        XCTAssertTrue(line.contains("SIGTERM"), line)
+        XCTAssertFalse(line.contains("left"), line)
+        XCTAssertTrue(line.contains("every item was already finished"), line)
+        // A signal in the middle: items are left, and the line says so.
+        let stopFirst = CLIStop()
+        var n = 0
+        let first = run(["--clean-safe", "--yes"], try makeHome(), stop: stopFirst) { _ in n += 1; if n == 1 { stopFirst.request(signal: SIGTERM) } }
+        let mid = try XCTUnwrap(first.logs.first { $0.hasPrefix("cli stopped by signal") })
+        XCTAssertTrue(mid.contains("the items that are left are not cleaned"), mid)
+        XCTAssertEqual(first.logs.filter { $0.hasPrefix("cli stopped by signal") }.count, 1)
+    }
+
+    /// F9. SIGQUIT is a stop like SIGTERM (131). SIGHUP is ignored.
+    func testSIGQUITStopsLikeSIGTERMWithExit131AndSIGHUPIsIgnored() throws {
+        let stop = CLIStop()
+        XCTAssertEqual(stop.signalName, "signal 0")
+        stop.request(signal: SIGQUIT)
+        XCTAssertEqual(stop.exitCode, 131)
+        XCTAssertEqual(stop.signalName, "SIGQUIT")
+        XCTAssertEqual(CLISignals.stopSignals, [SIGINT, SIGTERM, SIGQUIT])
+        XCTAssertEqual(CLISignals.ignoredSignals, [SIGHUP])
+        let box = try makeHome()
+        let before = snapshot(box.home)
+        let quit = CLIStop()
+        quit.request(signal: SIGQUIT)
+        let r = run(["--clean-safe", "--yes", "--json"], box, stop: quit)
+        XCTAssertEqual(r.result?.exitCode, 131)
+        XCTAssertTrue(r.sentToCleaner.isEmpty)
+        XCTAssertEqual(snapshot(box.home), before)
+        XCTAssertTrue(try decodeClean(r).stopped)
+        XCTAssertTrue(r.logs.contains { $0.contains("stopped by signal SIGQUIT") })
+        // A stop in the middle: the item that runs finishes.
+        let mid = CLIStop()
+        var count = 0
+        let m = run(["--clean-safe", "--yes", "--json"], try makeHome(), stop: mid) { _ in count += 1; if count == 1 { mid.request(signal: SIGQUIT) } }
+        XCTAssertEqual(m.result?.exitCode, 131)
+        XCTAssertEqual(m.sentToCleaner.count, 1)
+        XCTAssertFalse(CLISignals.stopSignals.contains(SIGHUP))
+    }
+
+    private func editorFinding(_ box: Sandbox) throws -> Finding {
+        let file = try box.file("Library/Caches/Editor/a.bin", bytes: 100_000)
+        return Finding(id: "editor", ecosystem: .python, title: "Editor cache", location: "~/Library/Caches/Editor", bytes: 100_000, tier: .safe,
+                       rebuild: .seconds, action: .removeContents(file.deletingLastPathComponent()), owner: CleanPlanTests.editor)
+    }
+
+    /// F10. The list of programs could not be read: an item with an owner app is skipped, other items are cleaned.
+    func testAnItemWithAnOwnerAppIsSkippedWhenTheProgramListCannotBeRead() throws {
+        let box = try makeHome()
+        let editor = try editorFinding(box)
+        let file = box.home.appendingPathComponent("Library/Caches/Editor/a.bin")
+        let unreadable: @Sendable () -> RunningSnapshot = { RunningSnapshot(apps: [], processes: [], processListRead: false) }
+        let dry = run(["--clean-safe", "--dry-run", "--json"], box, apps: unreadable, extra: [editor])
+        let planned = try JSONDecoder().decode(DryRunReport.self, from: Data(try XCTUnwrap(dry.result?.stdout).utf8))
+        let entry = try XCTUnwrap(planned.findings.first { $0.base.id == "editor" })
+        XCTAssertFalse(entry.wouldClean)
+        XCTAssertEqual(entry.skipReason, CleanPlan.processListUnreadReason)
+        let r = run(["--clean-safe", "--yes", "--json"], box, apps: unreadable, extra: [editor])
+        XCTAssertEqual(r.result?.exitCode, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "the owner item stays")
+        XCTAssertFalse(r.sentToCleaner.contains("editor"))
+        let report = try decodeClean(r)
+        XCTAssertEqual(report.findings.first { $0.base.id == "editor" }?.skipReason, CleanPlan.processListUnreadReason)
+        XCTAssertGreaterThan(report.totals.cleaned, 0, "items without an owner app are still cleaned")
+        // The list is read: the same item is cleaned.
+        let box2 = try makeHome()
+        let editor2 = try editorFinding(box2)
+        XCTAssertTrue(run(["--clean-safe", "--yes"], box2, extra: [editor2]).sentToCleaner.contains("editor"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: box2.home.appendingPathComponent("Library/Caches/Editor/a.bin").path))
+    }
+
+    /// F10, at the Cleaner: a forged plan says wouldClean, and the Cleaner still skips. The menu (default) is not changed.
+    func testTheCleanerSkipsAnOwnerItemWhenTheProgramListCannotBeReadAndOnlyForTheCommandLine() throws {
+        let box = try Sandbox()
+        let editor = try editorFinding(box)
+        let file = box.home.appendingPathComponent("Library/Caches/Editor/a.bin")
+        let (plan, result) = forgedPlan([editor])
+        let cleaner = makeCleaner(box, spy: Spy(), apps: { RunningSnapshot(apps: [], processListRead: false) })
+        cleaner.requireProgramList = true
+        let done = runPlan(plan, result, cleaner: cleaner, box: box)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(done.outcome(0).result, .skipped)
+        XCTAssertTrue(done.outcome(0).skipReason.contains(CleanPlan.processListUnreadReason), done.outcome(0).skipReason)
+        XCTAssertEqual(done.failed, 0)
+        // The menu does not set the flag: it works as before.
+        let menu = makeCleaner(box, spy: Spy(), apps: { RunningSnapshot(apps: [], processListRead: false) })
+        XCTAssertFalse(menu.requireProgramList)
+        XCTAssertEqual(runPlan(plan, result, cleaner: menu, box: box).outcome(0).result, .cleaned)
+    }
+
+    /// The home that is a link: stop at the start with a clear message. A plain fixture home still works (all other tests).
+    func testAHomeThatIsALinkIsRefusedAtTheStart() throws {
+        let box = try makeHome()
+        let before = snapshot(box.home)
+        let link = box.home.deletingLastPathComponent().appendingPathComponent("home-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: box.home)
+        var logs: [String] = []
+        let (result, _) = command(["--clean-safe", "--yes"], home: link, values: (link.path, link.path, link.path), box: box) { _, t in logs.append(t) }
+        XCTAssertEqual(result?.exitCode, 1)
+        XCTAssertEqual(result?.stdout, "")
+        XCTAssertTrue(result?.stderr.contains("home folder is a link") == true, result?.stderr ?? "")
+        XCTAssertFalse(logs.contains { $0.hasPrefix("cli plan") || $0.hasPrefix("cli lock") })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lockFolder(box).path))
+        XCTAssertEqual(snapshot(box.home), before)
+        // A link in the path of the home is refused too.
+        let parentLink = box.home.deletingLastPathComponent().appendingPathComponent("parent-link")
+        try FileManager.default.createSymbolicLink(at: parentLink, withDestinationURL: box.home.deletingLastPathComponent())
+        let deep = parentLink.appendingPathComponent("home")
+        let (second, _) = command(["--clean-safe", "--yes"], home: deep, values: (nil, nil, deep.path), box: box) { _, _ in }
+        XCTAssertEqual(second?.exitCode, 1)
+        XCTAssertTrue(second?.stderr.contains("home folder is a link") == true)
+        XCTAssertEqual(snapshot(box.home), before)
     }
 
     // MARK: Source

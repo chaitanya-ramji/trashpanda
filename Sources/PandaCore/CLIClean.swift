@@ -23,25 +23,32 @@ public final class CLIStop: @unchecked Sendable {
         return number
     }
 
-    /// 130 for SIGINT, 143 for SIGTERM: 128 plus the number of the signal, as a shell does.
+    /// 130 for SIGINT, 131 for SIGQUIT, 143 for SIGTERM: 128 plus the number of the signal, as a shell does.
     public var exitCode: Int32 { 128 + signalNumber }
 
     public var signalName: String {
         switch signalNumber {
         case SIGINT: return "SIGINT"
         case SIGTERM: return "SIGTERM"
+        case SIGQUIT: return "SIGQUIT"
         default: return "signal \(signalNumber)"
         }
     }
 }
 
-/// Connects SIGINT and SIGTERM to a `CLIStop`. The handlers run on a background queue, because the main thread is busy with the run.
+/// Connects SIGINT, SIGTERM, and SIGQUIT to a `CLIStop`, and ignores SIGHUP. The handlers run on a background queue, because the
+/// main thread is busy with the run.
 public enum CLISignals {
     private static var sources: [DispatchSourceSignal] = []
+    /// These signals ask the run to stop after the current item.
+    public static let stopSignals: [Int32] = [SIGINT, SIGTERM, SIGQUIT]
+    /// These signals are ignored. SIGHUP comes when the terminal closes. The run goes on and finishes, so no item is cut in the middle.
+    public static let ignoredSignals: [Int32] = [SIGHUP]
 
     /// Call it once, before the run. A second signal does not end the run at once: the run always finishes the item that it works on.
     public static func install(_ stop: CLIStop) {
-        for number in [SIGINT, SIGTERM] {
+        for number in ignoredSignals { signal(number, SIG_IGN) }
+        for number in stopSignals {
             // The default action ends the program at once. The dispatch source takes the signal instead.
             signal(number, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: number, queue: DispatchQueue.global(qos: .userInitiated))
@@ -70,7 +77,7 @@ public final class CLILock {
 
     deinit { release() }
 
-    /// Takes the lock, or says why not. The file has mode 0600, and the folder has mode 0700 when it is made here.
+    /// Takes the lock, or says why not. The file has mode 0600 (an old file with another mode is fixed, or refused), and the folder has mode 0700 when it is made here.
     public static func acquire(in folder: URL) -> Result<CLILock, Failure> {
         let fm = FileManager.default
         do {
@@ -88,6 +95,14 @@ public final class CLILock {
         guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_nlink == 1 else {
             close(fd)
             return .failure(.cannotOpen("the lock file \(path) is not a plain file with one name"))
+        }
+        // An old file can have a wider mode (for example 0644). Fix it here, on the open descriptor, never by path. If it cannot be
+        // fixed (the file is not ours), the run does not go on.
+        if (info.st_mode & 0o7777) != 0o600 {
+            guard fchmod(fd, 0o600) == 0, fstat(fd, &info) == 0, (info.st_mode & 0o7777) == 0o600 else {
+                close(fd)
+                return .failure(.cannotOpen("the lock file \(path) has a wrong mode and it could not be fixed"))
+            }
         }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             let busy = errno == EWOULDBLOCK
@@ -117,6 +132,9 @@ public struct CLICleanEnvironment {
     public var moveToTrash: ((URL) throws -> Void)?
     /// The working folders of the running programs, read at clean time. nil means the real read.
     public var activeDirectories: (() -> [String])?
+    /// True when the real log file is in an absolute place, so a refusal of a bad home may be written to it. A test gives its own.
+    /// A log line is never written under a relative path: the log folder would be made in the current folder.
+    public var canLog: () -> Bool = { Log.isPlainAbsolute(Log.fileURL.path) }
     /// Called with each finding right before it goes to the Cleaner. Tests use it to see exactly what the Cleaner gets.
     public var willClean: ((Finding) -> Void)?
     /// Called right before EACH read of the running apps (the plan, and each item that has an owner app). `NSWorkspace` only updates
@@ -127,9 +145,13 @@ public struct CLICleanEnvironment {
     }
     /// The values that decide the home folder: `CFFIXED_USER_HOME`, `HOME`, and the home that the system gives. nil means not set.
     /// A test gives its own values.
+    /// The system home is asked only when both values are plain: `NSHomeDirectory()` with `CFFIXED_USER_HOME=~` can call itself
+    /// without end (the program crashes). It is "" then, and `CommandLineCheck.homeError` refuses the run.
     public var homeValues: () -> (cffixedUserHome: String?, home: String?, resolved: String) = {
         func value(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
-        return (value("CFFIXED_USER_HOME"), value("HOME"), NSHomeDirectory())
+        let cffixed = value("CFFIXED_USER_HOME"), home = value("HOME")
+        let plain = [cffixed, home].allSatisfy { $0 == nil || Log.isPlainAbsolute($0 ?? "") }
+        return (cffixed, home, plain ? NSHomeDirectory() : "")
     }
 
     /// Gives the scan result of a run. nil means the real scan (`DiskScanner.scan`). Only a test sets it, so that it can add a finding
@@ -187,23 +209,30 @@ enum CLIClean {
             return refuse("trashpanda --clean-safe --yes does not run as root. Run it as the user whose caches you want to clean.",
                           code: 77, log: log, line: "refused to run as root")
         }
-        // A home that is set but not an absolute path (for example `CFFIXED_USER_HOME=.`) would become the current folder.
-        let values = environment.homeValues()
-        let badValue = [values.cffixedUserHome, values.home].contains { $0 != nil && !($0 ?? "").hasPrefix("/") }
-        guard !badValue, values.resolved.hasPrefix("/") else {
-            log(.info, beginText(nil))
-            return refuse("CFFIXED_USER_HOME, HOME, or the home folder is not an absolute path. Nothing was cleaned.", code: 1, log: log,
-                          line: "home folder is not an absolute path")
+        // A home that is set but not a plain absolute path (`.`, `sub`, `~`, or empty) would become the current folder, or it could crash.
+        // This check reads text only, and it comes before any other use of the home. The refusal goes to the real log only when the
+        // log file is in an absolute place (never in the current folder).
+        if let message = CommandLineCheck.homeError(environment.homeValues()) {
+            if environment.canLog() { log(.info, beginText(nil)) }
+            return refuse(message, code: 1, log: { level, text in if environment.canLog() { log(level, text) } },
+                          line: "home folder is not a plain absolute path")
         }
         let scan = scanner()
+        // (f) The real home folder must be known. We never fall back to `/`. This check comes BEFORE the first log line and before
+        // any scanner work: the log makes its folders, so a log line would make a home folder that does not exist.
+        // For the same reason a missing home gets no log line at all.
+        let home = URL(fileURLWithPath: Log.isPlainAbsolute(scan.home.path) ? scan.home.path : "/").standardizedFileURL
+        var isFolder: ObjCBool = false
+        guard Log.isPlainAbsolute(scan.home.path), home.path != "/",
+              FileManager.default.fileExists(atPath: home.path, isDirectory: &isFolder), isFolder.boolValue else {
+            return CLIResult(stdout: "", stderr: "The home folder could not be found. Nothing was cleaned.\n", exitCode: 1)
+        }
         // The first line of the run, before the scan, so that a scan that hangs or crashes leaves a trace.
         log(.info, beginText(scan.config.deleteMode.rawValue))
-        // (f) The real home folder must be known. We never fall back to `/`.
-        let home = scan.home.standardizedFileURL
-        var isFolder: ObjCBool = false
-        guard home.path.hasPrefix("/"), home.path != "/", FileManager.default.fileExists(atPath: home.path, isDirectory: &isFolder),
-              isFolder.boolValue else {
-            return refuse("The home folder could not be found. Nothing was cleaned.", code: 1, log: log, line: "home folder unknown")
+        // A home that is a link, or that has a link in its path, would refuse every item. Stop at the start with a clear message.
+        guard UpdateDownloads.isPlainPath(home) else {
+            return refuse("The home folder is a link, or a folder in its path is a link. Use the real path of the home folder. Nothing was cleaned.",
+                          code: 1, log: log, line: "home folder is a link")
         }
 
         // (a) One clean at a time.
@@ -234,6 +263,8 @@ enum CLIClean {
         let cleaner = Cleaner(guardian: scan.guardian, remaining: scan.remainingBytes(of:), runningApps: runningApps,
                               runtimeRequests: scan.runtimeRequests, deleteMode: plan.deleteMode)
         cleaner.staleDays = scan.config.staleDays
+        // Fail closed: if the list of running programs cannot be read, an item that has an owner app is skipped.
+        cleaner.requireProgramList = true
         if let move = environment.moveToTrash { cleaner.useTrashMove(move) }
         if let active = environment.activeDirectories { cleaner.activeDirectories = active }
         // The Cleaner gets ONE item at a time, so its own stop check is not used: the run checks the flag between items. An item
@@ -295,7 +326,8 @@ enum CLIClean {
         }
         // A signal that came during the scan, or during the last item, is still a stop: exit 130 or 143, and the log says so.
         if stop.isRequested {
-            if !stopLogged { log(.warn, "cli stopped by signal \(stop.signalName): the items that are left are not cleaned") }
+            // Nothing was skipped by the stop (that would have logged above), so no item is left.
+            if !stopLogged { log(.warn, "cli stopped by signal \(stop.signalName): every item was already finished") }
             run.stopped = true
         }
         return run
@@ -413,7 +445,7 @@ struct CleanRun {
 ///
 /// - `mode`: always `clean`.
 /// - `deleteMode`: `permanent` or `trash`, from the settings.
-/// - `stopped`: `true` when a signal (SIGINT or SIGTERM) stopped the run. The items that were left are `skipped` with the reason
+/// - `stopped`: `true` when a signal (SIGINT, SIGQUIT, or SIGTERM) stopped the run. The items that were left are `skipped` with the reason
 ///   `stopped by signal`.
 /// - `note`: in trash mode, the line that says that the space is not free until the Trash is emptied. Empty in permanent mode.
 /// - `totals.cleaned`, `skipped`, `failed`: the number of items for each result.

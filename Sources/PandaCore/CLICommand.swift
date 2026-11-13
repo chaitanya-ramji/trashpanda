@@ -30,7 +30,7 @@ public enum CLICommand {
                            Add --json for one JSON object (schema 1), or --verbose to list each skipped item.
                            --yes works only with --clean-safe. It cannot be used with any other option except --json and --verbose.
                            Exit codes: 0 done, 1 an item failed, 64 wrong option, 75 another clean runs, 77 run as root,
-                           130 or 143 stopped by SIGINT or SIGTERM.
+                           130, 131, or 143 stopped by SIGINT, SIGQUIT, or SIGTERM.
       --write-icons DIR    Write the app icon sizes to DIR.
       --demo [light|dark]  Show made-up data. Nothing is scanned or deleted.
       --version            Print the version.
@@ -54,6 +54,11 @@ public enum CLICommand {
         }
         if arguments.contains("--help") { return CLIResult(stdout: usage, stderr: "", exitCode: 0) }
         if arguments.contains("--version") { return CLIResult(stdout: version + "\n", stderr: "", exitCode: 0) }
+        // `--scan` and the dry run refuse a bad home too, before any log line and before the scanner is built.
+        if arguments.contains("--scan") || CommandLineCheck.isDryRun(arguments), let message = CommandLineCheck.homeError(clean.homeValues()) {
+            if clean.canLog() { log(.warn, "cli: home folder is not a plain absolute path, exit 1") }
+            return CLIResult(stdout: "", stderr: message + "\n", exitCode: 1)
+        }
         if arguments.contains("--scan") { return scan(arguments, scanner: scanner(), version: version, now: now, log: log) }
         // The command line never runs the main run loop, so `NSWorkspace` can be stale. Each read of the running apps is
         // preceded by a short run of the main run loop (a hook, so that a test can see it). The menu app does not use this.
