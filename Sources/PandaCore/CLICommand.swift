@@ -56,8 +56,11 @@ public enum CLICommand {
         if arguments.contains("--version") { return CLIResult(stdout: version + "\n", stderr: "", exitCode: 0) }
         // The home check comes FIRST for every command that scans, before the scanner is built and before any log line. The scanner
         // and the log can make folders, and a missing home must stay missing. A missing home gets no log line at all.
-        if arguments.contains("--scan") || CommandLineCheck.isDryRun(arguments) || CommandLineCheck.isClean(arguments),
-           let problem = CommandLineCheck.homeProblem(clean.homeValues()) {
+        // `--clean-safe --yes` as root is the exception: the root check of the clean comes first (exit 77), as the README lists it.
+        let asRoot = CommandLineCheck.isClean(arguments) && clean.effectiveUserID() == 0
+        let use: CommandLineCheck.HomeUse = CommandLineCheck.isClean(arguments) ? .clean : .read
+        if !asRoot, arguments.contains("--scan") || CommandLineCheck.isDryRun(arguments) || CommandLineCheck.isClean(arguments),
+           let problem = CommandLineCheck.homeProblem(clean.homeValues(), use: use) {
             if let line = problem.logLine, clean.canLog() { log(.warn, line) }
             return CLIResult(stdout: "", stderr: problem.message + "\n", exitCode: 1)
         }
@@ -109,7 +112,8 @@ public enum CLICommand {
                                         now: now())
         let report = DryRunReport(result, plan: plan, home: scanner.home.path)
         for entry in report.findings { log(.info, entry.logLine) }
-        let out = json ? report.json() : plan.text(verbose: verbose)
+        var out = json ? report.json() : plan.text(verbose: verbose)
+        if !json, !UpdateDownloads.isPlainPath(scanner.home) { out += CommandLineCheck.linkedHomeNote }
         let millis = Int(now().timeIntervalSince(started) * 1000)
         log(.info, "cli end dry-run \(plan.summary()) duration_ms=\(millis) exit=0")
         return CLIResult(stdout: out, stderr: "", exitCode: 0)

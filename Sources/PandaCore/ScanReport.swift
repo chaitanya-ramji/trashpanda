@@ -211,33 +211,58 @@ public enum CommandLineCheck {
         return nil
     }
 
+    /// What a command does with the home folder. `read` commands (`--scan`, `--clean-safe --dry-run`) only read, so a home that is a link
+    /// is allowed. The `clean` command deletes, so its home must be its own real path.
+    public enum HomeUse { case read, clean
+        var done: String { self == .clean ? "cleaned" : "scanned" }
+    }
+
     /// nil when the home values are fine. Else the message for stderr (exit code 1). `CFFIXED_USER_HOME` and `HOME` must be not set or
     /// plain absolute paths, and the home of the system must be a plain absolute path. A value like `~`, `.`, `sub`, or an empty text
     /// is refused. This reads text only: it never expands `~` and never standardizes a path (that can call itself without end).
-    public static func homeError(_ values: (cffixedUserHome: String?, home: String?, resolved: String)) -> String? {
+    public static func homeError(_ values: (cffixedUserHome: String?, home: String?, resolved: String), use: HomeUse = .clean) -> String? {
         let bad = [values.cffixedUserHome, values.home].contains { $0 != nil && !Log.isPlainAbsolute($0 ?? "") }
         if bad || !Log.isPlainAbsolute(values.resolved) {
-            return "CFFIXED_USER_HOME, HOME, or the home folder is not an absolute path. Nothing was cleaned."
+            return "CFFIXED_USER_HOME, HOME, or the home folder is not an absolute path. Nothing was \(use.done)."
         }
         return nil
     }
 
-    /// The full home check for every command that scans: the values are plain absolute paths, and the home exists, is a folder, is not
-    /// `/`, and is its own real path (no link, and no other letter case, in the path). It reads and never writes. nil means fine.
-    /// `message` goes to stderr (exit 1). `logLine` is nil when no log line may be written: a missing home must get none.
-    public static func homeProblem(_ values: (cffixedUserHome: String?, home: String?, resolved: String))
+    /// True when both paths are the same folder (links are followed, and the letter case does not matter on a volume that ignores it).
+    /// A path that cannot be read is never the same.
+    private static func sameFolder(_ a: String, _ b: String) -> Bool {
+        var x = stat(), y = stat()
+        guard stat(a, &x) == 0, stat(b, &y) == 0 else { return false }
+        return x.st_dev == y.st_dev && x.st_ino == y.st_ino
+    }
+
+    /// The full home check for every command that scans: the values are plain absolute paths, and the home exists, is a folder, and is
+    /// not `/`. `HOME`, when it is set, must be the same folder as the home that is used: the tools that the scan starts (npm, brew,
+    /// yarn, pnpm) get `HOME`, and they would write in another folder. For `.clean` the home must also be its own real path (no link,
+    /// and no other letter case, in the path). A `.read` command allows a link: it only reads, and the plan marks each item below a link
+    /// as skipped. It reads and never writes. nil means fine.
+    /// `message` goes to stderr (exit 1). `logLine` is nil when no log line may be written: a missing home, or a `HOME` that is not
+    /// the home, must get none.
+    public static func homeProblem(_ values: (cffixedUserHome: String?, home: String?, resolved: String), use: HomeUse = .clean)
         -> (message: String, logLine: String?)? {
-        if let message = homeError(values) { return (message, "cli: home folder is not a plain absolute path, exit 1") }
+        if let message = homeError(values, use: use) { return (message, "cli: home folder is not a plain absolute path, exit 1") }
         let home = URL(fileURLWithPath: values.resolved).standardizedFileURL
         var isFolder: ObjCBool = false
         guard home.path != "/", FileManager.default.fileExists(atPath: home.path, isDirectory: &isFolder), isFolder.boolValue else {
-            return ("The home folder could not be found. Nothing was cleaned.", nil)
+            return ("The home folder could not be found. Nothing was \(use.done).", nil)
         }
-        guard UpdateDownloads.isPlainPath(home) else {
+        if let env = values.home, !env.isEmpty, !sameFolder(env, home.path) {
+            return ("HOME and the home folder are not the same folder. Set both CFFIXED_USER_HOME and HOME to the same folder. Nothing was \(use.done).", nil)
+        }
+        if use == .clean, !UpdateDownloads.isPlainPath(home) {
             return (homeNotRealPathMessage, "cli: home folder path is not its real path, exit 1")
         }
         return nil
     }
+
+    /// The last lines of the text of a dry run when the home is a link, or has another letter case.
+    public static let linkedHomeNote =
+        "Note: the home folder path is a link, or is not its real path. Each item below a link is skipped (a folder in the path is a link), so nothing would be cleaned.\n"
 
     public static let homeNotRealPathMessage =
         "The home folder path is not the same as its real path (a link in the path, or another letter case). Use the real path of the home folder. Nothing was cleaned."
