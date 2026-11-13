@@ -197,6 +197,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var input = MenuInput(result: result, disk: disk, scanning: scanning, cleaning: cleaning, running: running,
                               staleDays: scanner.config.staleDays, updateVersion: updates.available?.version,
                               updateCheckEnabled: updates.isEnabled, loginEnabled: loginEnabled)
+        // Read the setting now, not the copy from when Settings opened: a hand edit of the file must show in the rows too.
+        deleteMode = Config.readDeleteMode()
         input.deleteMode = deleteMode
         input.lowDiskAlertGB = lowDiskAlertGB
         input.cleaningTitle = cleaner.progressText
@@ -340,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The words of the dialog for one item. They come from the core, where tests check them. Only demo mode uses this.
     func demoDialog(for f: Finding) -> FindingBox {
-        let c = Confirmation.forOne(f, staleDays: scanner.config.staleDays)
+        let c = Confirmation.forOne(f, staleDays: scanner.config.staleDays, mode: Config.readDeleteMode())
         return FindingBox([f], title: c.title, body: c.body, footer: c.footer, confirmTitle: c.confirmTitle,
                           cancelIsDefault: c.cancelIsDefault)
     }

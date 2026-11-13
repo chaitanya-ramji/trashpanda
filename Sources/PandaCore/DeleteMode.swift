@@ -163,6 +163,34 @@ public enum DeleteModeText {
         return "Quit \(apps) and free \(size)"
     }
 
+    /// The label that says what it costs to get an item back. It is on a row (second line), in the tooltip and in the dialog.
+    /// A file item with no way back ("Cannot be recovered") goes to the Trash in trash mode, so the user can put it back.
+    /// An item that a tool removes keeps its label: the tool removes it for good, also in trash mode.
+    public static func rebuildLabel(_ f: Finding, mode: DeleteMode, hfInstalled: Bool = true) -> String {
+        rebuildLabel(f.rebuild, movesFiles: DeleteMode.movesFiles(f.action, hfInstalled: hfInstalled), mode: mode)
+    }
+
+    public static func rebuildLabel(_ rebuild: Rebuild, movesFiles: Bool, mode: DeleteMode) -> String {
+        if mode == .trash, movesFiles, rebuild == .never { return goesToTrashLabel }
+        return rebuild.label
+    }
+
+    /// The label of a file item that has no rebuild, in trash mode. No full stop: a dialog adds one.
+    public static let goesToTrashLabel = "Goes to the Trash, so you can put it back"
+
+    /// The words for the part of the header line that counts the safe items. In trash mode, "free" is not used:
+    /// a file that goes to the Trash does not free space, and the safe items can also hold tool items.
+    public static func headerClause(_ size: String, wording: SplitTotals.Wording, mode: DeleteMode) -> String {
+        switch (mode, wording) {
+        case (.permanent, .long): return "You can free \(size) now"
+        case (.permanent, .compact): return "Free \(size) now"
+        case (.permanent, .short): return "Free \(size)"
+        case (.trash, .long): return "You can clean \(size) now"
+        case (.trash, .compact): return "Clean \(size) now"
+        case (.trash, .short): return "Clean \(size)"
+        }
+    }
+
     /// The short text in the menu bar after a clean.
     public static func flash(_ report: CleanReport) -> String {
         if report.deleteMode == .trash {

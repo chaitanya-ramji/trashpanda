@@ -164,8 +164,14 @@ public enum MenuText {
 
     /// A label shows on a row only when it adds information. When most rows have the same label, it goes once into the header.
     /// "Cannot be recovered" is never moved: each row that has it keeps it. One row alone keeps its label.
-    public static func rebuildNotes(_ list: [Rebuild]) -> RebuildNotes {
-        let own = list.map { Optional(rowLabel($0)) }
+    /// `movesFiles` tells for each item if a clean moves it to the Trash in trash mode. Then "Cannot be recovered" is not true for it.
+    public static func rebuildNotes(_ list: [Rebuild], movesFiles: [Bool]? = nil, mode: DeleteMode = .permanent) -> RebuildNotes {
+        precondition(movesFiles == nil || movesFiles!.count == list.count)
+        func label(_ i: Int) -> String {
+            let text = DeleteModeText.rebuildLabel(list[i], movesFiles: movesFiles?[i] ?? false, mode: mode)
+            return list[i] == .recreate ? "Must be recreated" : text
+        }
+        let own = list.indices.map { Optional(label($0)) }
         let alone = RebuildNotes(sectionSuffix: nil, rowLabels: own)
         // A section with an item that cannot be recovered has a plain header. Each row says its own label.
         guard list.count >= 2, !list.contains(.never) else { return alone }
@@ -179,11 +185,8 @@ public enum MenuText {
         case .recreate: suffix = "must be recreated"
         case .never: return alone
         }
-        return RebuildNotes(sectionSuffix: suffix, rowLabels: list.map { $0 == top.key ? nil : rowLabel($0) })
+        return RebuildNotes(sectionSuffix: suffix, rowLabels: list.indices.map { list[$0] == top.key ? nil : label($0) })
     }
-
-    /// The label on a row. The tooltip and the dialogs keep the longer `Rebuild.label`.
-    private static func rowLabel(_ r: Rebuild) -> String { r == .recreate ? "Must be recreated" : r.label }
 
     /// The parts of the place line of a Docker item. The row shows a short second line. The tooltip has the engine first,
     /// then the image and the state, then the volumes that a person named. An id of an anonymous volume (it ends with "…") never shows:

@@ -42,6 +42,7 @@ final class SegmentElement: NSAccessibilityElement {
 final class StorageHeaderView: NSView {
     private var disk = DiskUsage(total: 0, free: 0)
     private var totals = SplitTotals(free: 0, review: 0, waiting: 0)
+    private var deleteMode = DeleteMode.permanent
     /// What to show: the real bar, the skeleton, or an empty track. The model decides. This view only draws it.
     private var content = HeaderContent.make(activity: .scanning, hasResult: false, hasParts: false)
     private var segments: [SplitSegment] = []
@@ -219,7 +220,9 @@ final class StorageHeaderView: NSView {
         }
     }
 
-    func update(disk: DiskUsage, totals: SplitTotals, content: HeaderContent, segments: [SplitSegment]) {
+    func update(disk: DiskUsage, totals: SplitTotals, content: HeaderContent, segments: [SplitSegment],
+                deleteMode: DeleteMode = .permanent) {
+        self.deleteMode = deleteMode
         self.disk = disk
         self.totals = totals
         self.content = content
@@ -266,7 +269,7 @@ final class StorageHeaderView: NSView {
         }
         if let text = content.detail { return text }
         // Three lengths of the same line. The longest one that fits is used. The short one keeps all three numbers.
-        let tiers = SplitTotals.Wording.allCases.map { totals.summary($0) }
+        let tiers = SplitTotals.Wording.allCases.map { totals.summary($0, mode: deleteMode) }
         return tiers.first { $0.size(withAttributes: [.font: Self.detailFont]).width <= room } ?? tiers[tiers.count - 1]
     }
 

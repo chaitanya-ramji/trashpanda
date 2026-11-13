@@ -80,7 +80,17 @@ public struct Confirmation: Equatable, Sendable {
     /// The default button of an ordinary dialog: a review item is kept when the user presses Return.
     public static func defaultKeeps(tier: Tier) -> Bool { tier == .review }
 
-    public static func forOne(_ f: Finding, staleDays: Int, now: Date = Date()) -> Confirmation {
+    /// `mode` is the delete mode. In trash mode, the label of a file item says that it goes to the Trash (`DeleteModeText.rebuildLabel`),
+    /// and a title "Free up X?" becomes "Move X to the Trash?" (`DeleteModeText.title`).
+    public static func forOne(_ f: Finding, staleDays: Int, now: Date = Date(), mode: DeleteMode = .permanent) -> Confirmation {
+        let c = forOneInMode(f, staleDays: staleDays, now: now, mode: mode)
+        guard mode == .trash else { return c }
+        return Confirmation(title: DeleteModeText.title(c.title, mode: mode, findings: [f]), body: c.body,
+                            footer: c.footer.map { DeleteModeText.footer($0, mode: mode, findings: [f]) },
+                            confirmTitle: c.confirmTitle, cancelIsDefault: c.cancelIsDefault)
+    }
+
+    private static func forOneInMode(_ f: Finding, staleDays: Int, now: Date, mode: DeleteMode) -> Confirmation {
         let detail = "\(f.title)\n\(f.location)"
         switch kind(of: f) {
         case .worktree:
@@ -201,7 +211,7 @@ public struct Confirmation: Equatable, Sendable {
         case .ordinary:
             // A review item is one that the user must choose, so Return must keep it. Only a safe item may delete on Return.
             let keeps = defaultKeeps(tier: f.tier)
-            var text = "\(f.title)\n\(f.rebuild.label)."
+            var text = "\(f.title)\n\(DeleteModeText.rebuildLabel(f, mode: mode))."
             if case .removeArtifact = f.action, f.tier == .review, let d = f.lastActivity {
                 let days = max(0, Int(now.timeIntervalSince(d) / 86_400))
                 if days < staleDays { text += " You worked on this project \(days == 0 ? "today" : "\(days) days ago")." }
