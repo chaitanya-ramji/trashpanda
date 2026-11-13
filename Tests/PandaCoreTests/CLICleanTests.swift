@@ -1229,21 +1229,6 @@ final class CLICleanTests: XCTestCase {
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? NSNumber)?.intValue, 0o644)
     }
 
-    /// F6. The home is replaced only at the start of a path.
-    func testRedactReplacesTheHomeOnlyAtTheStartOfAPath() {
-        XCTAssertEqual(Log.redact("/private/tmp/x/a", home: "/tmp/x"), "/private/tmp/x/a")
-        XCTAssertEqual(Log.redact("/tmp/xyz/a", home: "/tmp/x"), "/tmp/xyz/a")
-        XCTAssertEqual(Log.redact("/tmp/x.bak", home: "/tmp/x"), "/tmp/x.bak")
-        XCTAssertEqual(Log.redact("/tmp/x/Library/a", home: "/tmp/x"), "~/Library/a")
-        XCTAssertEqual(Log.redact("/tmp/x", home: "/tmp/x"), "~")
-        XCTAssertEqual(Log.redact("id=/tmp/x/a and \"/tmp/x/b\" (/tmp/x). /tmp/x.", home: "/tmp/x"), "id=~/a and \"~/b\" (~). ~.")
-        XCTAssertEqual(Log.redact("a /tmp/x/a /private/tmp/x/b /tmp/x/c", home: "/tmp/x"), "a ~/a /private/tmp/x/b ~/c")
-        XCTAssertEqual(Log.redact("/Users/example/Library/x", home: "/Users/example/"), "~/Library/x")
-        XCTAssertEqual(Log.redact("/Users/exampleuser/x", home: "/Users/example"), "/Users/exampleuser/x")
-        XCTAssertEqual(Log.redact("nothing", home: "/"), "nothing")
-        XCTAssertEqual(Log.redact("nothing", home: ""), "nothing")
-    }
-
     /// F7. A signal during the last item: the log does not say that items are left.
     func testTheSignalLogLineIsRightWhenTheSignalComesDuringTheLastItem() throws {
         let box = try makeHome()
@@ -1353,7 +1338,7 @@ final class CLICleanTests: XCTestCase {
         let (result, _) = command(["--clean-safe", "--yes"], home: link, values: (link.path, link.path, link.path), box: box) { _, t in logs.append(t) }
         XCTAssertEqual(result?.exitCode, 1)
         XCTAssertEqual(result?.stdout, "")
-        XCTAssertTrue(result?.stderr.contains("home folder is a link") == true, result?.stderr ?? "")
+        XCTAssertTrue(result?.stderr.contains("not the same as its real path") == true, result?.stderr ?? "")
         XCTAssertFalse(logs.contains { $0.hasPrefix("cli plan") || $0.hasPrefix("cli lock") })
         XCTAssertFalse(FileManager.default.fileExists(atPath: lockFolder(box).path))
         XCTAssertEqual(snapshot(box.home), before)
@@ -1363,8 +1348,114 @@ final class CLICleanTests: XCTestCase {
         let deep = parentLink.appendingPathComponent("home")
         let (second, _) = command(["--clean-safe", "--yes"], home: deep, values: (nil, nil, deep.path), box: box) { _, _ in }
         XCTAssertEqual(second?.exitCode, 1)
-        XCTAssertTrue(second?.stderr.contains("home folder is a link") == true)
+        XCTAssertTrue(second?.stderr.contains("not the same as its real path") == true)
         XCTAssertEqual(snapshot(box.home), before)
+    }
+
+    // MARK: Review round 2 of #253
+
+    private let allModes: [[String]] = [["--scan"], ["--scan", "--json"], ["--clean-safe", "--dry-run"], ["--clean-safe", "--yes"]]
+
+    /// The DEFAULT config path (`Config.load`) and the REAL `Log`, pointed below a missing home. The scanner has a missing home, so it can
+    /// never touch a real folder. The default config writes two log lines when it is built: that must not make the home.
+    func testMissingHomeWithTheDefaultConfigAndTheRealLogIsNeverMadeInAllModes() throws {
+        let box = try makeHome()
+        let missing = box.home.deletingLastPathComponent().appendingPathComponent("missing-home-defaults")
+        let saved = Log.fileURL
+        Log.fileURL = missing.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+        defer { Log.fileURL = saved }
+        for args in allModes {
+            var env = CLICleanEnvironment()
+            env.homeValues = { (missing.path, missing.path, missing.path) }
+            env.lockFolder = lockFolder(box)
+            env.effectiveUserID = { 501 }
+            env.refreshRunningApps = {}
+            let result = CLICommand.run(
+                arguments: ["t"] + args,
+                scanner: DiskScanner(home: missing, useOwnerTools: false, programPaths: { [] }, openClaudeBinaries: { _ in [] },
+                                     appName: { _ in nil }, activeDirectories: { [] }),
+                runningApps: RunningApps { RunningSnapshot(apps: []) }, clean: env,
+                log: { level, text in switch level { case .info: Log.info(text); case .warn: Log.warn(text) } })
+            Log.flush()
+            XCTAssertEqual(result?.exitCode, 1, "\(args)")
+            XCTAssertEqual(result?.stdout, "", "\(args)")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path), "\(args): the missing home must NOT be made")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: lockFolder(box).path), "\(args)")
+        }
+        // A wrong option (exit 64) writes a log line too. It must not make the home either.
+        let wrong = CLICommand.run(arguments: ["t", "--clean-safe", "--yes", "--bogus"], scanner: self.scanner(at: missing),
+                                   runningApps: RunningApps { RunningSnapshot(apps: []) },
+                                   log: { level, text in switch level { case .info: Log.info(text); case .warn: Log.warn(text) } })
+        Log.flush()
+        XCTAssertEqual(wrong?.exitCode, 64)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
+    }
+
+    /// HOME=/ is refused for the scan and the dry run too.
+    func testTheRootAsHomeIsRefusedInAllModes() throws {
+        let box = try makeHome()
+        for args in allModes {
+            var built = 0
+            var env = environment(box)
+            env.homeValues = { ("/", "/", "/") }
+            let result = CLICommand.run(arguments: ["t"] + args, scanner: { built += 1; return self.scanner(box) }(),
+                                        runningApps: RunningApps { RunningSnapshot(apps: []) }, clean: env, log: { _, _ in })
+            XCTAssertEqual(result?.exitCode, 1, "\(args)")
+            XCTAssertEqual(built, 0, "\(args)")
+        }
+    }
+
+    /// A link as the home is refused for the scan and the dry run too, and the message is about the real path.
+    func testALinkAsHomeIsRefusedInAllModesBeforeTheScanner() throws {
+        let box = try makeHome()
+        let link = box.home.deletingLastPathComponent().appendingPathComponent("home-link-all")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: box.home)
+        for args in allModes {
+            let (result, built) = command(args, home: link, values: (link.path, link.path, link.path), box: box) { _, _ in }
+            XCTAssertEqual(result?.exitCode, 1, "\(args)")
+            XCTAssertEqual(built, 0, "\(args)")
+            XCTAssertEqual(result?.stderr, CommandLineCheck.homeNotRealPathMessage + "\n")
+        }
+    }
+
+    /// The usage text and the README table of exit codes agree.
+    func testTheUsageAndTheReadmeAgreeOnTheExitCodes() throws {
+        let readme = try source("README.md")
+        let table = try XCTUnwrap(readme.components(separatedBy: "#### Exit codes").last)
+        let codes = table.split(separator: "\n").compactMap { line -> Int? in
+            let cells = line.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+            return cells.count >= 2 ? Int(cells[0]) : nil
+        }
+        XCTAssertEqual(Set(codes), [0, 1, 64, 75, 77, 130, 131, 143])
+        let usage = CLICommand.usage.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "  ", with: " ")
+        for code in codes where code != 0 { XCTAssertTrue(usage.contains("\(code)"), "usage names \(code)") }
+        XCTAssertTrue(usage.contains("1 an item failed or a home or lock problem"))
+        XCTAssertTrue(usage.contains("0 done"))
+    }
+
+    /// The program list can be read for the plan and not at clean time. The item with an owner app is skipped by the Cleaner.
+    func testOwnerItemIsSkippedWhenTheListIsReadForThePlanButNotAtCleanTime() throws {
+        final class Counter: @unchecked Sendable {
+            private let lock = NSLock(); private var n = 0
+            func next() -> Int { lock.lock(); defer { lock.unlock() }; n += 1; return n }
+        }
+        let box = try makeHome()
+        let editor = try editorFinding(box)
+        let file = box.home.appendingPathComponent("Library/Caches/Editor/a.bin")
+        let counter = Counter()
+        let apps: @Sendable () -> RunningSnapshot = {
+            RunningSnapshot(apps: [], processes: [], processListRead: counter.next() == 1)
+        }
+        let r = run(["--clean-safe", "--yes", "--json"], box, apps: apps, extra: [editor])
+        XCTAssertEqual(r.result?.exitCode, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "the owner item must stay")
+        XCTAssertTrue(r.sentToCleaner.contains("editor"), "the plan said wouldClean, so the Cleaner decides")
+        let report = try decodeClean(r)
+        let entry = try XCTUnwrap(report.findings.first { $0.base.id == "editor" })
+        XCTAssertEqual(entry.result, "skipped")
+        XCTAssertTrue(entry.skipReason.contains(CleanPlan.processListUnreadReason), entry.skipReason)
+        XCTAssertEqual(report.totals.failed, 0)
+        XCTAssertGreaterThan(report.totals.cleaned, 0, "items without an owner app are still cleaned")
     }
 
     // MARK: Source

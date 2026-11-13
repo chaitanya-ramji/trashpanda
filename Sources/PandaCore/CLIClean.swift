@@ -231,8 +231,7 @@ enum CLIClean {
         log(.info, beginText(scan.config.deleteMode.rawValue))
         // A home that is a link, or that has a link in its path, would refuse every item. Stop at the start with a clear message.
         guard UpdateDownloads.isPlainPath(home) else {
-            return refuse("The home folder is a link, or a folder in its path is a link. Use the real path of the home folder. Nothing was cleaned.",
-                          code: 1, log: log, line: "home folder is a link")
+            return refuse(CommandLineCheck.homeNotRealPathMessage, code: 1, log: log, line: "home folder path is not its real path")
         }
 
         // (a) One clean at a time.

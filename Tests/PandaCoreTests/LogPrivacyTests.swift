@@ -15,8 +15,7 @@ final class LogPrivacyTests: XCTestCase {
     }
 
     func testRedactLeavesOtherPathsAndEmptyHome() {
-        // A longer name that starts with the home text is another folder: it is not changed (it was "~er/x" before).
-        XCTAssertEqual(Log.redact("/Users/tester/x", home: "/Users/test"), "/Users/tester/x")
+        XCTAssertEqual(Log.redact("/Users/tester/x", home: "/Users/test"), "~er/x")
         XCTAssertEqual(Log.redact("/opt/x", home: ""), "/opt/x")
     }
 
@@ -78,5 +77,73 @@ final class LogPrivacyTests: XCTestCase {
         let text = try String(contentsOf: Log.fileURL, encoding: .utf8)
         XCTAssertTrue(text.contains("second"))
         XCTAssertFalse(text.contains("first"))
+    }
+
+    // MARK: A missing home is never made by the log
+
+    func testTheLogNeverMakesAMissingHome() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("log-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let missing = dir.appendingPathComponent("home")
+        let old = Log.fileURL
+        defer { Log.fileURL = old }
+        Log.fileURL = missing.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+        Log.info("must not make the home")
+        Log.warn("nor this")
+        Log.flush()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path), "no folder at all")
+        XCTAssertFalse(Log.prepareFolder(missing.appendingPathComponent("Library/Logs/TrashPanda")))
+        // The home is a file, not a folder: nothing is made.
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data().write(to: missing)
+        Log.info("still nothing")
+        Log.flush()
+        var isFolder: ObjCBool = true
+        XCTAssertTrue(FileManager.default.fileExists(atPath: missing.path, isDirectory: &isFolder))
+        XCTAssertFalse(isFolder.boolValue)
+    }
+
+    func testTheFirstStartStillMakesTheLogFolderBelowAnExistingHome() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("log-first-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let old = Log.fileURL
+        defer { Log.fileURL = old }
+        Log.fileURL = home.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+        Log.info("first start")
+        Log.flush()
+        let folder = Log.fileURL.deletingLastPathComponent()
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: folder.path)[.posixPermissions] as? Int), 0o700)
+        XCTAssertTrue(try String(contentsOf: Log.fileURL, encoding: .utf8).contains("first start"))
+    }
+
+    // MARK: The home never appears in a redacted line
+
+    /// The privacy property: whatever is around the home text, the real home string is gone. A garbled look (`/private~/x`) is fine.
+    func testRedactNeverLeavesTheRealHomeInTheOutput() {
+        let templates = [
+            "%@", "%@/x", "unix://%@/.docker/run/docker.sock", "file://%@/Library/x", "{NSURL=file://%@/Library/x}", "x/%@/y",
+            "./%@", "-%@", "\u{e9}%@/x", "%@-old", "%@_bak", "%@.bak", "%@\u{e9}", "\"%@/x\"", "id=%@/x", "a:%@/x", "a %@/x",
+            "(%@)", "'%@'", "%@, %@/y", "ln -s %@/a %@/b", "path=%@;other=%@", "%@%@", "[%@]",
+        ]
+        let homes = ["/Users/x", "/tmp/x", "/Users/example/", "/private/tmp/h-1"]
+        var cases = 0
+        for home in homes {
+            for t in templates {
+                let text = t.replacingOccurrences(of: "%@", with: home.hasSuffix("/") ? String(home.dropLast()) : home)
+                let out = Log.redact(text, home: home)
+                let base = home.hasSuffix("/") ? String(home.dropLast()) : home
+                XCTAssertFalse(out.contains(base), "\(text) -> \(out)")
+                cases += 1
+            }
+        }
+        XCTAssertGreaterThanOrEqual(cases, 40)
+        // No home to hide: the text stays as it is.
+        for home in ["", "/"] {
+            for t in templates {
+                let text = t.replacingOccurrences(of: "%@", with: "/Users/x")
+                XCTAssertEqual(Log.redact(text, home: home), text)
+            }
+        }
     }
 }
