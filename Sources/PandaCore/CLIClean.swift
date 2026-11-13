@@ -205,9 +205,11 @@ enum CLIClean {
 
         // (d) Never as root: `~` would be the home of root.
         guard environment.effectiveUserID() != 0 else {
-            log(.info, beginText(nil))
+            // A log line makes `Library/Logs` below the home: write it only when the home is fine (a missing home must stay missing).
+            if CommandLineCheck.homeProblem(environment.homeValues()) == nil { log(.info, beginText(nil)) }
             return refuse("trashpanda --clean-safe --yes does not run as root. Run it as the user whose caches you want to clean.",
-                          code: 77, log: log, line: "refused to run as root")
+                          code: 77, log: { level, text in if CommandLineCheck.homeProblem(environment.homeValues()) == nil { log(level, text) } },
+                          line: "refused to run as root")
         }
         // A home that is set but not a plain absolute path (`.`, `sub`, `~`, or empty) would become the current folder, or it could crash.
         // This check reads text only, and it comes before any other use of the home. The refusal goes to the real log only when the

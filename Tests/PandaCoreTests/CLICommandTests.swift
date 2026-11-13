@@ -295,6 +295,8 @@ final class CLICommandTests: XCTestCase {
         // Foundation: reads of the disk (no write)
         "attributesOfItem": "FileManager read", "contentsOfDirectory": "FileManager read",
         "fileExists": "FileManager read (does the home folder exist)",
+        "stat": "reads file attributes (is HOME the same folder as the home)", "effectiveUserID": "the hook of the caller: reads the user id, changes nothing",
+        "clean.effectiveUserID": "the hook of the caller: reads the user id, changes nothing",
         "homeProblem": "reads the home values and the home folder, changes nothing",
         // The types and the functions of PandaCore that these files call. Each one only reads.
         "DiskScanner": "a type; the scan only reads", "scan": "the scan only reads (it never calls the Cleaner)",

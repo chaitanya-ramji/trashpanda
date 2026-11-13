@@ -1405,17 +1405,121 @@ final class CLICleanTests: XCTestCase {
         }
     }
 
-    /// A link as the home is refused for the scan and the dry run too, and the message is about the real path.
-    func testALinkAsHomeIsRefusedInAllModesBeforeTheScanner() throws {
+    /// A link as the home: the clean refuses it (the Cleaner would refuse every item) with the real-path message. The scan and the dry
+    /// run only read, so they run, and they delete nothing.
+    func testALinkAsHomeIsRefusedForTheCleanAndAllowedForTheReadCommands() throws {
         let box = try makeHome()
+        try box.file("Library/Caches/pip/a.bin", bytes: mb)
         let link = box.home.deletingLastPathComponent().appendingPathComponent("home-link-all")
-        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: box.home)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: box.home.path)
+        let before = snapshot(box.home)
         for args in allModes {
             let (result, built) = command(args, home: link, values: (link.path, link.path, link.path), box: box) { _, _ in }
-            XCTAssertEqual(result?.exitCode, 1, "\(args)")
-            XCTAssertEqual(built, 0, "\(args)")
-            XCTAssertEqual(result?.stderr, CommandLineCheck.homeNotRealPathMessage + "\n")
+            if args.contains("--yes") {
+                XCTAssertEqual(result?.exitCode, 1, "\(args)")
+                XCTAssertEqual(result?.stderr, CommandLineCheck.homeNotRealPathMessage + "\n")
+                XCTAssertEqual(built, 0, "nothing is scanned")
+            } else {
+                XCTAssertEqual(result?.exitCode, 0, "\(args)")
+                XCTAssertEqual(built, 1, "\(args)")
+            }
         }
+        // The dry run shows everything as skipped, and says why.
+        let (dry, _) = command(["--clean-safe", "--dry-run"], home: link, values: (link.path, link.path, link.path), box: box) { _, _ in }
+        XCTAssertTrue(dry?.stdout.contains(CommandLineCheck.linkedHomeNote) == true)
+        XCTAssertTrue(dry?.stdout.hasPrefix("0 items would be cleaned") == true, dry?.stdout ?? "")
+        let (json, _) = command(["--clean-safe", "--dry-run", "--json"], home: link, values: (link.path, link.path, link.path), box: box) { _, _ in }
+        XCTAssertFalse(json?.stdout.contains("Note:") == true, "JSON is never changed")
+        XCTAssertEqual(snapshot(box.home), before, "nothing is deleted")
+    }
+
+    /// A home that differs only by the letter case: the clean refuses it, the read commands run.
+    func testAnotherLetterCaseOfTheHomeIsRefusedForTheCleanAndAllowedForTheReadCommands() throws {
+        let box = try makeHome()
+        let upper = box.home.deletingLastPathComponent().path + "/" + box.home.lastPathComponent.uppercased()
+        guard upper != box.home.path, FileManager.default.fileExists(atPath: upper) else {
+            throw XCTSkip("The sandbox name has no other case, or the volume is case-sensitive.")
+        }
+        for args in allModes {
+            let (result, _) = command(args, home: URL(fileURLWithPath: upper), values: (upper, upper, upper), box: box) { _, _ in }
+            XCTAssertEqual(result?.exitCode, args.contains("--yes") ? 1 : 0, "\(args)")
+        }
+    }
+
+    /// The text of the refusal says what was NOT done: the clean says cleaned, the read commands say scanned.
+    func testTheRefusalSaysScannedForTheReadCommandsAndCleanedForTheClean() throws {
+        let box = try makeHome()
+        let missing = box.home.deletingLastPathComponent().appendingPathComponent("missing-wording")
+        for args in allModes {
+            let (result, built) = command(args, home: missing, values: (missing.path, missing.path, missing.path), box: box) { _, _ in }
+            let done = args.contains("--yes") ? "cleaned" : "scanned"
+            XCTAssertEqual(result?.stderr, "The home folder could not be found. Nothing was \(done).\n", "\(args)")
+            XCTAssertEqual(built, 0)
+            let (bad, _) = command(args, home: missing, values: ("relative", box.home.path, box.home.path), box: box) { _, _ in }
+            XCTAssertTrue(bad?.stderr.hasSuffix("Nothing was \(done).\n") == true, "\(args)")
+        }
+    }
+
+    /// HOME is not the home folder: every mode exits with 1. Nothing is scanned, nothing is logged, nothing is made in either folder.
+    func testAHomeVariableThatIsNotTheHomeFolderIsRefusedInAllModes() throws {
+        let box = try makeHome()
+        let parent = box.home.deletingLastPathComponent()
+        let otherHome = parent.appendingPathComponent("other-home-var")
+        let missingHome = parent.appendingPathComponent("missing-home-var")
+        try FileManager.default.createDirectory(at: otherHome, withIntermediateDirectories: true)
+        let link = parent.appendingPathComponent("home-var-link")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: box.home.path)
+        let before = snapshot(box.home), otherBefore = snapshot(otherHome)
+        for args in allModes {
+            for wrong in [otherHome.path, missingHome.path] {
+                var logs: [String] = []
+                let (result, built) = command(args, home: box.home, values: (box.home.path, wrong, box.home.path), box: box) { _, t in logs.append(t) }
+                XCTAssertEqual(result?.exitCode, 1, "\(args) \(wrong)")
+                XCTAssertTrue(result?.stderr.hasPrefix("HOME and the home folder are not the same folder.") == true)
+                XCTAssertEqual(result?.stdout, "")
+                XCTAssertEqual(built, 0, "nothing is scanned")
+                XCTAssertTrue(logs.isEmpty, "nothing is logged: \(logs)")
+            }
+            // Equal, a link to the same folder, and not set: all run.
+            for good in [box.home.path, link.path] as [String?] + [nil] {
+                let (result, _) = command(args, home: box.home, values: (box.home.path, good, box.home.path), box: box) { _, _ in }
+                XCTAssertEqual(result?.exitCode, 0, "\(args) \(good ?? "nil")")
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingHome.path), "the missing HOME folder must not be made")
+        XCTAssertEqual(snapshot(otherHome), otherBefore, "nothing is made in the other folder")
+        XCTAssertEqual(snapshot(box.home).keys.filter { before[$0] == nil }.filter { !$0.contains("Library/Logs") }, [])
+    }
+
+    /// The root check comes first for `--clean-safe --yes` (exit 77), also when the home is missing, a link, or HOME is wrong.
+    func testTheRootCheckComesBeforeTheHomeCheck() throws {
+        let box = try makeHome()
+        let parent = box.home.deletingLastPathComponent()
+        let missing = parent.appendingPathComponent("missing-root-first")
+        let link = parent.appendingPathComponent("link-root-first")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: box.home.path)
+        let saved = Log.fileURL
+        Log.fileURL = missing.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+        defer { Log.fileURL = saved }
+        let cases: [(URL, (String?, String?, String))] = [
+            (missing, (missing.path, missing.path, missing.path)),
+            (link, (link.path, link.path, link.path)),
+            (box.home, (box.home.path, missing.path, box.home.path))]
+        for (home, values) in cases {
+            var env = environment(box, euid: 0)
+            env.homeValues = { values }
+            let result = CLICommand.run(arguments: ["t", "--clean-safe", "--yes"], scanner: self.scanner(at: home),
+                                        runningApps: RunningApps { RunningSnapshot(apps: []) }, clean: env,
+                                        log: { level, text in switch level { case .info: Log.info(text); case .warn: Log.warn(text) } })
+            Log.flush()
+            XCTAssertEqual(result?.exitCode, 77, "\(values)")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path), "the missing home must not be made")
+        }
+        // The read commands do not check the user: a bad home is still exit 1 for root.
+        var env = environment(box, euid: 0)
+        env.homeValues = { (missing.path, missing.path, missing.path) }
+        XCTAssertEqual(CLICommand.run(arguments: ["t", "--scan"], scanner: scanner(at: missing), runningApps: RunningApps { RunningSnapshot(apps: []) },
+                                      clean: env, log: { _, _ in })?.exitCode, 1)
     }
 
     /// The usage text and the README table of exit codes agree.
@@ -1427,10 +1531,39 @@ final class CLICleanTests: XCTestCase {
             return cells.count >= 2 ? Int(cells[0]) : nil
         }
         XCTAssertEqual(Set(codes), [0, 1, 64, 75, 77, 130, 131, 143])
-        let usage = CLICommand.usage.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "  ", with: " ")
-        for code in codes where code != 0 { XCTAssertTrue(usage.contains("\(code)"), "usage names \(code)") }
-        XCTAssertTrue(usage.contains("1 an item failed or a home or lock problem"))
-        XCTAssertTrue(usage.contains("0 done"))
+        // Compare the exact meaning of each code. The usage text lists the codes in one sentence ("<code> <meaning>,").
+        let afterLabel = CLICommand.usage.components(separatedBy: "Exit codes:").last ?? ""
+        let flat = (afterLabel.components(separatedBy: "--write-icons").first ?? "")
+            .split(whereSeparator: { $0 == " " || $0 == "\n" }).joined(separator: " ")
+        func usageMeaning(_ code: Int) -> String? {
+            guard let range = flat.range(of: #"(^|\s)\#(code) [a-z ]+?(,|\.)"#, options: .regularExpression) else { return nil }
+            return String(flat[range]).trimmingCharacters(in: .whitespaces).dropFirst("\(code) ".count)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ",."))
+        }
+        XCTAssertEqual(usageMeaning(0), "done")
+        XCTAssertEqual(usageMeaning(1), "an item failed or a home or lock problem")
+        XCTAssertEqual(usageMeaning(64), "wrong option")
+        XCTAssertEqual(usageMeaning(75), "another clean runs")
+        XCTAssertEqual(usageMeaning(77), "run as root")
+        XCTAssertTrue(flat.hasSuffix("130, 131, or 143 stopped by SIGINT, SIGQUIT, or SIGTERM."), flat)
+        // The README rows say the same thing in the same words.
+        let rows = table.split(separator: "\n").compactMap { line -> (Int, String)? in
+            let cells = line.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard cells.count >= 2, let code = Int(cells[0]) else { return nil }
+            return (code, cells[1])
+        }
+        let readmeMeaning = Dictionary(uniqueKeysWithValues: rows)
+        XCTAssertTrue(try XCTUnwrap(readmeMeaning[0]).hasPrefix("Success"))
+        XCTAssertTrue(try XCTUnwrap(readmeMeaning[1]).contains("failed"))
+        XCTAssertTrue(try XCTUnwrap(readmeMeaning[1]).contains("home folder or the lock"))
+        XCTAssertEqual(readmeMeaning[64]?.hasPrefix("A wrong option"), true)
+        XCTAssertEqual(readmeMeaning[75]?.contains("holds the lock"), true)
+        XCTAssertEqual(readmeMeaning[77]?.contains("as root"), true)
+        for code in [130, 131, 143] {
+            let name = [130: "SIGINT", 131: "SIGQUIT", 143: "SIGTERM"][code] ?? ""
+            XCTAssertEqual(readmeMeaning[code]?.contains(name), true, "README \(code)")
+        }
+        XCTAssertTrue(flat.contains("130, 131, or 143 stopped by SIGINT, SIGQUIT, or SIGTERM"))
     }
 
     /// The program list can be read for the plan and not at clean time. The item with an owner app is skipped by the Cleaner.
