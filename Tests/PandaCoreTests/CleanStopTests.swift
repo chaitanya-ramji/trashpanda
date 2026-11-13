@@ -70,6 +70,8 @@ final class CleanStopTests: XCTestCase {
         XCTAssertEqual(report.skipped, [items[1].location + ": Stopped by you", items[2].location + ": Stopped by you"])
         XCTAssertEqual(shown, ["Item one"], "Only the first item started")
         XCTAssertEqual(stop.asks, 2, "The question is asked once for each item that started, and once for the stop")
+        // The range is not exact on purpose: the Cleaner now measures the bytes on the disk (blocks), not the length of the file, so the
+        // value depends on the disk. The lower limit is the data that we wrote, and the upper limit is a small allowance for blocks.
         // The freed bytes are the bytes of the one item that was deleted, as measured on the disk (the size on disk can be a little more).
         XCTAssertGreaterThanOrEqual(report.freed, 3_000_000)
         XCTAssertLessThan(report.freed, 3_100_000)

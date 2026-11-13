@@ -80,8 +80,15 @@ public final class CLILock {
         }
         let path = folder.appendingPathComponent(fileName).path
         // O_NOFOLLOW: a link in place of the lock file is refused, never followed.
-        let fd = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        // O_NONBLOCK: opening a pipe in place of the file must never wait.
+        let fd = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
         guard fd >= 0 else { return .failure(.cannotOpen("the lock file \(path) could not be opened")) }
+        // The lock file must be a plain file with one name. A pipe, a device, or a file with a second hard link is refused.
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_nlink == 1 else {
+            close(fd)
+            return .failure(.cannotOpen("the lock file \(path) is not a plain file with one name"))
+        }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             let busy = errno == EWOULDBLOCK
             close(fd)
@@ -112,6 +119,22 @@ public struct CLICleanEnvironment {
     public var activeDirectories: (() -> [String])?
     /// Called with each finding right before it goes to the Cleaner. Tests use it to see exactly what the Cleaner gets.
     public var willClean: ((Finding) -> Void)?
+    /// Called right before EACH read of the running apps (the plan, and each item that has an owner app). `NSWorkspace` only updates
+    /// while the main run loop runs, and the command line never runs it, so the default runs it for a short time. The menu app
+    /// does not use this hook. A test gives its own and counts the calls.
+    public var refreshRunningApps: @Sendable () -> Void = {
+        if Thread.isMainThread { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05)) }
+    }
+    /// The values that decide the home folder: `CFFIXED_USER_HOME`, `HOME`, and the home that the system gives. nil means not set.
+    /// A test gives its own values.
+    public var homeValues: () -> (cffixedUserHome: String?, home: String?, resolved: String) = {
+        func value(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
+        return (value("CFFIXED_USER_HOME"), value("HOME"), NSHomeDirectory())
+    }
+
+    /// Gives the scan result of a run. nil means the real scan (`DiskScanner.scan`). Only a test sets it, so that it can add a finding
+    /// that the scanner cannot make without a real tool, for example a tool item. Both the dry run and the clean read it.
+    var scanResult: ((DiskScanner) -> ScanResult)?
 
     public init() {}
 }
@@ -153,21 +176,33 @@ enum CLIClean {
         let started = now()
         let json = arguments.contains("--json")
         let verbose = arguments.contains("--verbose")
-        let startText = "cli start version=\(version) mode=\(CommandLineCheck.mode(arguments)) \(CommandLineCheck.logOptions(arguments))"
+        func beginText(_ deleteMode: String?) -> String {
+            "cli begin version=\(version) mode=\(CommandLineCheck.mode(arguments)) \(CommandLineCheck.logOptions(arguments))"
+                + (deleteMode.map { " deleteMode=\($0)" } ?? "")
+        }
 
         // (d) Never as root: `~` would be the home of root.
         guard environment.effectiveUserID() != 0 else {
-            log(.info, startText)
+            log(.info, beginText(nil))
             return refuse("trashpanda --clean-safe --yes does not run as root. Run it as the user whose caches you want to clean.",
                           code: 77, log: log, line: "refused to run as root")
         }
+        // A home that is set but not an absolute path (for example `CFFIXED_USER_HOME=.`) would become the current folder.
+        let values = environment.homeValues()
+        let badValue = [values.cffixedUserHome, values.home].contains { $0 != nil && !($0 ?? "").hasPrefix("/") }
+        guard !badValue, values.resolved.hasPrefix("/") else {
+            log(.info, beginText(nil))
+            return refuse("CFFIXED_USER_HOME, HOME, or the home folder is not an absolute path. Nothing was cleaned.", code: 1, log: log,
+                          line: "home folder is not an absolute path")
+        }
         let scan = scanner()
+        // The first line of the run, before the scan, so that a scan that hangs or crashes leaves a trace.
+        log(.info, beginText(scan.config.deleteMode.rawValue))
         // (f) The real home folder must be known. We never fall back to `/`.
         let home = scan.home.standardizedFileURL
         var isFolder: ObjCBool = false
         guard home.path.hasPrefix("/"), home.path != "/", FileManager.default.fileExists(atPath: home.path, isDirectory: &isFolder),
               isFolder.boolValue else {
-            log(.info, startText)
             return refuse("The home folder could not be found. Nothing was cleaned.", code: 1, log: log, line: "home folder unknown")
         }
 
@@ -179,29 +214,31 @@ enum CLIClean {
             lock = taken
             log(.info, "cli lock taken: \(Log.redact(lockFolder.appendingPathComponent(CLILock.fileName).path, home: home.path))")
         case .failure(.held):
-            log(.info, startText)
             return refuse("Another trashpanda clean is running. This run did not start. Nothing was cleaned.", code: 75, log: log,
                           line: "lock is held by another run")
         case .failure(.cannotOpen(let why)):
-            log(.info, startText)
             return refuse("The lock could not be taken (\(Log.redact(why, home: home.path))). Nothing was cleaned.", code: 1, log: log,
                           line: "lock could not be taken")
         }
         defer { lock.release() }
 
         // The scan, then the plan. The dry run makes the same plan, so it is an exact preview of this run.
-        let result = scan.scan()
-        let plan = CleanPlan(result, guardian: scan.guardian, running: runningApps.take(), deleteMode: scan.config.deleteMode,
-                             activeDirectories: activeDirectories, now: now(), unattended: true)
-        log(.info, "\(startText) deleteMode=\(plan.deleteMode.rawValue) plan: \(plan.summary())")
+        let result = environment.scanResult?(scan) ?? scan.scan()
+        let plan = CleanPlan.unattended(result, scanner: scan, running: runningApps.take(), activeDirectories: activeDirectories,
+                                        now: now())
+        log(.info, "cli plan deleteMode=\(plan.deleteMode.rawValue) \(plan.summary())")
+        for item in plan.skipped {
+            log(.info, "clean plan-skip id=\(ScanReport.id(item.finding.id, home: home.path)) reason=\"\(item.skipReason)\" bytes=\(item.finding.bytes)")
+        }
 
         let cleaner = Cleaner(guardian: scan.guardian, remaining: scan.remainingBytes(of:), runningApps: runningApps,
                               runtimeRequests: scan.runtimeRequests, deleteMode: plan.deleteMode)
         cleaner.staleDays = scan.config.staleDays
         if let move = environment.moveToTrash { cleaner.useTrashMove(move) }
         if let active = environment.activeDirectories { cleaner.activeDirectories = active }
+        // The Cleaner gets ONE item at a time, so its own stop check is not used: the run checks the flag between items. An item
+        // that the Cleaner already works on always finishes, and no item gets the menu text "Stopped by you".
         let stop = environment.stop
-        cleaner.shouldStop = { stop.isRequested }
 
         let run = runPlan(plan: plan, result: result, cleaner: cleaner, home: home.path, stop: stop,
                           willClean: environment.willClean, log: log)
@@ -256,7 +293,11 @@ enum CLIClean {
                 "clean item id=\(id) result=\(outcome.result.rawValue) freed=\(outcome.freedBytes) movedToTrash=\(outcome.movedToTrashBytes)"
                 + " reason=\"\(reason)\"")
         }
-        if stop.isRequested { run.stopped = true }
+        // A signal that came during the scan, or during the last item, is still a stop: exit 130 or 143, and the log says so.
+        if stop.isRequested {
+            if !stopLogged { log(.warn, "cli stopped by signal \(stop.signalName): the items that are left are not cleaned") }
+            run.stopped = true
+        }
         return run
     }
 
@@ -349,7 +390,12 @@ struct CleanRun {
                 for entry in counts.sorted(by: { ($0.value, $1.key) > ($1.value, $0.key) }) { out += "  \(entry.value)  \(entry.key)\n" }
             }
         }
-        if stopped { out += "Stopped by a signal. The items that are left were not cleaned. This report is partial.\n" }
+        if stopped {
+            let left = plan.items.indices.contains { plan.items[$0].wouldClean && outcomes[$0]?.skipReason == CLIClean.stoppedReason }
+                || plan.items.indices.contains { plan.items[$0].wouldClean && outcomes[$0] == nil }
+            out += left ? "Stopped by a signal. The items that are left were not cleaned. This report is partial.\n"
+                        : "A signal arrived at the end of the run. Every item was already finished.\n"
+        }
         return out
     }
 
@@ -376,6 +422,8 @@ struct CleanRun {
 /// - `findings[].result`: `cleaned`, `skipped`, or `failed`.
 /// - `findings[].skipReason`: empty unless `result` is `skipped`. `findings[].failReason`: empty unless `result` is `failed`.
 /// - `findings[].freedBytes` and `findings[].movedToTrashBytes`: measured, for this item. A `failed` item can show a part.
+/// - `findings[].wouldClean`, `checkedNow`, `checkedAtCleanTime`: the fields of the dry run, from the plan of this same run. A script
+///   can compare what was planned with what was done. `totals.wouldFree` is the sum of `countedBytes` of the items with `wouldClean`.
 public struct CleanReportJSON: Codable, Equatable, Sendable {
     public struct Entry: Codable, Equatable, Sendable {
         public var base: ScanReport.Entry
@@ -384,11 +432,19 @@ public struct CleanReportJSON: Codable, Equatable, Sendable {
         public var failReason: String
         public var freedBytes: Int64
         public var movedToTrashBytes: Int64
+        public var wouldClean: Bool
+        public var checkedNow: Bool
+        public var checkedAtCleanTime: String
 
-        private enum Extra: String, CodingKey { case result, skipReason, failReason, freedBytes, movedToTrashBytes }
+        private enum Extra: String, CodingKey {
+            case result, skipReason, failReason, freedBytes, movedToTrashBytes, wouldClean, checkedNow, checkedAtCleanTime
+        }
 
-        init(base: ScanReport.Entry, outcome: CleanOutcome) {
+        init(base: ScanReport.Entry, outcome: CleanOutcome, item: CleanPlan.Item) {
             self.base = base
+            wouldClean = item.wouldClean
+            checkedNow = item.checkedNow
+            checkedAtCleanTime = item.checkedAtCleanTime
             result = outcome.result.rawValue
             skipReason = outcome.result == .skipped ? outcome.skipReason : ""
             failReason = outcome.result == .failed ? outcome.failReason : ""
@@ -404,6 +460,9 @@ public struct CleanReportJSON: Codable, Equatable, Sendable {
             failReason = try c.decode(String.self, forKey: .failReason)
             freedBytes = try c.decode(Int64.self, forKey: .freedBytes)
             movedToTrashBytes = try c.decode(Int64.self, forKey: .movedToTrashBytes)
+            wouldClean = try c.decode(Bool.self, forKey: .wouldClean)
+            checkedNow = try c.decode(Bool.self, forKey: .checkedNow)
+            checkedAtCleanTime = try c.decode(String.self, forKey: .checkedAtCleanTime)
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -414,6 +473,9 @@ public struct CleanReportJSON: Codable, Equatable, Sendable {
             try c.encode(failReason, forKey: .failReason)
             try c.encode(freedBytes, forKey: .freedBytes)
             try c.encode(movedToTrashBytes, forKey: .movedToTrashBytes)
+            try c.encode(wouldClean, forKey: .wouldClean)
+            try c.encode(checkedNow, forKey: .checkedNow)
+            try c.encode(checkedAtCleanTime, forKey: .checkedAtCleanTime)
         }
     }
 
@@ -425,6 +487,7 @@ public struct CleanReportJSON: Codable, Equatable, Sendable {
         public var failed: Int
         public var freedBytes: Int64
         public var movedToTrashBytes: Int64
+        public var wouldFree: Int64
     }
 
     public var schema: Int
@@ -445,8 +508,9 @@ public struct CleanReportJSON: Codable, Equatable, Sendable {
         note = run.plan.deleteMode == .trash ? DeleteModeText.notFreeYet : ""
         disk = scan.disk
         totals = Totals(reclaimable: scan.totals.reclaimable, reviewable: scan.totals.reviewable, cleaned: run.cleaned,
-                        skipped: run.skipped, failed: run.failed, freedBytes: run.freedBytes, movedToTrashBytes: run.movedToTrashBytes)
+                        skipped: run.skipped, failed: run.failed, freedBytes: run.freedBytes, movedToTrashBytes: run.movedToTrashBytes,
+                        wouldFree: run.plan.wouldFree)
         // The plan and the report keep the order of the scan.
-        findings = scan.findings.enumerated().map { Entry(base: $1, outcome: run.outcome($0)) }
+        findings = scan.findings.enumerated().map { Entry(base: $1, outcome: run.outcome($0), item: run.plan.items[$0]) }
     }
 }

@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import PandaCore
 
@@ -49,7 +50,9 @@ final class CLICleanTests: XCTestCase {
             let time = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
             let size = (attrs[.size] as? NSNumber)?.int64Value ?? -1
             let target = (try? fm.destinationOfSymbolicLink(atPath: url.path)) ?? ""
-            let bytes = type == FileAttributeType.typeRegular.rawValue ? ((try? Data(contentsOf: url))?.hashValue ?? 0) : 0
+            // SHA-256 of the whole content: a real content hash, so `byte-identical` is true.
+            let bytes = type == FileAttributeType.typeRegular.rawValue
+                ? ((try? Data(contentsOf: url)).map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() } ?? "unreadable") : "-"
             return "\(type) \(size) \(time) \(target) \(bytes)"
         }
         out["."] = describe(root)
@@ -90,9 +93,13 @@ final class CLICleanTests: XCTestCase {
     }
 
     private func environment(_ box: Sandbox, mode: DeleteMode = .permanent, stop: CLIStop = CLIStop(), euid: UInt32 = 501,
-                             willClean: ((Finding) -> Void)? = nil) -> CLICleanEnvironment {
+                             willClean: ((Finding) -> Void)? = nil, lock: URL? = nil,
+                             refresh: @escaping @Sendable () -> Void = {}) -> CLICleanEnvironment {
         var env = CLICleanEnvironment()
-        env.lockFolder = lockFolder(box)
+        // The default hook runs the main run loop. Tests do not: they count the calls where it matters.
+        env.refreshRunningApps = refresh
+        env.homeValues = { (box.home.path, box.home.path, box.home.path) }
+        env.lockFolder = lock ?? lockFolder(box)
         env.effectiveUserID = { euid }
         env.stop = stop
         env.activeDirectories = { [] }
@@ -111,11 +118,13 @@ final class CLICleanTests: XCTestCase {
     /// Runs the command like `main.swift` does, on the fixture home. `apps` is read again for each call, so a test can change it.
     private func run(_ args: [String], _ box: Sandbox, mode: DeleteMode = .permanent, stop: CLIStop = CLIStop(), euid: UInt32 = 501,
                      apps: @escaping @Sendable () -> RunningSnapshot = { RunningSnapshot(apps: []) },
+                     lock: URL? = nil, refresh: @escaping @Sendable () -> Void = {}, extra: [Finding] = [],
                      before: ((Finding) -> Void)? = nil) -> Run {
         var built = 0
         var logs: [String] = []
         var sent: [String] = []
-        let env = environment(box, mode: mode, stop: stop, euid: euid) { f in sent.append(ScanReport.id(f.id, home: box.home.path)); before?(f) }
+        var env = environment(box, mode: mode, stop: stop, euid: euid, willClean: { f in sent.append(ScanReport.id(f.id, home: box.home.path)); before?(f) }, lock: lock, refresh: refresh)
+        if !extra.isEmpty { env.scanResult = { ScanResult(findings: $0.scan().findings + extra, disk: DiskUsage(total: 1, free: 1)) } }
         let result = CLICommand.run(arguments: ["trashpanda"] + args, scanner: { built += 1; return self.scanner(box, mode: mode) }(),
                                     runningApps: RunningApps(apps), version: "9.9.9", clean: env, log: { _, text in logs.append(text) })
         return Run(result: result, logs: logs, scannersBuilt: built, sentToCleaner: sent)
@@ -371,6 +380,7 @@ final class CLICleanTests: XCTestCase {
             XCTAssertEqual(report.totals.cleaned, 0)
             let stoppedItems = report.findings.filter { $0.skipReason == "stopped by signal" }
             XCTAssertFalse(stoppedItems.isEmpty)
+            XCTAssertEqual(stoppedItems.count, report.findings.filter(\.wouldClean).count, "every planned item reads exactly this text")
             XCTAssertEqual(report.findings.count, try dryRunReport(try makeHome()).findings.count, "every finding is in the report")
             XCTAssertTrue(r.logs.contains { $0.contains("stopped by signal") })
             XCTAssertTrue(r.logs.last?.contains("exit=\(code)") == true)
@@ -392,26 +402,28 @@ final class CLICleanTests: XCTestCase {
         XCTAssertEqual(r.result?.exitCode, 143)
         let report = try decodeClean(r)
         XCTAssertTrue(report.stopped)
-        XCTAssertEqual(report.totals.cleaned, 1, "the first item was finished")
+        // The signal comes after the run's own check of item 2, so item 2 still runs and finishes. Item 3 and the rest do not start.
+        XCTAssertEqual(report.totals.cleaned, 2, "the second item was already started, so it was finished")
         XCTAssertEqual(r.sentToCleaner.count, 2)
         XCTAssertEqual(report.totals.failed, 0)
         let planned = try dryRunReport(try makeHome()).findings.filter(\.wouldClean).count
-        XCTAssertEqual(report.findings.filter { $0.result == "skipped" && ($0.skipReason == "stopped by signal" || $0.skipReason.contains("Stopped")) }.count,
-                       planned - 1)
+        XCTAssertEqual(report.findings.filter { $0.result == "skipped" && $0.skipReason == "stopped by signal" }.count, planned - 2)
+        XCTAssertFalse(report.findings.contains { $0.skipReason.contains("Stopped by you") })
     }
 
     // MARK: Logging
 
     func testTheLogHasTheAuditTrailAndNoPrivateText() throws {
         let box = try makeHome()
-        let r = run(["--clean-safe", "--yes", "--json", "secret-value"], box)
+        let r = run(["--clean-safe", "--yes", "--json"], box)
         XCTAssertEqual(r.result?.exitCode, 0)
         let logs = r.logs
-        XCTAssertTrue(logs[0].contains("lock taken"), logs[0])
-        let start = try XCTUnwrap(logs.first { $0.hasPrefix("cli start version=9.9.9 mode=clean-safe --yes --json") })
-        XCTAssertTrue(start.contains("options=--clean-safe --yes --json other=1"), start)
-        XCTAssertTrue(start.contains("deleteMode=permanent"), start)
-        XCTAssertTrue(start.contains("plan: wouldClean="), start)
+        XCTAssertTrue(logs[0].hasPrefix("cli begin version=9.9.9 mode=clean-safe --yes --json"), logs[0])
+        XCTAssertTrue(logs[0].contains("options=--clean-safe --yes --json other=0"), logs[0])
+        XCTAssertTrue(logs[0].contains("deleteMode=permanent"), logs[0])
+        XCTAssertTrue(logs.contains { $0.contains("lock taken") })
+        let plan = try XCTUnwrap(logs.first { $0.hasPrefix("cli plan deleteMode=permanent wouldClean=") })
+        XCTAssertTrue(plan.contains("wouldFree="), plan)
         let before = logs.filter { $0.hasPrefix("clean item id=") && $0.contains(" bytes=") && $0.contains("action=") }
         let after = logs.filter { $0.hasPrefix("clean item id=") && $0.contains(" result=") }
         XCTAssertEqual(before.count, r.sentToCleaner.count)
@@ -422,11 +434,12 @@ final class CLICleanTests: XCTestCase {
         XCTAssertTrue(end.hasPrefix("cli end clean-safe --yes cleaned="), end)
         for part in ["skipped=", "failed=", "freed=", "movedToTrash=", "duration_ms=", "exit=0"] { XCTAssertTrue(end.contains(part), end) }
         for line in logs {
-            XCTAssertFalse(line.contains("secret-value"), "raw arguments are never logged")
             XCTAssertFalse(line.contains(box.home.path), "the home folder is written as ~: \(line)")
         }
-        // Tests read the arguments from the check only.
-        XCTAssertFalse(logs.contains { $0.contains("trashpanda") && $0.contains("--yes secret") })
+        // A wrong option logs the known options and a count, never a value.
+        let bad = run(["--clean-safe", "--yes", "secret-value"], box)
+        XCTAssertEqual(bad.result?.exitCode, 64)
+        XCTAssertFalse(bad.logs.contains { $0.contains("secret-value") }, "raw arguments are never logged")
     }
 
     // MARK: Forged plans: the Cleaner is the only judge, and the command never trusts a plan blindly
@@ -770,12 +783,282 @@ final class CLICleanTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(done.json().utf8)) as? [String: Any])
         XCTAssertEqual(Set(object.keys), ["schema", "mode", "deleteMode", "stopped", "note", "disk", "totals", "findings"])
         XCTAssertEqual(Set((object["totals"] as? [String: Any] ?? [:]).keys),
-                       ["reclaimable", "reviewable", "cleaned", "skipped", "failed", "freedBytes", "movedToTrashBytes"])
+                       ["reclaimable", "reviewable", "cleaned", "skipped", "failed", "freedBytes", "movedToTrashBytes", "wouldFree"])
         for entry in try XCTUnwrap(object["findings"] as? [[String: Any]]) {
             XCTAssertEqual(Set(entry.keys), ["id", "group", "title", "bytes", "tier", "rebuild", "location", "blocked", "blockedReason",
                                              "upperLimit", "countedBytes", "result", "skipReason", "failReason", "freedBytes",
-                                             "movedToTrashBytes"])
+                                             "movedToTrashBytes", "wouldClean", "checkedNow", "checkedAtCleanTime"])
         }
+    }
+
+    func testTheCleanReportCarriesTheFieldsOfThePlan() throws {
+        let box = try Sandbox()
+        let done = try Self.goldenRun(mode: .permanent, box: box, trash: nil)
+        let report = CleanReportJSON(done)
+        let dry = DryRunReport(done.result, plan: done.plan, home: box.home.path)
+        XCTAssertEqual(report.totals.wouldFree, dry.totals.wouldFree)
+        XCTAssertGreaterThan(report.totals.wouldFree, 0)
+        XCTAssertEqual(report.findings.map(\.wouldClean), dry.findings.map(\.wouldClean))
+        XCTAssertEqual(report.findings.map(\.checkedNow), dry.findings.map(\.checkedNow))
+        XCTAssertEqual(report.findings.map(\.checkedAtCleanTime), dry.findings.map(\.checkedAtCleanTime))
+    }
+
+    // MARK: The dry run is an exact preview of --yes
+
+    /// A fixture with a file item (pip) and a tool item (a Homebrew-style item built by hand is not possible through the scan, so a
+    /// scanner that finds the file item and a hand-made tool finding is used): the dry run and the clean use ONE plan factory.
+    func testTheDryRunAndTheCleanMakeTheSamePlanAndTheCleanSendsExactlyTheWouldCleanSet() throws {
+        let box = try makeHome()
+        let result = scanner(box).scan()
+        let tool = Finding(id: "tool.item", ecosystem: .homebrew, title: "A tool item", location: "~/tool", bytes: 10, tier: .safe,
+                           rebuild: .download, action: .brew(.uninstall(name: "x")))
+        let withTool = ScanResult(findings: result.findings + [tool], disk: result.disk)
+        let sc = scanner(box)
+        let running = RunningSnapshot(apps: [])
+        let plan = CleanPlan.unattended(withTool, scanner: sc, running: running, activeDirectories: [], now: Date())
+        let toolItem = try XCTUnwrap(plan.items.first { $0.finding.id == "tool.item" })
+        XCTAssertFalse(toolItem.wouldClean)
+        XCTAssertEqual(toolItem.skipReason, "needs a person (tool item)")
+        XCTAssertTrue(plan.unattended, "the shared factory makes an unattended plan: a tool item is never cleaned")
+        // The same factory feeds the run: the Cleaner gets exactly the items of this plan with wouldClean.
+        var sent: [String] = []
+        let done = CLIClean.runPlan(plan: plan, result: withTool, cleaner: makeCleaner(box, spy: Spy()), home: box.home.path, stop: CLIStop(),
+                                    willClean: { sent.append(ScanReport.id($0.id, home: box.home.path)) }, log: { _, _ in })
+        let planned = Set(plan.wouldClean.map { ScanReport.id($0.finding.id, home: box.home.path) })
+        XCTAssertEqual(Set(sent), planned)
+        XCTAssertFalse(sent.contains("tool.item"))
+        XCTAssertEqual(done.cleaned, planned.count)
+    }
+
+    func testTheDryRunJSONMarksAToolItemAndItsWouldCleanSetIsWhatTheCleanSends() throws {
+        let box = try makeHome()
+        let tool = Finding(id: "tool.item", ecosystem: .homebrew, title: "A tool item", location: "~/tool", bytes: 10, tier: .safe,
+                           rebuild: .download, action: .brew(.uninstall(name: "x")))
+        let dry = run(["--clean-safe", "--dry-run", "--json"], box, extra: [tool])
+        let preview = try JSONDecoder().decode(DryRunReport.self, from: Data(try XCTUnwrap(dry.result?.stdout).utf8))
+        let toolEntry = try XCTUnwrap(preview.findings.first { $0.base.id == "tool.item" })
+        XCTAssertFalse(toolEntry.wouldClean)
+        XCTAssertEqual(toolEntry.skipReason, "needs a person (tool item)")
+        let planned = Set(preview.findings.filter(\.wouldClean).map(\.base.id))
+        XCTAssertFalse(planned.isEmpty, "the file items are planned")
+        let r = run(["--clean-safe", "--yes", "--json"], box, extra: [tool])
+        XCTAssertEqual(Set(r.sentToCleaner), planned, "the clean sends exactly the wouldClean set of the dry run")
+        XCTAssertFalse(r.sentToCleaner.contains("tool.item"))
+        let report = try decodeClean(r)
+        XCTAssertEqual(report.findings.first { $0.base.id == "tool.item" }?.skipReason, "needs a person (tool item)")
+        XCTAssertEqual(report.findings.first { $0.base.id == "tool.item" }?.wouldClean, false)
+    }
+
+    // MARK: Stray arguments never reach the run
+
+    func testStrayArgumentsGive64WithNoScanAndNoLock() throws {
+        let box = try makeHome()
+        let before = snapshot(box.home)
+        for args in [["--clean-safe", "--yes", "/some/path"], ["--clean-safe", "--yes", ""], ["onlythis", "--clean-safe", "--yes"],
+                     ["--clean-safe", "--yes", "--yes"], ["--clean-safe", "--clean-safe", "--yes"], ["--clean-safe", "--yes", "--json", "--json"],
+                     ["--clean-safe", "--yes", "-psn_0_12345"], ["--clean-safe", "--yes", "--verbose", "--verbose"],
+                     ["--clean-safe", "--dry-run", "x"], ["--clean-safe", "--dry-run", "--json", "--json"]] {
+            let r = run(args, box)
+            XCTAssertEqual(r.result?.exitCode, 64, "\(args)")
+            XCTAssertEqual(r.scannersBuilt, 0, "\(args)")
+            XCTAssertTrue(r.sentToCleaner.isEmpty, "\(args)")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: lockFolder(box).path), "\(args): no lock")
+        }
+        XCTAssertEqual(snapshot(box.home), before)
+    }
+
+    // MARK: A lock that cannot be opened stops the run
+
+    private func assertLockRefusal(_ lock: URL, _ box: Sandbox, _ name: String, file: StaticString = #filePath, line: UInt = #line) {
+        let before = snapshot(box.home)
+        let r = run(["--clean-safe", "--yes", "--json"], box, lock: lock)
+        XCTAssertEqual(r.result?.exitCode, 1, name, file: file, line: line)
+        XCTAssertEqual(r.result?.stdout, "", name, file: file, line: line)
+        XCTAssertTrue(r.result?.stderr.contains("The lock could not be taken") == true, name, file: file, line: line)
+        XCTAssertTrue(r.sentToCleaner.isEmpty, "\(name): the Cleaner is never called", file: file, line: line)
+        XCTAssertTrue(r.logs.contains { $0.contains("lock could not be taken, exit 1") }, "\(name): \(r.logs)", file: file, line: line)
+        XCTAssertFalse(r.logs.contains { $0.contains("plan:") || $0.hasPrefix("cli plan") }, "\(name): no plan", file: file, line: line)
+        XCTAssertEqual(snapshot(box.home), before, name, file: file, line: line)
+    }
+
+    func testARunWithALockThatCannotBeOpenedExits1AndNeverCallsTheCleaner() throws {
+        let holder = try Sandbox()
+        let outside = holder.home.deletingLastPathComponent()
+        let box = try makeHome()
+        // 1. The log folder is a regular file.
+        let notAFolder = outside.appendingPathComponent("lock-is-a-file")
+        try Data("x".utf8).write(to: notAFolder)
+        assertLockRefusal(notAFolder, box, "folder is a file")
+        // 2. The lock file is a link.
+        let linked = outside.appendingPathComponent("lock-link-run")
+        try FileManager.default.createDirectory(at: linked, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linked.appendingPathComponent("clean.lock"),
+                                                   withDestinationURL: box.home.appendingPathComponent("Documents/letter.txt"))
+        assertLockRefusal(linked, box, "lock file is a link")
+        XCTAssertEqual(try Data(contentsOf: box.home.appendingPathComponent("Documents/letter.txt")).count, 100)
+        // 3. The lock file is a FIFO.
+        let fifo = outside.appendingPathComponent("lock-fifo")
+        try FileManager.default.createDirectory(at: fifo, withIntermediateDirectories: true)
+        XCTAssertEqual(mkfifo(fifo.appendingPathComponent("clean.lock").path, 0o600), 0)
+        assertLockRefusal(fifo, box, "lock file is a FIFO")
+        // 4. The lock file has a second hard link.
+        let hard = outside.appendingPathComponent("lock-hard")
+        try FileManager.default.createDirectory(at: hard, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: hard.appendingPathComponent("clean.lock"))
+        XCTAssertEqual(link(hard.appendingPathComponent("clean.lock").path, hard.appendingPathComponent("second-name").path), 0)
+        assertLockRefusal(hard, box, "lock file has two names")
+    }
+
+    func testTheLockRefusesAFileThatIsNotAPlainFileWithOneName() throws {
+        let holder = try Sandbox()
+        let outside = holder.home.deletingLastPathComponent()
+        let fifo = outside.appendingPathComponent("l-fifo")
+        try FileManager.default.createDirectory(at: fifo, withIntermediateDirectories: true)
+        XCTAssertEqual(mkfifo(fifo.appendingPathComponent("clean.lock").path, 0o600), 0)
+        XCTAssertEqual(CLILock.acquire(in: fifo).failureValue.map { if case .cannotOpen = $0 { return true } else { return false } }, true)
+        let hard = outside.appendingPathComponent("l-hard")
+        try FileManager.default.createDirectory(at: hard, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: hard.appendingPathComponent("clean.lock"))
+        XCTAssertEqual(link(hard.appendingPathComponent("clean.lock").path, hard.appendingPathComponent("other").path), 0)
+        XCTAssertEqual(CLILock.acquire(in: hard).failureValue.map { if case .cannotOpen = $0 { return true } else { return false } }, true)
+        // A plain file with one name still works.
+        let ok = outside.appendingPathComponent("l-ok")
+        XCTAssertNoThrow(try CLILock.acquire(in: ok).get().release())
+    }
+
+    // MARK: The home folder
+
+    func testAHomeThatIsNotAbsoluteIsRefusedAndNothingIsScanned() throws {
+        let box = try makeHome()
+        let before = snapshot(box.home)
+        let cases: [(String?, String?, String)] = [(".", box.home.path, box.home.path), (box.home.path, "relative", box.home.path),
+                                                   ("", box.home.path, box.home.path), (box.home.path, box.home.path, "relative")]
+        for (cffixed, home, resolved) in cases {
+            var logs: [String] = []
+            var built = 0
+            var env = environment(box)
+            env.homeValues = { (cffixed, home, resolved) }
+            let result = CLICommand.run(arguments: ["t", "--clean-safe", "--yes"], scanner: { built += 1; return self.scanner(box) }(),
+                                        runningApps: RunningApps { RunningSnapshot(apps: []) }, clean: env, log: { _, t in logs.append(t) })
+            XCTAssertEqual(result?.exitCode, 1, "\(cffixed ?? "nil") \(home ?? "nil") \(resolved)")
+            XCTAssertTrue(result?.stderr.contains("not an absolute path") == true)
+            XCTAssertEqual(built, 0, "nothing is scanned")
+            XCTAssertFalse(logs.contains { $0.hasPrefix("cli plan") })
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lockFolder(box).path))
+        XCTAssertEqual(snapshot(box.home), before)
+        // Not set at all is fine (the system gives the home).
+        var ok = environment(box)
+        ok.homeValues = { (nil, nil, box.home.path) }
+        XCTAssertEqual(CLICommand.run(arguments: ["t", "--clean-safe", "--yes"], scanner: scanner(box),
+                                      runningApps: RunningApps { RunningSnapshot(apps: []) }, clean: ok, log: { _, _ in })?.exitCode, 0)
+    }
+
+    // MARK: The running apps are read fresh
+
+    func testTheRunningAppsAreRefreshedRightBeforeEachRead() throws {
+        let box = try makeHome()
+        // An item with an owner app: the Cleaner reads the running apps again for it.
+        try box.file("Library/Developer/Xcode/DerivedData/Demo-abc/Build/a.bin", bytes: mb)
+        final class Order: @unchecked Sendable {
+            let lock = NSLock(); var events: [String] = []
+            func add(_ e: String) { lock.lock(); events.append(e); lock.unlock() }
+        }
+        let order = Order()
+        let r = run(["--clean-safe", "--yes", "--json"], box, apps: { order.add("take"); return RunningSnapshot(apps: []) },
+                    refresh: { order.add("refresh") })
+        XCTAssertEqual(r.result?.exitCode, 0)
+        let events = order.events
+        XCTAssertGreaterThanOrEqual(events.filter { $0 == "take" }.count, 2, "the plan, and at least one item with an owner app: \(events)")
+        XCTAssertEqual(events.count % 2, 0)
+        for pair in stride(from: 0, to: events.count, by: 2) {
+            XCTAssertEqual(Array(events[pair...pair + 1]), ["refresh", "take"], "each read is right after a refresh: \(events)")
+        }
+    }
+
+    // MARK: Signals: exact text, counted as skipped
+
+    func testASignalDuringAnItemIsReportedAsStoppedBySignalNeverAsTheMenuText() throws {
+        let box = try makeHome()
+        let stop = CLIStop()
+        var count = 0
+        let r = run(["--clean-safe", "--yes", "--json"], box, stop: stop) { _ in
+            count += 1
+            if count == 1 { stop.request(signal: SIGINT) }   // the signal arrives while the first item is already in the Cleaner
+        }
+        XCTAssertEqual(r.result?.exitCode, 130)
+        let report = try decodeClean(r)
+        XCTAssertTrue(report.stopped)
+        XCTAssertEqual(r.sentToCleaner.count, 1, "the item that runs finishes, and no other starts")
+        XCTAssertEqual(report.totals.cleaned, 1)
+        let planned = try dryRunReport(try makeHome()).findings.filter(\.wouldClean).count
+        let stopped = report.findings.filter { $0.wouldClean && $0.result == "skipped" }
+        XCTAssertEqual(stopped.count, planned - 1)
+        for e in stopped { XCTAssertEqual(e.skipReason, "stopped by signal", e.base.id) }
+        XCTAssertFalse(report.findings.contains { $0.skipReason.contains("Stopped by you") })
+        XCTAssertEqual(report.totals.skipped, report.findings.filter { $0.result == "skipped" }.count)
+        XCTAssertTrue(r.logs.contains { $0.contains("stopped by signal") })
+    }
+
+    func testASignalAtTheVeryEndStillGivesExit143AndSaysSo() throws {
+        let box = try makeHome()
+        let stop = CLIStop()
+        let planned = try dryRunReport(try makeHome()).findings.filter(\.wouldClean).count
+        var count = 0
+        let r = run(["--clean-safe", "--yes", "--json"], box, stop: stop) { _ in
+            count += 1
+            if count == planned { stop.request(signal: SIGTERM) }   // during the last item
+        }
+        XCTAssertEqual(r.sentToCleaner.count, planned, "every item was already started")
+        XCTAssertEqual(r.result?.exitCode, 143)
+        let report = try decodeClean(r)
+        XCTAssertTrue(report.stopped)
+        XCTAssertEqual(report.totals.cleaned, planned)
+        XCTAssertTrue(r.logs.contains { $0.contains("stopped by signal SIGTERM") }, "\(r.logs)")
+        let again = try makeHome()
+        let stop2 = CLIStop()
+        var n = 0
+        let text = try XCTUnwrap(run(["--clean-safe", "--yes"], again, stop: stop2) { _ in
+            n += 1
+            if n == planned { stop2.request(signal: SIGTERM) }
+        }.result?.stdout)
+        XCTAssertTrue(text.contains("A signal arrived at the end of the run. Every item was already finished."), text)
+        XCTAssertFalse(text.contains("partial"), text)
+    }
+
+    func testASignalDuringTheScanStopsBeforeTheFirstItem() throws {
+        let box = try makeHome()
+        let stop = CLIStop()
+        // The signal comes while the plan is made: the first read of the running apps is part of the plan.
+        let r = run(["--clean-safe", "--yes", "--json"], box, stop: stop, apps: { stop.request(signal: SIGINT); return RunningSnapshot(apps: []) })
+        XCTAssertEqual(r.result?.exitCode, 130)
+        XCTAssertTrue(r.sentToCleaner.isEmpty)
+        XCTAssertTrue(r.logs.contains { $0.contains("stopped by signal SIGINT") })
+    }
+
+    // MARK: The log
+
+    func testTheBeginLineComesBeforeTheScanAndEverySkippedItemIsLogged() throws {
+        let box = try makeHome()
+        var logs: [String] = []
+        var scanSeenAt: Int?
+        let env = environment(box)
+        // The scanner is built when the autoclosure runs. The scan itself starts later, so the begin line must already be there.
+        let sc = DiskScanner(home: box.home, config: Config(keep: [box.home.path + "/Library/Caches/node-gyp"], deleteMode: .permanent),
+                             useOwnerTools: false, programPaths: { [] }, openClaudeBinaries: { _ in [] }, appName: { _ in nil },
+                             activeDirectories: { scanSeenAt = logs.count; return [] })
+        let result = CLICommand.run(arguments: ["t", "--clean-safe", "--yes"], scanner: sc, runningApps: RunningApps { RunningSnapshot(apps: []) },
+                                    clean: env, log: { _, t in logs.append(t) })
+        XCTAssertEqual(result?.exitCode, 0)
+        let begin = try XCTUnwrap(logs.first { $0.hasPrefix("cli begin version=") })
+        XCTAssertTrue(begin.contains("options=--clean-safe --yes other=0"), begin)
+        XCTAssertTrue(begin.contains("deleteMode=permanent"), begin)
+        if let seen = scanSeenAt { XCTAssertLessThanOrEqual(logs.firstIndex(of: begin) ?? 99, seen) }
+        XCTAssertLessThan(try XCTUnwrap(logs.firstIndex(of: begin)), try XCTUnwrap(logs.firstIndex { $0.hasPrefix("cli plan") }))
+        let skippedInPlan = try dryRunReport(try makeHome()).findings.filter { !$0.wouldClean }
+        let skipLines = logs.filter { $0.hasPrefix("clean plan-skip id=") }
+        XCTAssertEqual(skipLines.count, skippedInPlan.count)
+        XCTAssertTrue(skipLines.allSatisfy { $0.contains("reason=\"") })
     }
 
     // MARK: Source

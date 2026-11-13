@@ -184,6 +184,15 @@ final class CLICommandTests: XCTestCase {
             ["--demo", "--scan"], ["--demo", "dark", "--clean-safe", "--dry-run"], ["--demo", "--dry-run"],
             ["--clean-safe", "--dry-run", "--demo"], ["--demo", "--scan", "--json"],
             ["-x"], ["--clean-safe", "--dry-run", "--yes", "--verbose"],
+            // Stray arguments: the deleting command and the dry run take ONLY their own options, each one at most once.
+            ["--clean-safe", "--yes", "/some/path"], ["--clean-safe", "--yes", ""], ["onlythis", "--clean-safe", "--yes"],
+            ["--clean-safe", "--yes", "--yes"], ["--clean-safe", "--clean-safe", "--yes"], ["--clean-safe", "--yes", "--json", "--json"],
+            ["--clean-safe", "--yes", "--verbose", "--verbose"], ["--clean-safe", "--yes", "-psn_0_12345"],
+            ["-psn_0_12345", "--clean-safe", "--yes"], ["--yes", "--clean-safe", "--yes"], ["--clean-safe", "--yes", "--json", ""],
+            ["--clean-safe", "--dry-run", "/some/path"], ["--clean-safe", "--dry-run", ""], ["onlythis", "--clean-safe", "--dry-run"],
+            ["--clean-safe", "--dry-run", "--dry-run"], ["--clean-safe", "--clean-safe", "--dry-run"],
+            ["--clean-safe", "--dry-run", "--json", "--json"], ["--clean-safe", "--dry-run", "--verbose", "--verbose"],
+            ["--clean-safe", "--dry-run", "-psn_0_12345"],
         ]
         for args in wrong {
             let r = run(args, box)
@@ -203,6 +212,11 @@ final class CLICommandTests: XCTestCase {
         XCTAssertTrue(run(["--verbose"], box).result!.stderr.hasPrefix("--verbose works only with --clean-safe --dry-run or --clean-safe --yes\n"))
         XCTAssertTrue(run(["--clean-safe", "--dry-run", "--yes"], box).result!.stderr.hasPrefix("--yes cannot be used with --dry-run\n"))
         XCTAssertTrue(run(["--yes"], box).result!.stderr.hasPrefix("--yes works only with --clean-safe\n"))
+        // A stray value is refused, and the message never repeats it (it could be a secret).
+        let stray = try XCTUnwrap(run(["--clean-safe", "--yes", "secret-value"], box).result?.stderr)
+        XCTAssertTrue(stray.hasPrefix("--clean-safe --yes takes no value."), stray)
+        XCTAssertFalse(stray.contains("secret-value"))
+        XCTAssertTrue(run(["--clean-safe", "--yes", "--yes"], box).result!.stderr.hasPrefix("--yes was given more than once\n"))
     }
 
     func testArgumentsThatAreNotCommandsStartTheAppAndRunNothing() throws {
@@ -275,6 +289,8 @@ final class CLICommandTests: XCTestCase {
         "standardizedFileURL": "builds a path value", "resolvingSymlinksInPath": "reads the links of a path",
         "URL": "builds a path value", "fileURLWithPath": "builds a path value", "lastIndex": "pure", "firstIndex": "pure",
         "index": "pure", "stop": "local helper of the plan", "encodeIfPresent": "writes to memory",
+        "RunningApps": "wraps the read of the running apps in a value", "refresh": "the hook of the caller: runs the main run loop for a moment, changes nothing",
+        "unattended": "CleanPlan factory: builds a plan in memory", "CleanPlan.unattended": "CleanPlan factory: builds a plan in memory",
         "container": "reads from memory", "nestedContainer": "reads from memory", "min": "pure", "abs": "pure",
         // Foundation: reads of the disk (no write)
         "attributesOfItem": "FileManager read", "contentsOfDirectory": "FileManager read",

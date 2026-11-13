@@ -55,13 +55,17 @@ public enum CLICommand {
         if arguments.contains("--help") { return CLIResult(stdout: usage, stderr: "", exitCode: 0) }
         if arguments.contains("--version") { return CLIResult(stdout: version + "\n", stderr: "", exitCode: 0) }
         if arguments.contains("--scan") { return scan(arguments, scanner: scanner(), version: version, now: now, log: log) }
+        // The command line never runs the main run loop, so `NSWorkspace` can be stale. Each read of the running apps is
+        // preceded by a short run of the main run loop (a hook, so that a test can see it). The menu app does not use this.
+        let refresh = clean.refreshRunningApps
+        let fresh = RunningApps { refresh(); return runningApps.take() }
         if CommandLineCheck.isClean(arguments) {
-            return CLIClean.run(arguments: arguments, scanner: scanner, runningApps: runningApps, activeDirectories: activeDirectories,
+            return CLIClean.run(arguments: arguments, scanner: scanner, runningApps: fresh, activeDirectories: activeDirectories,
                                 version: version, now: now, log: log, environment: clean)
         }
         if CommandLineCheck.isDryRun(arguments) {
-            return dryRun(arguments, scanner: scanner(), runningApps: runningApps, activeDirectories: activeDirectories,
-                          version: version, now: now, log: log)
+            return dryRun(arguments, scanner: scanner(), runningApps: fresh, activeDirectories: activeDirectories,
+                          version: version, now: now, log: log, scanOverride: clean.scanResult)
         }
         return nil
     }
@@ -87,14 +91,15 @@ public enum CLICommand {
 
     /// `trashpanda --clean-safe --dry-run` prints the safe items that a clean would remove. Nothing is deleted.
     private static func dryRun(_ arguments: [String], scanner: DiskScanner, runningApps: RunningApps, activeDirectories: [String]?,
-                               version: String, now: () -> Date, log: (CLILogLevel, String) -> Void) -> CLIResult {
+                               version: String, now: () -> Date, log: (CLILogLevel, String) -> Void,
+                               scanOverride: ((DiskScanner) -> ScanResult)?) -> CLIResult {
         let started = now()
         let json = arguments.contains("--json")
         let verbose = arguments.contains("--verbose")
         log(.info, "cli start version=\(version) mode=\(CommandLineCheck.mode(arguments)) \(CommandLineCheck.logOptions(arguments))")
-        let result = scanner.scan()
-        let plan = CleanPlan(result, guardian: scanner.guardian, running: runningApps.take(), deleteMode: scanner.config.deleteMode,
-                             activeDirectories: activeDirectories, now: now(), unattended: true)
+        let result = scanOverride?(scanner) ?? scanner.scan()
+        let plan = CleanPlan.unattended(result, scanner: scanner, running: runningApps.take(), activeDirectories: activeDirectories,
+                                        now: now())
         let report = DryRunReport(result, plan: plan, home: scanner.home.path)
         for entry in report.findings { log(.info, entry.logLine) }
         let out = json ? report.json() : plan.text(verbose: verbose)
