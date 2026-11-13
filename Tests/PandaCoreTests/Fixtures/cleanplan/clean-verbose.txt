@@ -1,0 +1,14 @@
+cleaned  1.0 GB     Xcode & Swift  Example build cache  [~/Library/Caches/Example]
+cleaned  1.0 GB     Docker         Example upper limit  [Docker]
+2 items cleaned, 8 skipped, 0 failed.
+Freed 2.0 GB (measured).
+
+Skipped: 8 items
+  review item - AI agents & local models · Example models  [~/.example/models]
+  blocked: Has changes that are not committed - Git worktrees · Example blocked  [~/code/busy]
+  info only - Homebrew · Example note  [~/Library/Example]
+  on the keep list - JavaScript & TypeScript · Example kept cache  [~/Library/Caches/Kept]
+  owner app is open (Example Editor) - App update downloads · Example editor cache  [~/Library/Caches/Editor]
+  needs a person (tool item) - Homebrew · Example tool item  [Trash]
+  refused by the path guard: path is protected (Documents) - Xcode & Swift · Example refused  [~/Documents/letter.txt]
+  not there now - Python · Example gone  [~/Library/Caches/Gone]

@@ -46,6 +46,8 @@ public final class Cleaner {
     public let deleteMode: DeleteMode
     /// The one call that moves an item to the Trash (trash mode). A test replaces it, so that no test touches the real Trash.
     var trashItem: (URL) throws -> Void = TrashMover.move
+    /// Gives the Cleaner another move to the Trash. The command line tests use it, so that no test touches the real Trash.
+    func useTrashMove(_ move: @escaping (URL) throws -> Void) { trashItem = move }
     /// Asked once before each item, never during one. When it says true, the clean ends and the items that are left
     /// are reported as skipped with the reason `stoppedReason`. The item that runs always finishes.
     public var shouldStop: @Sendable () -> Bool = { false }
@@ -1056,6 +1058,14 @@ public final class Cleaner {
 
     private func removeContents(of dir: URL, finding: Finding, into report: inout CleanReport) {
         if let reason = guardian.check(dir) { skip(finding, "\(reason)", &report); return }
+        // A link in any part of the path could lead out of the cache folder, for example `~/.cache` that is a link to another
+        // folder in the home folder. The guard looks at the last part only, so the whole path is checked here.
+        guard CleanRules.isPlain(dir) else { skip(finding, "a folder in the path is a link", &report); return }
+        guard CleanRules.exists(dir) else { skip(finding, "It is not there now", &report); return }
+        let size = sizeOf(dir)                          // measure first, check last
+        // The path is checked again after the measuring: a link that replaced a folder during it is caught.
+        if let reason = guardian.check(dir) { skip(finding, "\(reason)", &report); return }
+        guard CleanRules.isPlain(dir) else { skip(finding, "a folder in the path is a link", &report); return }
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {
             Log.error("cannot read \(dir.path)")
             report.failed.append("\(finding.location): cannot read folder"); return
@@ -1074,9 +1084,9 @@ public final class Cleaner {
         }
         report.removed += 1
         let left = Sizer.size(of: dir)
-        let freed = max(0, finding.bytes - left)
+        let freed = max(0, size - left)
         count(freed, &report)
-        Log.info("clean \(finding.id): estimate \(finding.bytes), left \(left), freed \(freed), failures \(failures)")
+        Log.info("clean \(finding.id): measured \(size), left \(left), freed \(freed), failures \(failures)")
         if failures > 0 { report.failed.append("\(finding.location): \(failures) items stayed") }
     }
 

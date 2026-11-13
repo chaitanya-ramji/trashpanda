@@ -70,8 +70,9 @@ final class CleanStopTests: XCTestCase {
         XCTAssertEqual(report.skipped, [items[1].location + ": Stopped by you", items[2].location + ": Stopped by you"])
         XCTAssertEqual(shown, ["Item one"], "Only the first item started")
         XCTAssertEqual(stop.asks, 2, "The question is asked once for each item that started, and once for the stop")
-        // The freed bytes are the bytes of the one item that was deleted.
-        XCTAssertEqual(report.freed, 3_000_000)
+        // The freed bytes are the bytes of the one item that was deleted, as measured on the disk (the size on disk can be a little more).
+        XCTAssertGreaterThanOrEqual(report.freed, 3_000_000)
+        XCTAssertLessThan(report.freed, 3_100_000)
     }
 
     func testWithoutAStopTheResultIsTheSameAsBefore() throws {
@@ -82,7 +83,8 @@ final class CleanStopTests: XCTestCase {
         c.shouldStop = { stop.ask() }
         let report = c.clean(items)
         XCTAssertEqual(report.removed, 3)
-        XCTAssertEqual(report.freed, 9_000_000)
+        XCTAssertGreaterThanOrEqual(report.freed, 9_000_000)
+        XCTAssertLessThan(report.freed, 9_300_000)
         XCTAssertTrue(report.skipped.isEmpty)
         XCTAssertTrue(report.failed.isEmpty)
         XCTAssertTrue(files.allSatisfy { !exists($0) })
@@ -92,7 +94,7 @@ final class CleanStopTests: XCTestCase {
         let (items2, files2) = try setup(box2)
         let report2 = cleaner(box2).clean(items2)
         XCTAssertEqual(report2.removed, 3)
-        XCTAssertEqual(report2.freed, 9_000_000)
+        XCTAssertEqual(report2.freed, report.freed)
         XCTAssertTrue(files2.allSatisfy { !exists($0) })
     }
 

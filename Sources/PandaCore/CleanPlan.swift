@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a clean of the safe items would do, decided for each finding. It only reads. It never changes a file.
-/// `trashpanda --clean-safe --dry-run` prints it. A later step will use the same plan for the real clean.
+/// `trashpanda --clean-safe --dry-run` prints it. `trashpanda --clean-safe --yes` uses the same plan for the real clean.
 ///
 /// An item would be cleaned only if all of this is true. The checks run in this order, and only the FIRST failing check is shown:
 /// 1. it is not an information line (`info only`),
@@ -21,7 +21,12 @@ import Foundation
 /// 9. for a build folder: no program runs in its project (`project is in use`), when the list of working folders is known,
 /// 10. its owner app is not open (`owner app is open (name)`). The command line cannot ask an app to quit, the menu can,
 /// 11. and the one-click clean of the menu would take it (`isOneClickSafe`). Step 11 is a safety net: steps 1 to 3 and 10 already
-///    cover its rule, so no item can fail it alone.
+///    cover its rule, so no item can fail it alone,
+/// 12. in an unattended plan (`--clean-safe --dry-run` and `--clean-safe --yes`): the item is a file item, not a tool item
+///    (`needs a person (tool item)`). Nobody can answer a dialog, so the command line never runs a tool item.
+///
+/// The real clean (`--clean-safe --yes`) uses this same plan. It gives the findings of the items with `wouldClean` to the Cleaner,
+/// so the dry run is an exact preview of what `--yes` tries.
 ///
 /// The Cleaner ALWAYS runs the path guard and the shape checks again right before it deletes, for every item. That is not
 /// shown per item. Some parts cannot be decided now at all (a tool decides, an app can start, an age changes). Each item that
@@ -46,6 +51,23 @@ public struct CleanPlan: Sendable {
 
     public let items: [Item]
     public let deleteMode: DeleteMode
+    /// True for a plan of a run that nobody watches (`--clean-safe --dry-run` and `--clean-safe --yes`). See `needsAPerson`.
+    public let unattended: Bool
+
+    /// The reason of an item that only a person can clean, because it needs a tool or the list of projects. It is used only in an
+    /// unattended plan. The menu cleans these items, and the command line does not.
+    public static let needsAPersonReason = "needs a person (tool item)"
+
+    /// True when a run that nobody watches must not clean the action: it is not a file delete that the Cleaner does alone.
+    /// `DeleteMode.movesFiles` is the one list of the actions that remove files or folders by themselves. Every other action runs a
+    /// tool (Docker, Homebrew, simctl, a package manager, Ollama, `hf`, the version tool of a worktree) or empties the Trash,
+    /// so it is a tool item. `hfInstalled` is true here: a Hugging Face repository is a tool item, because a read-only plan does not
+    /// look for `hf`. A runtime version (`removeRuntime`) is a file delete, but it needs the version requests of the projects,
+    /// which only the app reads, so it is left to a person too.
+    static func needsAPerson(_ action: Action) -> Bool {
+        if case .removeRuntime = action { return true }
+        return !DeleteMode.movesFiles(action, hfInstalled: true)
+    }
 
     /// The one rule of the one-click clean of safe items. The menu (`MenuModel`) and this plan both use it,
     /// so the two cannot drift. `blockers` are the names of the open owner apps of the item.
@@ -55,14 +77,23 @@ public struct CleanPlan: Sendable {
 
     /// - `activeDirectories`: the working folders of the running programs, when the caller has them. nil means unknown:
     ///   then a build folder is not checked for use now, and it says that the Cleaner reads it again. The plan never runs a program to find out.
+    /// - `unattended`: true when nobody can answer a dialog. Then only a file item can be cleaned, and each tool item is skipped.
     public init(_ result: ScanResult, guardian: PathGuard, running: RunningSnapshot, deleteMode: DeleteMode,
-                activeDirectories: [String]? = nil, now: Date = Date()) {
+                activeDirectories: [String]? = nil, now: Date = Date(), unattended: Bool = false) {
         self.deleteMode = deleteMode
+        self.unattended = unattended
         items = result.findings.map { f in
-            let d = Self.decide(f, guardian: guardian, running: running, active: activeDirectories, now: now)
+            let d = Self.decide(f, guardian: guardian, running: running, active: activeDirectories, now: now, unattended: unattended)
             return Item(finding: f, wouldClean: d.reason == nil, skipReason: d.reason ?? "", checkedNow: d.checkedNow,
                         checkedAtCleanTime: d.reason == nil ? d.atClean : "")
         }
+    }
+
+    /// A plan that is built from given items. Tests use it to give the real clean a plan that the rules would never make.
+    init(items: [Item], deleteMode: DeleteMode, unattended: Bool) {
+        self.items = items
+        self.deleteMode = deleteMode
+        self.unattended = unattended
     }
 
     struct Decision {
@@ -107,7 +138,7 @@ public struct CleanPlan: Sendable {
         var i = Inspection()
         switch f.action {
         case .removeContents(let url):
-            i.targets = [url]; i.mustExist = true; i.mustBeReadableFolder = true
+            i.targets = [url]; i.mustExist = true; i.mustBeReadableFolder = true; i.shape = CleanRules.isPlain
         case .removeArtifact(let url):
             i.targets = [url]; i.mustExist = true; i.shape = CleanRules.isArtifactTarget; i.artifact = url
             i.atClean = ["project use is read again"]
@@ -159,13 +190,14 @@ public struct CleanPlan: Sendable {
     }
 
     /// nil when the item would be cleaned. Else the short reason. The order of the checks is fixed (see the type comment).
-    static func skipReason(_ f: Finding, guardian: PathGuard, running: RunningSnapshot, active: [String]? = nil, now: Date = Date()) -> String? {
-        decide(f, guardian: guardian, running: running, active: active, now: now).reason
+    static func skipReason(_ f: Finding, guardian: PathGuard, running: RunningSnapshot, active: [String]? = nil, now: Date = Date(),
+                           unattended: Bool = false) -> String? {
+        decide(f, guardian: guardian, running: running, active: active, now: now, unattended: unattended).reason
     }
 
     /// `inspection` is for tests only: it replaces what the plan reads, so that a test can give a list that no real disk gives.
     static func decide(_ f: Finding, guardian: PathGuard, running: RunningSnapshot, active: [String]?, now: Date,
-                       inspection: ((Finding, URL, Date) -> Inspection)? = nil) -> Decision {
+                       unattended: Bool = false, inspection: ((Finding, URL, Date) -> Inspection)? = nil) -> Decision {
         func stop(_ reason: String, checked: Bool = false) -> Decision { Decision(reason: reason, checkedNow: checked, atClean: "") }
         if !f.isActionable { return stop("info only") }
         if f.tier != .safe { return stop("review item") }
@@ -203,6 +235,8 @@ public struct CleanPlan: Sendable {
         let blockers = f.owner.map { running.running($0) } ?? []
         if !blockers.isEmpty { return stop("owner app is open (\(blockers.joined(separator: " and ")))", checked: checked) }
         if !isOneClickSafe(f, blockers: blockers) { return stop(safetyNetReason, checked: checked) }
+        // Last, so that every other reason keeps its text. A run that nobody watches cleans files only.
+        if unattended, needsAPerson(f.action) { return stop(needsAPersonReason, checked: checked) }
         var atClean = i.atClean
         if f.owner != nil { atClean.append("app state is read again") }
         return Decision(reason: nil, checkedNow: checked, atClean: atClean.joined(separator: "; "))

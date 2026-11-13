@@ -3,8 +3,13 @@ import PandaCore
 
 // The read-only commands live in PandaCore (`CLICommand`), so that tests can run them. This file only parses nothing itself:
 // it calls the command, prints the result, flushes the log, and exits.
+// `--clean-safe --yes` stops after the current item on SIGINT or SIGTERM, and reports what it did.
+let cleanEnvironment = CLICleanEnvironment()
+if CommandLineCheck.error(CommandLine.arguments) == nil, CommandLineCheck.isClean(CommandLine.arguments) {
+    CLISignals.install(cleanEnvironment.stop)
+}
 if let result = CLICommand.run(arguments: CommandLine.arguments, scanner: DiskScanner(), runningApps: .system,
-                               version: UpdateController.currentVersion, log: { level, text in
+                               version: UpdateController.currentVersion, clean: cleanEnvironment, log: { level, text in
     switch level {
     case .info: Log.info(text)
     case .warn: Log.warn(text)
