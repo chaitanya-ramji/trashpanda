@@ -89,6 +89,14 @@ public struct CleanPlan: Sendable {
         }
     }
 
+    /// The ONE place that builds the plan of the two command line commands. The dry run and the real clean both call it, so the
+    /// dry run is an exact preview: the two plans can only differ by what changed on the disk between the two runs.
+    static func unattended(_ result: ScanResult, scanner: DiskScanner, running: RunningSnapshot, activeDirectories: [String]?,
+                           now: Date) -> CleanPlan {
+        CleanPlan(result, guardian: scanner.guardian, running: running, deleteMode: scanner.config.deleteMode,
+                  activeDirectories: activeDirectories, now: now, unattended: true)
+    }
+
     /// A plan that is built from given items. Tests use it to give the real clean a plan that the rules would never make.
     init(items: [Item], deleteMode: DeleteMode, unattended: Bool) {
         self.items = items

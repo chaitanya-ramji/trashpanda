@@ -62,6 +62,54 @@ final class CleanerDeleteTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: other.appendingPathComponent("b").path))
     }
 
+    // MARK: removeContents: the check after the measuring
+
+    private func contentsFinding(_ dir: URL) -> Finding {
+        Finding(id: "t", ecosystem: .python, title: "Test", location: "~/x", bytes: 1, tier: .safe, rebuild: .download,
+                action: .removeContents(dir))
+    }
+
+    /// A parent folder is swapped for a link inside the measuring. The guard looks at the last part only, so the check of the whole
+    /// path after the measuring (`isPlain`) must catch it. Nothing is deleted, and the reason is honest.
+    func testRemoveContentsChecksTheWholePathAgainAfterTheMeasuring() throws {
+        let box = try Sandbox()
+        let leak = try box.file("Other/pip/leak.bin", bytes: 10)
+        let target = try box.file(".cache/pip/a.bin", bytes: 10).deletingLastPathComponent()
+        let cache = box.home.appendingPathComponent(".cache")
+        let events = Events()
+        let cleaner = recorder(box, events: events) {
+            try? FileManager.default.moveItem(at: cache, to: box.home.appendingPathComponent(".cache-real"))
+            try? FileManager.default.createSymbolicLink(at: cache, withDestinationURL: box.home.appendingPathComponent("Other"))
+        }
+        cleaner.activeDirectories = { [] }
+        let report = cleaner.clean([contentsFinding(target)])
+        XCTAssertEqual(events.list, ["sizeOf"], "nothing is deleted")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: leak.path), "a file behind the link is never touched")
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(report.freed, 0)
+        XCTAssertTrue(report.failed.isEmpty)
+        XCTAssertTrue(report.skipped.first?.hasSuffix("a folder in the path is a link") == true, "\(report.skipped)")
+    }
+
+    /// The last folder is swapped for a link inside the measuring: the guard after the measuring refuses it.
+    func testRemoveContentsRunsTheGuardAgainAfterTheMeasuring() throws {
+        let box = try Sandbox()
+        let target = try box.file("Library/Caches/Demo/a.bin", bytes: 10).deletingLastPathComponent()
+        let other = try box.file("Library/Caches/Other/b.bin", bytes: 10).deletingLastPathComponent()
+        let events = Events()
+        let cleaner = recorder(box, events: events) {
+            try? FileManager.default.removeItem(at: target)
+            try? FileManager.default.createSymbolicLink(at: target, withDestinationURL: other)
+        }
+        cleaner.activeDirectories = { [] }
+        let report = cleaner.clean([contentsFinding(target)])
+        XCTAssertEqual(events.list, ["sizeOf"], "nothing is deleted")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.appendingPathComponent("b.bin").path))
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(report.skipped.count, 1)
+        XCTAssertTrue((report.skipped.first ?? "").contains("link"), "\(report.skipped)")
+    }
+
     // MARK: A target that becomes a link
 
     /// A parent folder becomes a link while we measure. The path now leads somewhere else in the home folder. The guard cannot tell,

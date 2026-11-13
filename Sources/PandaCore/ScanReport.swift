@@ -184,6 +184,25 @@ public enum CommandLineCheck {
         if args.contains("--verbose") && !(args.contains("--clean-safe") && (args.contains("--dry-run") || args.contains("--yes"))) {
             return "--verbose works only with --clean-safe --dry-run or --clean-safe --yes"
         }
+        return strictError(args.map { $0 })
+    }
+
+    /// The two commands that read the disk for a clean (`--clean-safe --dry-run`) and that delete (`--clean-safe --yes`) take ONLY
+    /// their own options, each one at most once. A value, an empty text, a repeated option, or the launcher argument `-psn_...`
+    /// is a mistake here: the run would go on with a command that the caller did not mean. The launcher argument is accepted
+    /// only where the menu bar app starts. The message never repeats a value, because a value could be a secret.
+    private static func strictError(_ args: [String]) -> String? {
+        let deleting = args.contains("--yes"), preview = args.contains("--dry-run")
+        guard args.contains("--clean-safe"), deleting || preview else { return nil }
+        let command = deleting ? "--clean-safe --yes" : "--clean-safe --dry-run"
+        let allowed: Set<String> = deleting ? ["--clean-safe", "--yes", "--json", "--verbose"]
+                                            : ["--clean-safe", "--dry-run", "--json", "--verbose"]
+        if args.contains(where: { !$0.hasPrefix("-") }) {
+            return "\(command) takes no value. Only these options are allowed: \(allowed.sorted().joined(separator: " "))"
+        }
+        let foreign = args.filter { !allowed.contains($0) }
+        if !foreign.isEmpty { return "\(command) cannot be used with \(foreign.joined(separator: " "))" }
+        if let twice = args.first(where: { option in args.filter { $0 == option }.count > 1 }) { return "\(twice) was given more than once" }
         return nil
     }
 
