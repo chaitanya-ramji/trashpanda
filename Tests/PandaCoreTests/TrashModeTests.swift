@@ -197,7 +197,7 @@ final class TrashModeTests: XCTestCase {
         XCTAssertEqual(calls.trashed.count, 2)
         XCTAssertEqual(calls.deleted, [])
         XCTAssertEqual(report.deleteMode, .trash)
-        XCTAssertEqual(report.movedToTrash, 5000)
+        XCTAssertEqual(report.movedToTrash, 100, "the measured size of the folder before the move (the test measures 100), never the estimate of 5000")
         XCTAssertEqual(report.freed, 0)
         XCTAssertEqual((try FileManager.default.contentsOfDirectory(atPath: dir.path)).count, 0, "the folder stays, empty")
     }
@@ -210,7 +210,7 @@ final class TrashModeTests: XCTestCase {
         let report = trashCleaner(box, trash: trashFolder(box), calls: calls, mode: .permanent).clean([finding(.removeContents(dir), bytes: 2000)])
         XCTAssertEqual(calls.trashed, [])
         XCTAssertEqual(calls.deleted.count, 1)
-        XCTAssertEqual(report.freed, 2000)
+        XCTAssertEqual(report.freed, 100, "the measured size of the folder before the delete (the test measures 100), never the estimate of 2000")
         XCTAssertEqual(report.movedToTrash, 0)
     }
 

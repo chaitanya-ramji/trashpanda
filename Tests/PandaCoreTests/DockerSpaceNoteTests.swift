@@ -53,7 +53,7 @@ final class DockerSpaceNoteTests: DockerTestCase {
     // MARK: Through the cleaner, with a fake docker and a fake free-space reader
 
     private func run(_ box: Sandbox, socket: String = ".orbstack/run/docker.sock", gain: Int64, extra: [Finding] = [],
-                     file: StaticString = #filePath, line: UInt = #line) throws -> CleanReport {
+                     sizeOf: ((URL) -> Int64)? = nil, file: StaticString = #filePath, line: UInt = #line) throws -> CleanReport {
         let s = try socket.hasPrefix("/") ? "unix://\(socket)" : "unix://\(box.home.appendingPathComponent(socket).path)"
         let fake = try FakeDocker(box: box, contextName: "ctx", host: s)
         let scanner = DiskScanner(home: box.home, config: Config(), useOwnerTools: false, dockerPath: fake.path, isSocket: { _ in true })
@@ -62,6 +62,7 @@ final class DockerSpaceNoteTests: DockerTestCase {
         let item = Finding(id: "docker.buildcache", ecosystem: .docker, title: "Build cache", location: "Docker engine: x", bytes: 568 * mb,
                            tier: .safe, rebuild: .minutes, action: .owner(.dockerBuilderPrune))
         let cleaner = Cleaner(guardian: scanner.guardian, remaining: { $0.ecosystem == .docker ? 0 : 0 }, dockerEngine: { scanner.dockerEngine() }, freeSpace: free)
+        if let sizeOf { cleaner.sizeOf = sizeOf }
         return cleaner.clean([item] + extra)
     }
 
@@ -95,7 +96,9 @@ final class DockerSpaceNoteTests: DockerTestCase {
         try box.file(".cache/zig/x", bytes: 3_000_000)
         let other = Finding(id: "zig", ecosystem: .zig, title: "Zig", location: "x", bytes: gb, tier: .safe, rebuild: .minutes,
                             action: .removeContents(box.home.appendingPathComponent(".cache/zig")))
-        let report = try run(box, gain: gb, extra: [other])               // the Mac gained 1 GB: exactly what the other item freed
+        // The folder holds 3 MB. The cleaner measures the folder, so the test says that it measures 1 GB before, and 0 after.
+        let measure: (URL) -> Int64 = { url in ((try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []).isEmpty ? 0 : self.gb }
+        let report = try run(box, gain: gb, extra: [other], sizeOf: measure)    // the Mac gained 1 GB: exactly what the other item freed
         XCTAssertEqual(report.dockerFreed, 568 * mb, "Only the Docker item counts as Docker")
         XCTAssertTrue(report.freed > gb + 500 * mb, "\(report.freed)")
         XCTAssertNotNil(report.dockerNote, "Docker returned nothing. The 1 GB of the other item must not hide that")

@@ -168,7 +168,12 @@ final class CLICommandTests: XCTestCase {
         let box = try makeHome()
         let before = snapshot(box.home)
         let wrong: [[String]] = [
-            ["--clean-safe"], ["--clean-safe", "--json"], ["--clean-safe", "--verbose"], ["--clean-safe", "--yes"],
+            ["--clean-safe"], ["--clean-safe", "--json"], ["--clean-safe", "--verbose"], ["--yes", "--json"], ["--yes", "--verbose"],
+            ["--clean-safe", "--yes", "--json", "--verbose"], ["--clean-safe", "--yes", "--scan"], ["--clean-safe", "--yes", "--demo"],
+            ["--demo", "--clean-safe", "--yes"], ["--clean-safe", "--yes", "--write-icons", "out"], ["--clean-safe", "--yes", "--dialog"],
+            ["--clean-safe", "--yes", "--submenu"], ["--clean-safe", "--yes", "--hover"], ["--clean-safe", "--yes", "--click"],
+            ["--clean-safe", "--yes", "--backdrop"], ["--clean-safe", "--yes", "--version"], ["--clean-safe", "--yes", "--help"],
+            ["--clean-safe", "--yes", "--nope"], ["--clean-safe", "--yes", "--dry-run", "--json"],
             ["--clean-safe", "--dry-run", "--yes"], ["--clean-safe", "--dry-run", "--yes", "--json"], ["--yes"],
             ["--yes", "--dry-run", "--clean-safe"], ["--dry-run"], ["--dry-run", "--json"], ["--dry-run", "--scan"],
             ["--dry-run", "--verbose"], ["--scan", "--clean-safe"], ["--scan", "--clean-safe", "--dry-run"],
@@ -193,10 +198,11 @@ final class CLICommandTests: XCTestCase {
         }
         XCTAssertEqual(snapshot(box.home), before)
         // The messages are clear.
-        XCTAssertTrue(run(["--clean-safe"], box).result!.stderr.hasPrefix("--clean-safe needs --dry-run in this version\n"))
+        XCTAssertTrue(run(["--clean-safe"], box).result!.stderr.hasPrefix("--clean-safe needs --dry-run (a preview) or --yes (a real clean)\n"))
         XCTAssertTrue(run(["--clean-safe", "--dry-run", "--json", "--verbose"], box).result!.stderr.hasPrefix("--verbose cannot be used with --json\n"))
-        XCTAssertTrue(run(["--verbose"], box).result!.stderr.hasPrefix("--verbose works only with --clean-safe --dry-run\n"))
-        XCTAssertTrue(run(["--clean-safe", "--dry-run", "--yes"], box).result!.stderr.hasPrefix("--yes is not available in this version\n"))
+        XCTAssertTrue(run(["--verbose"], box).result!.stderr.hasPrefix("--verbose works only with --clean-safe --dry-run or --clean-safe --yes\n"))
+        XCTAssertTrue(run(["--clean-safe", "--dry-run", "--yes"], box).result!.stderr.hasPrefix("--yes cannot be used with --dry-run\n"))
+        XCTAssertTrue(run(["--yes"], box).result!.stderr.hasPrefix("--yes works only with --clean-safe\n"))
     }
 
     func testArgumentsThatAreNotCommandsStartTheAppAndRunNothing() throws {
@@ -218,7 +224,7 @@ final class CLICommandTests: XCTestCase {
         let version = run(["--version"], box)
         XCTAssertEqual(version.result, CLIResult(stdout: "9.9.9\n", stderr: "", exitCode: 0))
         XCTAssertEqual(version.scannersBuilt, 0)
-        XCTAssertFalse(CLICommand.usage.contains("--yes"))
+        XCTAssertTrue(CLICommand.usage.contains("--clean-safe --yes"))
         XCTAssertTrue(CLICommand.usage.contains("--verbose and --json cannot be used together"))
     }
 
@@ -294,6 +300,9 @@ final class CLICommandTests: XCTestCase {
         "isVersionFolder": "pure path shape", "kind": "pure path shape", "isFolderName": "pure", "catalogNames": "pure table",
         "keepReason": "pure table", "cleanedFolders": "a table", "isOneClick": "pure", "sizeText": "text", "countedBytes": "a number",
         "wouldClean": "a list", "skipped": "a list", "skipCounts": "a list",
+        "isClean": "pure", "needsAPerson": "pure: reads the one list of DeleteMode", "movesFiles": "DeleteMode: a pure table of actions",
+        "CLICleanEnvironment": "a value type with the options of the real clean; it does nothing by itself",
+        "CLIClean": "the file of the real clean (CLIClean.swift). It has its own source tests; this file only hands the run over",
         // Log lines
         "info": "writes a log line (the log function of the caller)", "warn": "writes a log line (the log function of the caller)",
         // Types, enum cases, and properties that the regular expression sees as calls. None of them runs anything.
@@ -506,7 +515,9 @@ final class CLICommandTests: XCTestCase {
             let text = code(try String(contentsOf: dir.appendingPathComponent(file), encoding: .utf8))
             if text.range(of: #"\bCleaner\s*\("#, options: .regularExpression) != nil { cleanerUsers.insert((file as NSString).lastPathComponent) }
         }
-        XCTAssertTrue(cleanerUsers.isEmpty, "no file in PandaCore builds a Cleaner except through its own type: \(cleanerUsers)")
+        // CLIClean.swift is the one file that builds the real Cleaner: it hands the findings of the plan to it, with all its guards,
+        // and has no delete word and no delete rule of its own (the first assertion of this test and `testCLICleanFile...` check that).
+        XCTAssertEqual(cleanerUsers, ["CLIClean.swift"], "only the file of the real clean builds a Cleaner")
     }
 
     // MARK: Made-up sources: the scanners catch each bypass, and harmless code passes

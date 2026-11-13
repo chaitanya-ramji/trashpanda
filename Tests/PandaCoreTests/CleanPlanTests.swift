@@ -53,9 +53,10 @@ final class CleanPlanTests: XCTestCase {
     static let editorOpen = RunningSnapshot(apps: [RunningApp(bundleID: "com.example.editor", name: "Example Editor")])
 
     static func plan(_ result: ScanResult, home: URL, keep: [String]? = nil,
-                     running: RunningSnapshot = editorOpen, mode: DeleteMode = .permanent) -> CleanPlan {
+                     running: RunningSnapshot = editorOpen, mode: DeleteMode = .permanent, unattended: Bool = true) -> CleanPlan {
         let guardian = PathGuard(home: home, keep: keep ?? [home.path + "/Library/Caches/Kept"])
-        return CleanPlan(result, guardian: guardian, running: running, deleteMode: mode)
+        // The command line (the dry run and the real clean) always makes an unattended plan. The default is the same.
+        return CleanPlan(result, guardian: guardian, running: running, deleteMode: mode, unattended: unattended)
     }
 
     private func golden(_ name: String) throws -> String {
@@ -73,7 +74,8 @@ final class CleanPlanTests: XCTestCase {
 
     func testEachItemGetsItsReason() throws {
         let box = try fixtureBox()
-        let plan = Self.plan(Self.fixture(box.home), home: box.home)
+        // The plan of the menu (attended): it also takes the tool item.
+        let plan = Self.plan(Self.fixture(box.home), home: box.home, unattended: false)
         XCTAssertEqual(plan.items.map(\.wouldClean), [true, false, false, false, false, false, true, true, false, false])
         XCTAssertEqual(plan.items.map(\.skipReason), [
             "", "review item", "blocked: Has changes that are not committed", "info only", "on the keep list",
@@ -83,11 +85,20 @@ final class CleanPlanTests: XCTestCase {
         // The upper-limit item counts 0, as in the app.
         XCTAssertEqual(plan.wouldFree, 5_600_000_000)
         XCTAssertEqual(plan.wouldFree, plan.wouldClean.reduce(0) { $0 + $1.finding.countedBytes })
+        // The unattended plan of the command line is the same, except that the tool item needs a person.
+        let command = Self.plan(Self.fixture(box.home), home: box.home)
+        XCTAssertEqual(command.items.map(\.skipReason), [
+            "", "review item", "blocked: Has changes that are not committed", "info only", "on the keep list",
+            "owner app is open (Example Editor)", "", "needs a person (tool item)", "refused by the path guard: path is protected (Documents)",
+            "not there now",
+        ])
+        XCTAssertEqual(command.wouldClean.map(\.finding.id), ["example.cache", "example.upper"])
+        XCTAssertEqual(command.wouldFree, 5_300_000_000)
     }
 
     func testCheckedNowAndCheckedAtCleanTime() throws {
         let box = try fixtureBox()
-        let plan = Self.plan(Self.fixture(box.home), home: box.home, running: RunningSnapshot(apps: []))
+        let plan = Self.plan(Self.fixture(box.home), home: box.home, running: RunningSnapshot(apps: []), unattended: false)
         // A path item is checked now. A tool item is not, and a tool decides at clean time.
         XCTAssertEqual(plan.items.map(\.checkedNow), [true, false, false, false, true, true, true, false, true, true])
         XCTAssertEqual(plan.items.map(\.checkedAtCleanTime), ["", "", "", "", "", "app state is read again", "", "tool decides", "", ""])
@@ -95,7 +106,7 @@ final class CleanPlanTests: XCTestCase {
         XCTAssertTrue(plan.items[5].wouldClean)
         XCTAssertEqual(plan.checkedAgainAtCleanTime.map(\.finding.id), ["example.open", "example.tool"])
         // A skipped item never says what is checked at clean time.
-        let open = Self.plan(Self.fixture(box.home), home: box.home)
+        let open = Self.plan(Self.fixture(box.home), home: box.home, unattended: false)
         for item in open.skipped { XCTAssertEqual(item.checkedAtCleanTime, "", item.finding.title) }
     }
 
@@ -115,7 +126,7 @@ final class CleanPlanTests: XCTestCase {
         XCTAssertFalse(json.contains(box.home.path), "the output never holds the home folder")
         XCTAssertEqual(json.filter { $0 == "\n" }.count, 1)
         XCTAssertTrue(json.contains("\"mode\":\"dry-run\""))
-        XCTAssertTrue(json.contains("\"wouldFree\":5600000000"))
+        XCTAssertTrue(json.contains("\"wouldFree\":5300000000"))
         let decoded = try JSONDecoder().decode(DryRunReport.self, from: Data(json.utf8))
         XCTAssertEqual(decoded, report)
         XCTAssertEqual(decoded.schema, 1)
@@ -212,7 +223,8 @@ final class CleanPlanTests: XCTestCase {
             XCTAssertFalse(app.isEmpty)
             // The app does not know the keep list, the folders that are gone, and the path guard. The plan differs only by these.
             let onlyApp: Set<String> = ["example.kept", "example.refused", "example.gone"]
-            let plan = Self.plan(result, home: box.home, running: running)
+            // The app also cleans tool items. The unattended plan of the command line does not (see testUnattendedPlan...).
+            let plan = Self.plan(result, home: box.home, running: running, unattended: false)
             XCTAssertEqual(plan.wouldClean.map(\.finding.id), app.filter { !onlyApp.contains($0) })
             XCTAssertTrue(Set(app).isSuperset(of: Set(plan.wouldClean.map(\.finding.id))))
         }
@@ -315,18 +327,21 @@ final class CleanPlanTests: XCTestCase {
         for ok in [[], ["--scan"], ["--scan", "--json"], ["--clean-safe", "--dry-run"], ["--dry-run", "--clean-safe"],
                    ["--clean-safe", "--dry-run", "--json"], ["--json", "--clean-safe", "--dry-run"],
                    ["--clean-safe", "--dry-run", "--verbose"], ["--verbose", "--dry-run", "--clean-safe"],
+                   ["--clean-safe", "--yes"], ["--yes", "--clean-safe"], ["--clean-safe", "--yes", "--json"],
+                   ["--clean-safe", "--yes", "--verbose"], ["--json", "--yes", "--clean-safe"],
                    ["--version"], ["--help"], ["--demo"]] {
             XCTAssertNil(CommandLineCheck.error(["trashpanda"] + ok), "\(ok)")
         }
         // Wrong.
-        XCTAssertEqual(err("--clean-safe"), "--clean-safe needs --dry-run in this version")
-        XCTAssertEqual(err("--clean-safe", "--json"), "--clean-safe needs --dry-run in this version")
-        XCTAssertEqual(err("--clean-safe", "--verbose"), "--clean-safe needs --dry-run in this version")
+        let needs = "--clean-safe needs --dry-run (a preview) or --yes (a real clean)"
+        XCTAssertEqual(err("--clean-safe"), needs)
+        XCTAssertEqual(err("--clean-safe", "--json"), needs)
+        XCTAssertEqual(err("--clean-safe", "--verbose"), needs)
         XCTAssertEqual(err("--dry-run"), "--dry-run works only with --clean-safe")
         XCTAssertEqual(err("--dry-run", "--scan"), "--dry-run works only with --clean-safe")
         XCTAssertEqual(err("--dry-run", "--json"), "--dry-run works only with --clean-safe")
-        XCTAssertNotNil(err("--yes"))
-        XCTAssertNotNil(err("--clean-safe", "--yes"))
+        XCTAssertEqual(err("--yes"), "--yes works only with --clean-safe")
+        XCTAssertEqual(err("--clean-safe", "--dry-run", "--yes"), "--yes cannot be used with --dry-run")
         XCTAssertNotNil(err("--clean-safe", "--dry-run", "--yes"))
         XCTAssertNotNil(err("--clean-safe", "--dry-run", "--yes", "--json"))
         XCTAssertNotNil(err("--scan", "--yes"))
@@ -336,9 +351,10 @@ final class CleanPlanTests: XCTestCase {
         XCTAssertNotNil(err("--clean-safe", "--dry-run", "--nope"))
         XCTAssertNotNil(err("--delete"))
         // --verbose changes only the text of the dry run. Anywhere else it is a wrong option.
-        XCTAssertEqual(err("--verbose"), "--verbose works only with --clean-safe --dry-run")
-        XCTAssertEqual(err("--scan", "--verbose"), "--verbose works only with --clean-safe --dry-run")
-        XCTAssertEqual(err("--demo", "--verbose"), "--verbose works only with --clean-safe --dry-run")
+        let only = "--verbose works only with --clean-safe --dry-run or --clean-safe --yes"
+        XCTAssertEqual(err("--verbose"), only)
+        XCTAssertEqual(err("--scan", "--verbose"), only)
+        XCTAssertEqual(err("--demo", "--verbose"), only)
         XCTAssertEqual(err("--clean-safe", "--dry-run", "--json", "--verbose"), "--verbose cannot be used with --json")
         XCTAssertNotNil(err("--verbose", "--json"))
         XCTAssertTrue(CommandLineCheck.isDryRun(["t", "--clean-safe", "--dry-run"]))
@@ -349,11 +365,76 @@ final class CleanPlanTests: XCTestCase {
         XCTAssertEqual(CommandLineCheck.logOptions(["t", "--clean-safe", "--dry-run", "x"]), "options=--clean-safe --dry-run other=1")
     }
 
-    func testRealCleanDoesNotExistYet() throws {
-        // Step 2 has no real clean: no command can start one.
-        XCTAssertTrue(CommandLineCheck.knownOptions.contains("--yes"), "known, so that the error says why")
-        XCTAssertNotNil(CommandLineCheck.error(["t", "--clean-safe", "--dry-run", "--yes"]))
-        XCTAssertEqual(CommandLineCheck.error(["t", "--clean-safe", "--yes"]), "--yes is not available in this version")
+    func testYesIsValidOnlyWithCleanSafe() throws {
+        XCTAssertTrue(CommandLineCheck.knownOptions.contains("--yes"))
+        XCTAssertTrue(CommandLineCheck.isClean(["t", "--clean-safe", "--yes"]))
+        XCTAssertFalse(CommandLineCheck.isClean(["t", "--yes"]))
+        XCTAssertFalse(CommandLineCheck.isClean(["t", "--clean-safe"]))
+        XCTAssertFalse(CommandLineCheck.isClean(["t", "--clean-safe", "--dry-run"]))
+        XCTAssertEqual(CommandLineCheck.mode(["t", "--clean-safe", "--yes"]), "clean-safe --yes")
+        XCTAssertEqual(CommandLineCheck.mode(["t", "--clean-safe", "--yes", "--json"]), "clean-safe --yes --json")
+        // `--yes` mixes with no other option, except `--json` and `--verbose` (and not both of them together).
+        let others = ["--dry-run", "--scan", "--demo", "--write-icons", "--dialog", "--submenu", "--hover", "--click", "--backdrop",
+                      "--version", "--help"]
+        for other in others {
+            XCTAssertNotNil(CommandLineCheck.error(["t", "--clean-safe", "--yes", other]), other)
+            XCTAssertNotNil(CommandLineCheck.error(["t", other, "--yes", "--clean-safe"]), other)
+            XCTAssertNotNil(CommandLineCheck.error(["t", "--yes", other]), other)
+            XCTAssertNotNil(CommandLineCheck.error(["t", "--clean-safe", "--yes", "--json", other]), other)
+        }
+        XCTAssertNotNil(CommandLineCheck.error(["t", "--clean-safe", "--yes", "--json", "--verbose"]))
+    }
+
+    // MARK: Unattended plan
+
+    func testUnattendedPlanSkipsEveryToolItemAndNothingElseChanges() throws {
+        let box = try fixtureBox()
+        let result = Self.fixture(box.home)
+        let attended = Self.plan(result, home: box.home, unattended: false)
+        let unattended = Self.plan(result, home: box.home, unattended: true)
+        XCTAssertTrue(unattended.unattended)
+        XCTAssertFalse(attended.unattended)
+        for (a, u) in zip(attended.items, unattended.items) {
+            if CleanPlan.needsAPerson(a.finding.action), a.wouldClean {
+                XCTAssertFalse(u.wouldClean, a.finding.id)
+                XCTAssertEqual(u.skipReason, "needs a person (tool item)")
+            } else {
+                // Every other item keeps its decision and its reason.
+                XCTAssertEqual(u.wouldClean, a.wouldClean, a.finding.id)
+                XCTAssertEqual(u.skipReason, a.skipReason, a.finding.id)
+            }
+        }
+        XCTAssertFalse(unattended.items[7].wouldClean, "the Trash item is a tool item")
+        XCTAssertEqual(unattended.items[7].skipReason, CleanPlan.needsAPersonReason)
+    }
+
+    /// One finding for each action of the app, so that the unattended rule is read for every kind of action.
+    /// The classification is the one of `DeleteMode.movesFiles`: there is no second list.
+    func testToolItemsAreExactlyWhatDeleteModeCallsATool() throws {
+        let home = URL(fileURLWithPath: "/Users/example")
+        let url = home.appendingPathComponent("Library/Caches/x")
+        let actions: [Action] = [
+            .removeContents(url), .removeArtifact(url), .removeCacheFolderContents(name: "x"),
+            .removeRuntime(storeID: "a", tool: "b", name: "c"), .removeArchive(url), .removeOldTestBrowsers(toolID: "x"),
+            .removeServiceWorkerSite(browserID: "a", profile: "b", folder: "c"), .removeServiceWorkerStorage(browserID: "a"),
+            .removeBrowserCaches(browserID: "x"), .removeUpdateDownloads(url), .removeDeviceSupport(url), .removeOldLogs(.logs),
+            .removeInstaller(url), .emptyTrash, .inform,
+            .agent(.removeOllamaModel(name: "m")), .agent(.removeHuggingFaceRepo(id: "a/b")), .agent(.removeCodexRuntime(url)),
+            .agent(.removeFixedFolders(appID: "x")), .agent(.removeOldClaudeVersions(names: ["1"])),
+            .worktree(.prune(repo: url, paths: [])), .worktree(.remove(repo: url, path: url)),
+            .globalPackage(manager: .npm, name: "x"),
+        ]
+        for action in actions {
+            let expected: Bool
+            switch action {
+            case .removeRuntime: expected = true                    // a file delete that needs the project list of the app
+            default: expected = !DeleteMode.movesFiles(action, hfInstalled: true)
+            }
+            XCTAssertEqual(CleanPlan.needsAPerson(action), expected, "\(action)")
+        }
+        XCTAssertTrue(CleanPlan.needsAPerson(.agent(.removeHuggingFaceRepo(id: "a/b"))), "a Hugging Face repository is a tool item")
+        XCTAssertFalse(CleanPlan.needsAPerson(.removeContents(url)))
+        XCTAssertFalse(CleanPlan.needsAPerson(.removeArtifact(url)))
     }
 
     // MARK: Log
@@ -374,9 +455,9 @@ final class CleanPlanTests: XCTestCase {
         let text = try String(contentsOf: Log.fileURL, encoding: .utf8)
         XCTAssertTrue(text.contains("dry-run item id=example.cache wouldClean=true skipReason=\"\" bytes=5300000000 checkedNow=true checkedAtCleanTime=\"\""))
         XCTAssertTrue(text.contains("dry-run item id=example.kept wouldClean=false skipReason=\"on the keep list\" bytes=90000000"))
-        XCTAssertTrue(text.contains("dry-run item id=example.tool wouldClean=true skipReason=\"\" bytes=300000000 checkedNow=false checkedAtCleanTime=\"tool decides\""))
+        XCTAssertTrue(text.contains("dry-run item id=example.tool wouldClean=false skipReason=\"needs a person (tool item)\" bytes=300000000 checkedNow=false"))
         XCTAssertEqual(text.components(separatedBy: "dry-run item id=").count - 1, 10)
-        XCTAssertTrue(text.contains("wouldClean=3 skipped=7 wouldFree=5600000000 checkedAgain=1"))
+        XCTAssertTrue(text.contains("wouldClean=2 skipped=8 wouldFree=5300000000 checkedAgain=0"))
         XCTAssertTrue(text.hasSuffix("exit=0\n"))
     }
 

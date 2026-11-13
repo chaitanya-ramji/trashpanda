@@ -1,0 +1,14 @@
+cleaned  1.0 GB     Xcode & Swift  Example build cache  [~/Library/Caches/Example]
+cleaned  1.0 GB     Docker         Example upper limit  [Docker]
+2 items cleaned, 8 skipped, 0 failed.
+Moved 2.0 GB to the Trash. The space is not free yet. It is free when you empty the Trash.
+
+Skipped: 8 items
+  1  blocked: Has changes that are not committed
+  1  info only
+  1  needs a person (tool item)
+  1  not there now
+  1  on the keep list
+  1  owner app is open (Example Editor)
+  1  refused by the path guard: path is protected (Documents)
+  1  review item

@@ -64,6 +64,17 @@ fake=$(mktemp -d)
 HOME="$fake" CFFIXED_USER_HOME="$fake" swift run trashpanda --scan
 ```
 
+`trashpanda --clean-safe --yes` DELETES. Never run it against your real home folder, not in a test and not by hand. To try it, seed a fake home with a few cache folders and run the binary with a clean environment. Both variables are needed:
+
+```sh
+fake=$(mktemp -d)
+mkdir -p "$fake/tmp" "$fake/Library/Caches/pip"
+echo data > "$fake/Library/Caches/pip/a.bin"
+env -i PATH=/usr/bin:/bin HOME="$fake" CFFIXED_USER_HOME="$fake" TMPDIR="$fake/tmp" .build/debug/TrashPanda --clean-safe --yes
+```
+
+The lock file and the log go to `$fake/Library/Logs/TrashPanda`, so the real log is not touched. Tests of this command run `CLICommand.run(...)` in the test process on a `Sandbox` home, with an injected Trash folder inside the fixture, an injected lock folder, an injected user id (for the root check), and an injected stop flag (for the signal path). A test must not start the binary for the real clean.
+
 In a test, build the environment with `FakeHomeEnvironment.environment(for: home)` and pass it to `Process.environment`. A source test fails when a test file starts a program DIRECTLY (`Process(`, `posix_spawn`) without this helper. It does not cover an indirect start through product code. Known indirect cases: `Shell.run` in `ShellTimeoutTests`, `DiskScanner(dockerPath:)` in the FakeDocker tests, and the real `/usr/bin/git` in `WorktreeTests`. They inherit the real `HOME` because `Shell` copies `ProcessInfo.environment`. None of them writes the home folder, and the OS-level sandbox of issue #249 is the real check for them. Tests must never write the real home folder, the real Trash, or the real log. `Log.fileURL` uses a temp file when a `.xctest` bundle is loaded, and a test checks that the real log file did not change. The product has no `--home` option and no override of its own, and it must not get one.
 
 ## How the code is organized
@@ -132,6 +143,7 @@ A pull request must follow these rules. A reviewer checks them.
 - **Measure, do not guess.** If a tool keeps files that it never removes, ask the tool what it would free. See the Homebrew code.
 - **Add a test that fails without your change.** A new catalog row needs a test. A new safety rule needs a test that tries to break it.
 - **Never run a real delete in a test.** Use the `Sandbox` helper. It makes a fake home folder.
+- **The command line clean has its own file.** `CLIClean.swift` is the only file that builds a `Cleaner` for a command line command. It gives the findings of the plan to the Cleaner, and it has no delete word and no delete rule of its own. `CLICommand.swift`, `CleanPlan.swift`, `CleanRules.swift`, and `ScanReport.swift` are read-only and must not name the Cleaner. A source test checks both, and it lists the files that may take a lock (`flock`), handle signals, or read the user id. Do not add a second list of "tool items": `DeleteMode.movesFiles` is the one list.
 
 ## Commit and pull request
 

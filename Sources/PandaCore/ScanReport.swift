@@ -155,8 +155,13 @@ public enum CommandLineCheck {
         let args = arguments.dropFirst()
         let unknown = args.filter { $0.hasPrefix("-") && !knownOptions.contains($0) && !$0.hasPrefix("-psn_") }
         if !unknown.isEmpty { return "Unknown option: \(unknown.joined(separator: " "))" }
-        // `--yes` is for the real clean. It does not exist in this version.
-        if args.contains("--yes") { return "--yes is not available in this version" }
+        // `--yes` is for the real clean (`--clean-safe --yes`). It deletes, so it mixes with nothing else.
+        if args.contains("--yes") {
+            if !args.contains("--clean-safe") { return "--yes works only with --clean-safe" }
+            let others = ["--dry-run", "--scan", "--demo", "--write-icons", "--dialog", "--submenu", "--hover", "--click", "--backdrop",
+                          "--version", "--help"].filter { args.contains($0) }
+            if !others.isEmpty { return "--yes cannot be used with \(others.joined(separator: " "))" }
+        }
         // `--write-icons` needs a folder. Without it the app would start by chance.
         if let i = args.firstIndex(of: "--write-icons") {
             let next = args.index(after: i)
@@ -167,15 +172,17 @@ public enum CommandLineCheck {
             return "--demo cannot be used with --scan, --clean-safe, or --dry-run"
         }
         if args.contains("--scan") && args.contains("--clean-safe") { return "Use --scan or --clean-safe, not both" }
-        if args.contains("--clean-safe") && !args.contains("--dry-run") { return "--clean-safe needs --dry-run in this version" }
+        if args.contains("--clean-safe") && !args.contains("--dry-run") && !args.contains("--yes") {
+            return "--clean-safe needs --dry-run (a preview) or --yes (a real clean)"
+        }
         if args.contains("--dry-run") && !args.contains("--clean-safe") { return "--dry-run works only with --clean-safe" }
         if args.contains("--json") && !args.contains("--scan") && !args.contains("--clean-safe") {
-            return "--json works only with --scan or with --clean-safe --dry-run"
+            return "--json works only with --scan or with --clean-safe (--dry-run or --yes)"
         }
         // `--verbose` only changes the text of the dry run. It is an error anywhere else, so that it never starts the app by chance.
         if args.contains("--verbose") && args.contains("--json") { return "--verbose cannot be used with --json" }
-        if args.contains("--verbose") && !(args.contains("--clean-safe") && args.contains("--dry-run")) {
-            return "--verbose works only with --clean-safe --dry-run"
+        if args.contains("--verbose") && !(args.contains("--clean-safe") && (args.contains("--dry-run") || args.contains("--yes"))) {
+            return "--verbose works only with --clean-safe --dry-run or --clean-safe --yes"
         }
         return nil
     }
@@ -193,9 +200,14 @@ public enum CommandLineCheck {
         arguments.contains("--clean-safe") && arguments.contains("--dry-run")
     }
 
-    /// `scan`, `scan --json`, `clean-safe --dry-run`, or `clean-safe --dry-run --json`, for the log.
+    /// True for `--clean-safe --yes` (the options are fine, see `error`). This is the one command that deletes.
+    public static func isClean(_ arguments: [String]) -> Bool {
+        arguments.contains("--clean-safe") && arguments.contains("--yes")
+    }
+
+    /// `scan`, `clean-safe --dry-run`, or `clean-safe --yes`, with `--json` when it is there, for the log.
     public static func mode(_ arguments: [String]) -> String {
-        let base = isDryRun(arguments) ? "clean-safe --dry-run" : "scan"
+        let base = isClean(arguments) ? "clean-safe --yes" : isDryRun(arguments) ? "clean-safe --dry-run" : "scan"
         return arguments.contains("--json") ? base + " --json" : base
     }
 }
