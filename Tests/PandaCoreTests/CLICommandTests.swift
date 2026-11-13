@@ -3,6 +3,11 @@ import XCTest
 
 /// Step 2b of #197: the commands that only read are a pure function in PandaCore (`CLICommand.run`).
 /// These tests run it end to end on a fixture home with real files, and compare every file before and after.
+///
+/// They call `CLICommand.run` in this process and never start the binary. A test that starts the binary (or any program that
+/// uses a home folder) must build its environment with `FakeHomeEnvironment.environment(for:)`. `HOME=<temp folder>` alone does
+/// NOT isolate a program on this macOS: `NSHomeDirectory()` and `homeDirectoryForCurrentUser` still return the real home folder.
+/// Only `CFFIXED_USER_HOME` moves them. Set BOTH. (A source test below fails when a test file starts a program without the helper.)
 final class CLICommandTests: XCTestCase {
     private let mb = 1_500_000
 
@@ -137,7 +142,7 @@ final class CLICommandTests: XCTestCase {
         if let artifact = report.findings.first(where: { $0.base.location.hasSuffix("node_modules") }), artifact.wouldClean {
             XCTAssertTrue(artifact.checkedAtCleanTime.contains("project use is read again"))
         }
-        // The text form says how many items are checked again.
+        // The text form says how many items can change at clean time.
         let text = try XCTUnwrap(run(["--clean-safe", "--dry-run"], box).result?.stdout)
         XCTAssertTrue(text.contains("can change at clean time"), text)
         XCTAssertTrue(text.hasSuffix("Nothing was deleted.\n"))
@@ -227,26 +232,21 @@ final class CLICommandTests: XCTestCase {
         try String(contentsOf: root().appendingPathComponent(relative), encoding: .utf8)
     }
 
-    /// The code of a file without comments and without the text inside string literals.
-    private func code(_ text: String) -> String {
-        // Remove the text of string literals (one line each).
-        stripComments(text).replacingOccurrences(of: #""([^"\\]|\\.)*""#, with: "\"\"", options: .regularExpression)
-    }
+    /// The code of a file without comments and without the text of string literals. The code inside a string interpolation
+    /// `\( ... )` stays, because it runs. The reader is the one of the spawn scan (`ShellHardeningTests.codeOnly`). It knows
+    /// escapes (`"\"//"`), raw strings with any number of `#` (`#"x"y"#`), multi-line strings, nested strings inside an
+    /// interpolation, nested block comments, and regex literals. The earlier line-based reader did not.
+    private func code(_ text: String) -> String { ShellHardeningTests.codeOnly(text) }
 
-    /// The code of a file without comments. The text of string literals stays (the scan for delete selectors needs it).
-    private func stripComments(_ text: String) -> String {
-        var out = ""
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            var l = String(line)
-            if let r = l.range(of: "//") {
-                // Keep a "//" that is inside a string (for example a URL). The files here have none, so cut at the first one
-                // that is not inside quotes.
-                let before = l[..<r.lowerBound]
-                if before.filter({ $0 == "\"" }).count % 2 == 0 { l = String(before) }
-            }
-            out += l + "\n"
-        }
-        return out
+    /// The code of a file without comments. The text of string literals stays, between two marks (the scan for delete
+    /// selectors needs it). Same reader as `code`.
+    private func stripComments(_ text: String) -> String { ShellHardeningTests.codeOnly(text, keepStrings: true) }
+
+    /// True when the code declares `name` as a whole word: `func name`, `struct name`, `enum name`, or `class name`.
+    /// `func truncateText` does not declare `truncate`.
+    static func declares(_ code: String, _ name: String) -> Bool {
+        let pattern = #"\b(?:func|struct|enum|class)\s+"# + NSRegularExpression.escapedPattern(for: name) + #"\b"#
+        return code.range(of: pattern, options: .regularExpression) != nil
     }
 
     /// The files that make the plan of the read-only commands.
@@ -338,8 +338,8 @@ final class CLICommandTests: XCTestCase {
             if Self.lowLevelModules.contains(first) { problems.append("low-level call \(qualifier)\(name)"); continue }
             // A name that the file declares itself is the code of that file, but only for a call without a qualifier. A declared
             // overload (for example `exists`) must not hide a qualified call.
-            let declared = text.contains("func \(name)") || text.contains("struct \(name)") || text.contains("enum \(name)")
-                || text.contains("class \(name)") || name == "init"
+            // The name must be declared as a WHOLE word: `func truncateText` must not hide a call to `truncate`.
+            let declared = Self.declares(text, name) || name == "init"
             if qualifier.isEmpty && declared { continue }
             if Self.allowedCalls[name] == nil { problems.append("call not in the allow-list: \(qualifier)\(name)") }
         }
@@ -407,6 +407,12 @@ final class CLICommandTests: XCTestCase {
         Danger(name: "removefile", pattern: #"(?i)\bremovefile"#), Danger(name: "remove(", pattern: #"\bremove\s*\("#),
         Danger(name: "rmdir", pattern: #"\brmdir\b"#), Danger(name: "rename", pattern: #"\brename\s*\("#),
         Danger(name: "renamex", pattern: #"\brenamex\w*"#), Danger(name: "renameat", pattern: #"\brenameat\w*"#),
+        // More ways to write, copy, clone, or cut a file (added after the review of step 2c)
+        Danger(name: "write(toFile", pattern: #"\bwrite\s*\(\s*toFile\b"#), Danger(name: "createFile", pattern: #"\bcreateFile\b"#),
+        Danger(name: "clonefile", pattern: #"\bf?clonefile\w*"#), Danger(name: "copyfile", pattern: #"\bf?copyfile\w*"#),
+        Danger(name: "exchangedata", pattern: #"\bexchangedata\b"#), Danger(name: "truncate", pattern: #"\bf?truncate\s*\("#),
+        Danger(name: "fopen", pattern: #"\bf(?:re)?open\s*\("#), Danger(name: "forWritingTo", pattern: #"\bforWritingTo\b"#),
+        Danger(name: "NSFileCoordinator", pattern: #"NSFileCoordinator"#), Danger(name: "dlsym", pattern: #"\bdlsym\b"#),
         // A call to libc through its module name goes around every check of Foundation
         Danger(name: "Darwin./Glibc.", pattern: #"\b(Darwin|Glibc)\s*\."#),
         Danger(name: "Foundation.<call>", pattern: #"\bFoundation\s*\.\s*\w+\s*\("#),
@@ -443,6 +449,8 @@ final class CLICommandTests: XCTestCase {
         "removeItem": ["Cleaner.swift": "the one place that deletes items, after the guard (`deleteItem`)",
                        "Log.swift": "rotates the log file of the app itself (`trashpanda.log`), never a user file"],
         "moveItem": ["Log.swift": "rotates the log file of the app itself (`trashpanda.log`), never a user file"],
+        "createFile": ["Log.swift": "creates the log file of the app itself (`trashpanda.log`), never a user file"],
+        "forWritingTo": ["Log.swift": "opens the log file of the app itself (`trashpanda.log`) to append a line"],
         "setAttributes": ["Log.swift": "sets the permissions of the log folder and the log file of the app itself"],
         "trashItem": ["Cleaner.swift": "the field `trashItem` holds the move to the Trash (`TrashMover.move`). Only the Cleaner calls it",
                       "DeleteMode.swift": "TrashMover: the move to the Trash in trash mode. Only the Cleaner calls it"],
@@ -525,6 +533,17 @@ final class CLICommandTests: XCTestCase {
     }
     """
     private let probeB5 = "func gone(_ path: String) { _ = rmdir(path) }"
+    // The four bypasses of the review of step 2c. Each one type-checks as real Swift.
+    /// a. The call is inside a string interpolation.
+    private let probeC1 = #"func a(_ p: String) -> String { "\(Darwin.remove(p))" }"#
+    private let probeC1b = #"func a(_ u: URL) -> String { "\((try? FileManager.default.removeItem(at: u)) != nil)" }"#
+    private let probeC1c = #"func a(_ p: String) -> String { "x \(String("\(Darwin.remove(p))")) y" }"#
+    /// b. Code between two raw strings that have a quote inside.
+    private let probeC2 = ##"let x = #"x"y"#; _ = Darwin.remove(p); let y = #"x"y"#"##
+    /// c. An escaped quote before `//` cut the rest of the line.
+    private let probeC3 = #"let s = "\"//"; _ = Darwin.remove(p)"#
+    /// d. A declared name that only starts like the called name.
+    private let probeC4 = "enum CleanRules { static func truncateText() {}\n static func go(_ p: String) { truncate(p, 0) } }"
     private let harmless = """
     import Foundation
     struct Totals { var a: Int
@@ -541,6 +560,12 @@ final class CLICommandTests: XCTestCase {
             ("B3", probeB3, ["Process.init"]),
             ("B4", probeB4, ["NSSelectorFromString", "perform("]),
             ("B5", probeB5, ["rmdir"]),
+            ("C1", probeC1, ["Darwin./Glibc.", "remove("]),
+            ("C1b", probeC1b, ["removeItem"]),
+            ("C1c", probeC1c, ["Darwin./Glibc.", "remove("]),
+            ("C2", probeC2, ["Darwin./Glibc.", "remove("]),
+            ("C3", probeC3, ["Darwin./Glibc.", "remove("]),
+            ("C4", probeC4, ["truncate"]),
         ]
         for c in cases {
             let hits = Self.dangerHits(c.source, words: Self.dangers)
@@ -550,6 +575,14 @@ final class CLICommandTests: XCTestCase {
             // The read-only check catches it too.
             XCTAssertFalse(try readOnlyProblems(c.source).isEmpty, "\(c.name) must fail the read-only check")
         }
+        // The read-only check names the reason for each of the four new bypasses.
+        XCTAssertTrue(try readOnlyProblems(probeC1).contains("low-level call Darwin.remove"))
+        XCTAssertTrue(try readOnlyProblems(probeC1c).contains("low-level call Darwin.remove"))
+        XCTAssertTrue(try readOnlyProblems(probeC2).contains("low-level call Darwin.remove"))
+        XCTAssertTrue(try readOnlyProblems(probeC3).contains("low-level call Darwin.remove"))
+        XCTAssertTrue(try readOnlyProblems(probeC1b).contains("calls FileManager.removeItem"))
+        let c4 = try readOnlyProblems(probeC4)
+        XCTAssertTrue(c4.contains("call not in the allow-list: truncate"), "\(c4)")
         // B4 also hides the selector in a string. The raw scan sees it.
         XCTAssertEqual(Self.rawHits(stripComments(probeB4)), ["removeItemAtPath"])
         XCTAssertEqual(Self.rawHits(stripComments(probeB2)), [])
@@ -571,6 +604,85 @@ final class CLICommandTests: XCTestCase {
         // The two functions of the made-up source are its own code. The read-only check has no other problem with it.
         let problems = try readOnlyProblems(harmless)
         XCTAssertEqual(problems, [])
+    }
+
+    func testHarmlessLookalikesOfTheFourBypassesPass() throws {
+        let sources = [
+            #"func a(_ n: Int) -> String { "value \(n) and \(String(n))" }"#,
+            #"let s = "\"//"; let n = 1"#,
+            ##"let x = #"x"y"#; let y = #"a "quoted" b"#; let n = x.count + y.count"##,
+            "enum E { static func truncateText() {}\n static func go() { truncateText() } }",
+            "struct T { func a() -> String { \"\"\"\nDarwin.remove(p) in a text block \\(1)\n\"\"\" } }",
+        ]
+        for source in sources {
+            XCTAssertEqual(Self.dangerHits(source, words: Self.dangers), [], source)
+            XCTAssertEqual(Self.rawHits(stripComments(source)), [], source)
+            let problems = try readOnlyProblems(source).filter { !$0.hasPrefix("call not in the allow-list: ") }
+            XCTAssertEqual(problems, [], source)
+        }
+        // Whole words only: `truncateText` is declared, `truncate` is not.
+        XCTAssertTrue(Self.declares("static func truncateText() {}", "truncateText"))
+        XCTAssertFalse(Self.declares("static func truncateText() {}", "truncate"))
+        XCTAssertTrue(Self.declares("struct Box {}", "Box"))
+        XCTAssertFalse(Self.declares("struct Boxes {}", "Box"))
+    }
+
+    func testMutationEachFixOfTheFourBypassesIsNeeded() throws {
+        // Old reader, kept here only as a model: it blanked every string on one line and cut at the first `//` with an even
+        // quote count. With it, the three reader bypasses pass. This proves that the new reader is what catches them.
+        func oldCode(_ text: String) -> String {
+            var out = ""
+            for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                var l = String(line)
+                if let r = l.range(of: "//"), l[..<r.lowerBound].filter({ $0 == "\"" }).count % 2 == 0 { l = String(l[..<r.lowerBound]) }
+                out += l + "\n"
+            }
+            return out.replacingOccurrences(of: #""([^"\\]|\\.)*""#, with: "\"\"", options: .regularExpression)
+        }
+        for (name, source) in [("a", probeC1), ("a2", probeC1b), ("b", probeC2), ("c", probeC3)] {
+            XCTAssertNil(oldCode(source).range(of: #"\b(Darwin|Glibc)\s*\.|removeItem"#, options: .regularExpression),
+                         "bypass \(name) passes the old reader, so the test is a real check")
+            XCTAssertNotNil(code(source).range(of: #"\b(Darwin|Glibc)\s*\.|removeItem"#, options: .regularExpression),
+                            "bypass \(name) must be seen by the new reader")
+        }
+        // d. With the old prefix match, the declared name hides the call. With the whole word match, it does not.
+        let text = code(probeC4)
+        XCTAssertTrue(text.contains("func truncate"), "the old prefix check sees a declaration")
+        XCTAssertFalse(Self.declares(text, "truncate"))
+        // Each new word has a probe in the next test, and the removal of the word lets the probe through.
+        XCTAssertTrue(Self.dangerHits(probeC4, words: Self.dangers.filter { $0.name != "truncate" }).isEmpty)
+    }
+
+    /// Ways around the scanners that stay open ON PURPOSE. They need code that no honest change has, and a word list cannot cover
+    /// them. The real answer is the check at the level of the system (issue 249: run the binary in a sandbox profile that denies
+    /// writes in the home folder). This list is a record, not a test: an item here is a known hole, not a proof of safety.
+    /// Known survivors:
+    ///   - `method(for:)` plus `unsafeBitCast`, or `dlsym`-like lookups that this scan does not see by name
+    ///   - a `typealias FM = FileManager` followed by calls on the alias (the FileManager check reads `FileManager.default.<name>`)
+    ///   - `open(..., O_TRUNC)` and `open(..., O_WRONLY)` (the word `open(` is too common to forbid)
+    ///   - `rename` or `remove` used as a function VALUE (`let f = remove; f(p)`), because the call regex needs `name(`
+    ///   - code that builds a name from parts at run time (`NSSelectorFromString("remove" + "Item...")` is caught by the selector
+    ///     scan, but a name that comes from data is not)
+    /// Words that are now in the list (so no longer survivors): `write(toFile`, `createFile`, `clonefile`, `copyfile`, `exchangedata`,
+    /// `truncate`, `fopen`, `forWritingTo`, `NSFileCoordinator`, `dlsym`.
+    static let knownSurvivors = ["method(for:)+unsafeBitCast", "typealias FM", "open with O_TRUNC", "rename/remove as a function value"]
+
+    func testTheNewWordsHaveAProbeAndTheKnownSurvivorsAreNotCaught() throws {
+        let probes: [String: String] = [
+            "write(toFile": #"try "".write(toFile: p, atomically: true, encoding: .utf8)"#, "createFile": "_ = fm.createFile(atPath: p, contents: nil)",
+            "clonefile": "clonefile(a, b, 0)", "copyfile": "copyfile(a, b, nil, 0)", "exchangedata": "exchangedata(a, b, 0)",
+            "truncate": "truncate(p, 0)", "fopen": #"let f = fopen(p, "w")"#, "forWritingTo": "let h = try FileHandle(forWritingTo: u)",
+            "NSFileCoordinator": "let c = NSFileCoordinator()", "dlsym": "let f = dlsym(h, n)",
+        ]
+        for (word, source) in probes {
+            XCTAssertTrue(Self.dangerHits(source, words: Self.dangers).contains(word), word)
+            XCTAssertFalse(Self.dangerHits(source, words: Self.dangers.filter { $0.name != word }).contains(word), word)
+            XCTAssertFalse(try readOnlyProblems(source).isEmpty, word)
+        }
+        // A survivor passes the word list. This test fails the day that one of them gets caught, so the list stays true.
+        XCTAssertEqual(Self.dangerHits("let f = rename\nlet g = remove", words: Self.dangers), [])
+        XCTAssertEqual(Self.dangerHits("func a() { _ = open(p, O_TRUNC) }", words: Self.dangers), [])
+        XCTAssertEqual(Self.knownSurvivors.count, 4)
     }
 
     func testRemovingAWordFromTheListLetsItsProbeThrough() throws {
@@ -595,7 +707,11 @@ final class CLICommandTests: XCTestCase {
                     "setAttributes": "try fm.setAttributes([:], ofItemAtPath: p)", "write(to": "try text.write(to: u, atomically: true, encoding: .utf8)",
                     "unlink": "unlink(p)", "unlinkat": "unlinkat(0, p, 0)", "removefile": "removefile(p, nil, 0)",
                     "Foundation.<call>": "Foundation.remove(p)", "Process(": "let p = Process()", "posix_spawn": "posix_spawn(&pid, p, nil, nil, a, e)",
-                    "system(": "system(c)", "popen": "popen(c, r)", "exec": "execv(p, a)", "NSTask": "let t = NSTask()"]
+                    "system(": "system(c)", "popen": "popen(c, r)", "exec": "execv(p, a)", "NSTask": "let t = NSTask()",
+                    "write(toFile": #"try "".write(toFile: p, atomically: true, encoding: .utf8)"#, "createFile": "_ = fm.createFile(atPath: p, contents: nil)",
+                    "clonefile": "clonefile(a, b, 0)", "copyfile": "copyfile(a, b, nil, 0)", "exchangedata": "exchangedata(a, b, 0)",
+                    "truncate": "truncate(p, 0)", "fopen": #"let f = fopen(p, "w")"#, "forWritingTo": "let h = try FileHandle(forWritingTo: u)",
+                    "NSFileCoordinator": "let c = NSFileCoordinator()", "dlsym": "let f = dlsym(h, n)"]
         let covered = Set(probes.map(\.word)).union(more.keys)
         XCTAssertEqual(covered, Set(Self.dangers.map(\.name)))
         for (word, source) in more {
@@ -610,34 +726,132 @@ final class CLICommandTests: XCTestCase {
     /// previous review moved fixture files into the real Trash this way.
     private static let writeWords = ["removeItem", "moveItem", "trashItem", "copyItem", "createDirectory", "createFile", "createSymbolicLink",
                                      "setAttributes", "write(to", ".write(", "rename", "unlink", "rmdir", "remove(", "removefile", "Process"]
-    /// The names of the real home folder. They are built from parts, so that this file does not contain them in one piece.
-    private static let realHomeNames = ["NSHome" + "Directory()", "NSHome" + "DirectoryForUser", "homeDirectory" + "ForCurrentUser",
-                                        "getpw" + "uid", "expandingTilde" + "InPath"]
+    /// Ways to get the real home folder or the real Trash, as regular expressions for the code with the text of strings kept
+    /// (a string is written between \u{1} and \u{2}). They are built from parts, so that this file does not contain them in one piece.
+    private static let realHomePatterns: [String] = [
+        "NSHome" + "Directory", "home" + "Directory", "getpw" + "uid", "expandingTilde" + "InPath",
+        "NSUser" + "Name", "NSFullUser" + "Name", "trash" + "Directory", "NSSearchPathFor" + "DirectoriesInDomains",
+        #"\.homeDirectory\b"#,
+    ]
+    private static let realHomeStringPatterns: [String] = [
+        #"environment\s*\[\s*\x{1}HO"# + #"ME\x{2}\s*\]"#, #"getenv\s*\(\s*\x{1}HO"# + #"ME\x{2}"#,
+    ]
+    /// Calls that write in the home folder when the argument `home:` is left out (the default is the real home folder).
+    private static let homeDefaultCalls = ["ensureFile", "setDeleteMode", "appendKeep", #"FirstStartNote\s*\.\s*record"#, "writeSetting"]
 
-    /// The problems of one test file: the real home folder together with a write call. Empty means fine.
-    static func homeWriteProblems(_ source: String) -> [String] {
-        let text = CLICommandTests().stripComments(source)
-        guard realHomeNames.contains(where: { text.contains($0) }) else { return [] }
-        return writeWords.filter { text.contains($0) }
+    /// The text between the parentheses of a call that starts at `open` (the index of the opening parenthesis).
+    private static func arguments(_ code: String, from open: String.Index) -> String {
+        var depth = 0
+        var end = open
+        for i in code[open...].indices {
+            if code[i] == "(" { depth += 1 }
+            if code[i] == ")" { depth -= 1; if depth == 0 { end = i; break } }
+            end = i
+        }
+        return String(code[open..<end])
     }
 
-    func testNoTestFileCombinesTheRealHomeFolderWithAWriteCall() throws {
-        // Today no test file names the real home folder at all (checked by the test below). Each test uses a temp home (`Sandbox`).
+    /// The problems of one test file. Empty means fine. Three kinds:
+    /// 1. the real home folder (any spelling in `realHomePatterns`) together with a write call,
+    /// 2. a call that writes and leaves out `home:` (it would use the real home folder), and `TrashMover.move`, which moves into
+    ///    the real Trash,
+    /// 3. a `Cleaner(` in trash mode with no `trashItem =` in the same file (the default `trashItem` is `TrashMover.move`).
+    static func homeWriteProblems(_ source: String) -> [String] {
+        let test = CLICommandTests()
+        let withStrings = test.stripComments(source)
+        let code = test.code(source)
+        var problems: [String] = []
+        // The names are searched in the code, where the text of strings is blank (a probe string in a test file is not a use).
+        // The two environment patterns need the text of the string `"HOME"`, so they run on the text with strings kept.
+        if realHomePatterns.contains(where: { code.range(of: $0, options: .regularExpression) != nil })
+            || realHomeStringPatterns.contains(where: { withStrings.range(of: $0, options: .regularExpression) != nil })
+            // `standardizingPath` turns a `~` path into the real home folder. It is a risk only when the file has a string that
+            // starts with `~` (a relative path, for example in a manifest, never reaches the home folder).
+            || (code.contains("standardizing" + "Path") && withStrings.contains("\u{1}~")) {
+            // `Process` is a whole word here (`ProcessInfo` is not a call that starts a program).
+            problems += writeWords.filter { $0 == "Process" ? code.range(of: #"\bProcess\b"#, options: .regularExpression) != nil : code.contains($0) }
+                .map { "real home with \($0)" }
+        }
+        for name in homeDefaultCalls {
+            let regex = try! NSRegularExpression(pattern: #"\b"# + name + #"\s*\("#)
+            for m in regex.matches(in: code, range: NSRange(code.startIndex..., in: code)) {
+                let open = code.index(code.startIndex, offsetBy: m.range.upperBound - 1)
+                if !arguments(code, from: open).contains("home:") { problems.append("\(name) without home:") }
+            }
+        }
+        if code.range(of: #"\bTrashMover\s*\.\s*move\b"#, options: .regularExpression) != nil { problems.append("TrashMover.move") }
+        if code.range(of: #"\bCleaner\s*\("#, options: .regularExpression) != nil,
+           code.range(of: #"deleteMode\s*:\s*\.trash\b|DeleteMode\s*\.\s*trash\b"#, options: .regularExpression) != nil,
+           !code.contains("trashItem =") {
+            problems.append("Cleaner in trash mode without trashItem =")
+        }
+        return problems
+    }
+
+    /// The files of `Tests` as (relative path, text).
+    private func testFiles() throws -> [(String, String)] {
         let dir = root().appendingPathComponent("Tests")
         let files = try FileManager.default.subpathsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }
         XCTAssertGreaterThan(files.count, 50)
+        return try files.map { ($0, try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) }
+    }
+
+    func testNoTestFileCombinesTheRealHomeFolderWithAWriteCall() throws {
+        // Today no test file names the real home folder. Each test uses a temp home (`Sandbox`), and each call that writes
+        // in a home folder passes `home:`. The Cleaner default `trashItem` is the real Trash: each test that uses trash mode
+        // sets `trashItem` first. This test checks all of it, for every file of `Tests`.
         var bad: [String: [String]] = [:]
-        for file in files {
-            let problems = Self.homeWriteProblems(try String(contentsOf: dir.appendingPathComponent(file), encoding: .utf8))
+        for (file, text) in try testFiles() {
+            let problems = Self.homeWriteProblems(text)
             if !problems.isEmpty { bad[file] = problems }
         }
         XCTAssertTrue(bad.isEmpty, "A test must use a temp home (Sandbox), never the real home folder: \(bad)")
-        // The guard itself works on made-up sources.
-        let home = "NSHome" + "Directory()"
-        XCTAssertFalse(Self.homeWriteProblems("let h = \(home)\n_ = rename(a, h + \"/.Trash/x\")").isEmpty)
-        XCTAssertFalse(Self.homeWriteProblems("let h = \(home); try fm.moveItem(at: a, to: b)").isEmpty)
-        XCTAssertTrue(Self.homeWriteProblems("let h = \(home)\nlet n = h.count").isEmpty)
+    }
+
+    func testTheHomeGuardCatchesEverySpellingAndPassesHarmlessCode() throws {
+        func part(_ a: String, _ b: String) -> String { a + b }
+        let spellings = [
+            "let h = " + part("NSHome", "Directory()"),
+            "let h = ProcessInfo.processInfo.environment[\"" + part("HO", "ME") + "\"]!",
+            "let h = FileManager.default." + part("homeDirectory", "ForCurrentUser"),
+            "let h = URL." + part("home", "Directory"),
+            "let u = fm.urls(for: ." + part("trash", "Directory") + ", in: .userDomainMask)[0]",
+            "let h = String(cString: getenv(\"" + part("HO", "ME") + "\"))",
+            "let n = " + part("NSUser", "Name()"),
+            "let h = NSString(string: \"~/x\")." + part("standardizing", "Path"),
+            "let h = NSString(string: \"~/x\")." + part("expandingTilde", "InPath"),
+            "let p = " + part("getpw", "uid(getuid())"),
+        ]
+        for source in spellings {
+            XCTAssertFalse(Self.homeWriteProblems(source + "\n_ = rename(a, h + \"/x\")").isEmpty, source)
+            XCTAssertTrue(Self.homeWriteProblems(source + "\nlet n = h.count").isEmpty, "a read of the home alone is not flagged: \(source)")
+        }
+        // The default `home:` of a call that writes.
+        for call in ["Config.ensureFile(\"keep\")", "Config.setDeleteMode(.trash)", "Config.appendKeep(path)", "FirstStartNote.record()"] {
+            XCTAssertFalse(Self.homeWriteProblems("_ = \(call)").isEmpty, call)
+        }
+        XCTAssertTrue(Self.homeWriteProblems("_ = Config.appendKeep(path, home: box.home)\n_ = FirstStartNote.record(home: box.home)").isEmpty)
+        XCTAssertTrue(Self.homeWriteProblems("_ = Config.ensureFile(name, home: home)\n_ = Config.setDeleteMode(.trash, home: h)").isEmpty)
+        // The real Trash.
+        XCTAssertFalse(Self.homeWriteProblems("try TrashMover.move(url)").isEmpty)
+        XCTAssertFalse(Self.homeWriteProblems("let c = Cleaner(guardian: g, deleteMode: .trash)").isEmpty)
+        XCTAssertTrue(Self.homeWriteProblems("var c = Cleaner(guardian: g, deleteMode: .trash)\nc.trashItem = { _ in }").isEmpty)
+        // Comments and strings do not count, and a temp home is fine.
+        XCTAssertTrue(Self.homeWriteProblems("// " + part("NSHome", "Directory()") + " in a comment\ntry fm.removeItem(at: box.home)").isEmpty)
         XCTAssertTrue(Self.homeWriteProblems("let box = try Sandbox()\ntry fm.removeItem(at: box.home)").isEmpty)
-        XCTAssertTrue(Self.homeWriteProblems("// \(home) in a comment\ntry fm.removeItem(at: box.home)").isEmpty)
+    }
+
+    func testEveryTestThatStartsAProgramUsesTheFakeHomeHelper() throws {
+        // A program that starts with only `HOME` can still reach the real home. A test file that starts a program must use
+        // `FakeHomeEnvironment` (it sets HOME and CFFIXED_USER_HOME). Today no test file starts a program.
+        var bad: [String] = []
+        for (file, text) in try testFiles() where file != "FakeHomeEnvironment.swift" {
+            let code = self.code(text)
+            if code.range(of: #"\bProcess\s*\(|\bProcess\s*\.\s*(init|launchedProcess)|\bposix_spawn"#, options: .regularExpression) != nil,
+               !code.contains("FakeHomeEnvironment") {
+                bad.append(file)
+            }
+        }
+        XCTAssertEqual(bad, [], "Start a program in a test only with `FakeHomeEnvironment.environment(for:)`. HOME alone does not isolate it.")
     }
 }
