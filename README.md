@@ -149,7 +149,7 @@ You need macOS 13 or later.
 
 ### Option 1: DMG
 
-1. Download the DMG from the [Releases page](https://github.com/chaitanya-ramji/trashpanda/releases). The newest stable build is **0.8.0**, the first stable release since 0.1.0. The newest beta is **0.9.0-beta.1**, a pre-release marked as such on the Releases page. Beta users get beta updates, and stable users get stable updates. How versions are named is in [`docs/VERSIONING.md`](docs/VERSIONING.md). It has many more safety checks than 0.1.0, which can act on a remote Docker engine and can clean Xcode data while Xcode runs. The build is not signed or notarized yet, so macOS blocks the first launch (see below). Some of the tools that it can clean are not tested yet on many real Macs. The release notes list them.
+1. Download the DMG from the [Releases page](https://github.com/chaitanya-ramji/trashpanda/releases). The newest stable build is **0.8.0**, the first stable release since 0.1.0. The newest beta is **0.9.0-beta.1**, a pre-release marked as such on the Releases page. A beta build is told about newer betas and newer stable versions. A stable build is told about newer stable versions only. How versions are named is in [`docs/VERSIONING.md`](docs/VERSIONING.md). 0.8.0 has many more safety checks than 0.1.0, which can act on a remote Docker engine and can clean Xcode data while Xcode runs. The build is not signed or notarized yet, so macOS blocks the first launch (see below). Some of the tools that it can clean are not tested yet on many real Macs. The release notes list them.
 2. Open the DMG. Drag Trash Panda to Applications.
 3. Open Trash Panda from Applications.
 

@@ -92,3 +92,4 @@ Before these rules, the betas of the milestones `v0.4`, `v0.5`, and `v0.6` all s
 | `0.8.0-beta.1` | The first beta that follows this page. It finished milestone `v0.7` and began `v0.8`. |
 | `0.8.0-beta.2` | The second beta of `0.8.0`. Superseded by `0.8.0`. |
 | `0.8.0` | The first stable release since `0.1.0`. It finishes milestone `v0.8`. Not signed or notarized (#30). |
+| `0.9.0-beta.1` | The first beta of `0.9.0`, released 2026-11-13. It adds Trash mode, the low-disk alert, git worktrees, commands for scripts (`--scan --json`, `--clean-safe --dry-run`, `--clean-safe --yes`), and the conda, Deno, and Terraform caches. |
