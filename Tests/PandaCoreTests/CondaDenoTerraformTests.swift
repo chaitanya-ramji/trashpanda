@@ -75,20 +75,53 @@ final class CondaDenoTerraformTests: XCTestCase {
 
     func testDenoCache() throws {
         let box = try Sandbox()
-        for sub in ["deps", "npm", "gen"] { try box.file("Library/Caches/deno/\(sub)/x/data", bytes: 20_000) }
+        for sub in ["gen", "remote", "deps", "npm"] { try box.file("Library/Caches/deno/\(sub)/x/data", bytes: 20_000) }
         let items = found(box)
-        XCTAssertEqual(items.map(\.id), ["deno.cache:Library/Caches/deno/deps", "deno.cache:Library/Caches/deno/npm",
-                                         "deno.cache:Library/Caches/deno/gen"])
-        XCTAssertTrue(items.allSatisfy { $0.tier == .safe && $0.rebuild == .download && $0.ecosystem == .javascript })
+        XCTAssertEqual(items.map(\.id), ["deno.gen:Library/Caches/deno/gen", "deno.modules:Library/Caches/deno/remote",
+                                         "deno.modules:Library/Caches/deno/deps", "deno.modules:Library/Caches/deno/npm"])
+        XCTAssertEqual(items.map(\.tier), [.safe, .review, .review, .review])
+        XCTAssertEqual(items.map(\.rebuild), [.seconds, .download, .download, .download])
+        XCTAssertEqual(items.map(\.title), ["Deno compiled code cache", "Deno module downloads", "Deno module downloads",
+                                            "Deno module downloads"])
+        XCTAssertTrue(items.allSatisfy { $0.ecosystem == .javascript })
         let report = cleaner(box).clean(items)
-        XCTAssertEqual(report.removed, 3)
-        for sub in ["deps", "npm", "gen"] { XCTAssertFalse(exists(box, "Library/Caches/deno/\(sub)/x/data"), sub) }
+        XCTAssertEqual(report.removed, 4)
+        for sub in ["gen", "remote", "deps", "npm"] { XCTAssertFalse(exists(box, "Library/Caches/deno/\(sub)/x/data"), sub) }
+    }
+
+    func testDenoRemoteFolderIsAReviewItem() throws {
+        let box = try Sandbox()
+        try box.file("Library/Caches/deno/remote/https/x/data", bytes: 20_000)
+        let items = found(box)
+        XCTAssertEqual(items.map(\.id), ["deno.modules:Library/Caches/deno/remote"])
+        XCTAssertEqual(items.first?.tier, .review)
+        XCTAssertEqual(items.first?.rebuild, .download)
+    }
+
+    /// `--clean-safe --yes` cleans only the safe items. Only `gen` is safe, so the modules and the REPL history stay.
+    func testDenoUnattendedCleanRemovesOnlyCompiledCode() throws {
+        let box = try Sandbox()
+        for sub in ["gen", "remote", "deps", "npm"] { try box.file("Library/Caches/deno/\(sub)/x/data", bytes: 20_000) }
+        try box.file("Library/Caches/deno/location_data/abc/local_storage", bytes: 5_000)
+        try box.file("Library/Caches/deno/deno_history.txt", bytes: 300)
+        let items = found(box)
+        let plan = CleanPlan(ScanResult(findings: items, disk: DiskUsage(total: 1, free: 1)), guardian: scanner(box).guardian,
+                             running: RunningSnapshot(apps: []), deleteMode: .permanent, unattended: true)
+        XCTAssertEqual(plan.items.map(\.wouldClean), [true, false, false, false])
+        let report = cleaner(box).clean(plan.items.filter(\.wouldClean).map(\.finding))
+        XCTAssertEqual(report.removed, 1)
+        XCTAssertFalse(exists(box, "Library/Caches/deno/gen/x/data"))
+        for rel in ["Library/Caches/deno/remote/x/data", "Library/Caches/deno/deps/x/data", "Library/Caches/deno/npm/x/data",
+                    "Library/Caches/deno/location_data/abc/local_storage", "Library/Caches/deno/deno_history.txt"] {
+            XCTAssertTrue(exists(box, rel), rel)
+        }
     }
 
     func testDenoCleanKeepsLocalStorageData() throws {
         let box = try Sandbox()
         try box.file("Library/Caches/deno/deps/x", bytes: 20_000)
         try box.file("Library/Caches/deno/location_data/abc/local_storage", bytes: 5_000)
+        XCTAssertEqual(found(box).map(\.id), ["deno.modules:Library/Caches/deno/deps"])
         let report = cleaner(box).clean(found(box))
         XCTAssertEqual(report.removed, 1)
         XCTAssertTrue(exists(box, "Library/Caches/deno/location_data/abc/local_storage"), "your script data stays")
@@ -126,6 +159,7 @@ final class CondaDenoTerraformTests: XCTestCase {
         XCTAssertTrue(projects.isEmpty, "no project rule for .terraform")
         _ = cleaner(box).clean(items + projects)
         XCTAssertFalse(exists(box, ".terraform.d/plugin-cache/p/provider"))
+        XCTAssertTrue(exists(box, ".terraform.d/plugin-cache"), "Terraform does not make this folder, so it stays; only its contents go")
         for rel in [".terraform.d/credentials.tfrc.json", ".terraform.d/plugins/mine/provider", ".config/terraform/settings",
                     "Developer/infra/.terraform/terraform.tfstate", "Developer/infra/.terraform.lock.hcl",
                     "Developer/infra/terraform.tfstate", "Developer/infra/main.tf"] {

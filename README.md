@@ -42,7 +42,7 @@ Trash Panda looks in two places:
 | Language or tool | Global caches | Project folders |
 | --- | --- | --- |
 | Swift, Obj-C, Xcode | Build data, simulator caches, Swift packages, CocoaPods. Review: simulator runtimes, old simulators, archives, device support files (one item for each OS version; the newest of each device model is kept). | `.build`, `Pods` |
-| JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright (old browser versions), Electron and node-gyp downloads. Deno: the `deps`, `npm`, and `gen` folders of its cache (safe; the data of your scripts in `location_data` stays). Not checked on a real install. | `node_modules`, `.next`, `.nuxt`, `.turbo` |
+| JavaScript, TypeScript | npm, Yarn, Bun, pnpm, Playwright (old browser versions), Electron and node-gyp downloads. Deno: compiled code in `gen` (safe); downloaded modules in `remote`, `deps`, and `npm` (review). `location_data` and the REPL history stay. Not checked on a real install. | `node_modules`, `.next`, `.nuxt`, `.turbo` |
 | Old language runtimes | Versions installed by nvm, fnm, pyenv, rustup, SDKMAN, asdf, and mise: one review item for each version that is not the default, not the newest, not asked for by a scanned project, and not running. | None |
 | JavaScript global packages | Packages that you installed with `npm install -g`, `pnpm add -g`, `yarn global add`, or `bun add -g`: one review item for each. The manager removes it. | None |
 | Python | pip, uv, pre-commit, Poetry, Hugging Face, PyTorch. conda and mamba: the `pkgs` folder of miniconda3, anaconda3, miniforge3, mambaforge, and `~/.conda` (review). Your environments (`envs`) stay. Not checked on a real install. | `.venv`, `.tox`, `.nox` |
