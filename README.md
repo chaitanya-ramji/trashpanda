@@ -237,7 +237,7 @@ This command shows which items a clean of the safe items would remove, and the s
 
 The text has one line for each item that would be cleaned (size, group, title, place), then `N items would be cleaned. Would free X`, then a line such as `3 of 5 items can change at clean time` (a tool, an app, or an age decides part of them when the real clean runs), then the number of skipped items with a count for each reason. Add `--verbose` to list each skipped item with its reason, and to print a note under each item: `Checked now: yes` or `no`, and for an item that would be cleaned, `Decided again at clean time: <reason>` when a part is left to the Cleaner. An upper-limit item shows as `up to X`, and it adds 0 to the sum, the same as in the app. If the delete mode is `trash`, the text says that the files would move to the Trash.
 
-An item would be cleaned only if all of these are true. The checks run in the order of the table below, and **only the first failing check is shown** as the skip reason.
+An item would be cleaned only if all of these are true. The checks run in the order of the table below, and **only the first failing check is shown** as the skip reason. (`nothing to clean now` runs after the shape and link checks of the targets. For the places that the Cleaner finds again, the same shape and link checks run once more after it.)
 
 | Skip reason | Meaning |
 | --- | --- |
@@ -247,10 +247,10 @@ An item would be cleaned only if all of these are true. The checks run in the or
 | `on the keep list` | A path of the item is in your keep list. |
 | `refused by the path guard: <reason>` | The path guard refuses a path of the item: the path itself is a link, it is outside the home folder, or it is protected. |
 | `not there now` | The path is gone since the scan. |
-| `nothing to clean now` | The Cleaner finds its targets again from a fixed rule (browser caches, old logs, old test browsers, old update files). The rule finds none now. |
 | `not a readable folder` | The item empties a folder, and the target is a file, or a folder that cannot be listed now. The Cleaner would fail with `cannot read folder`. |
 | `a folder in the path is a link` | A folder above the item is a link (even if it leads to another place inside your home folder). The Cleaner refuses such a path for these items: build folders, Xcode archives, device support, update files, cache folders, browser caches, old logs, old test browsers, and installers. |
 | `not the kind of path that the clean takes` | The path does not have the shape that the Cleaner accepts for this kind of item (for example a build folder with a name that is not a build folder name). The plan calls the same functions as the Cleaner. |
+| `nothing to clean now` | The Cleaner finds its targets again from a fixed rule (browser caches, old logs, old test browsers, old update files). The rule finds none now. |
 | `project is in use` | A program runs in the project of the build folder. The command line does not start a program to find out, so it checks this only when the list of working folders is known (it is not known on the command line). The Cleaner reads it again at clean time. |
 | `owner app is open (<name>)` | The app that uses the item is open. The command line cannot ask an app to quit, the menu can. |
 

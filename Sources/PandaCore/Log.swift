@@ -4,22 +4,30 @@ import os
 /// A plain text log at ~/Library/Logs/TrashPanda/trashpanda.log, plus the system log.
 /// Every scan, every command, and every delete is written here, so each result can be checked later.
 public enum Log {
-    /// The real app writes to `~/Library/Logs/TrashPanda/trashpanda.log`. When a test run loads this code (XCTest is present),
-    /// the default is a file in the temp folder instead, so that no test can write or rotate the real log, however the test is
-    /// started (for example `swift test --filter SomeTests`, where no test makes a `Sandbox`). The real app never loads XCTest,
-    /// so its default does not change.
+    /// The real app writes to `~/Library/Logs/TrashPanda/trashpanda.log`. When a test run loads this code (a `.xctest` bundle is
+    /// loaded), the default is a file in a private folder of the temp folder instead, so that no test can write or rotate the real
+    /// log, however the test is started (for example `swift test --filter SomeTests`, where no test makes a `Sandbox`).
+    /// Only the loaded bundle decides this. An environment variable does not, because the real app could be started with one.
+    /// The real app never loads a `.xctest` bundle, so its default does not change.
     public static var fileURL: URL = defaultFileURL()
 
     static func defaultFileURL(underTest: Bool = isRunningUnderXCTest) -> URL {
+        chooseDefault(underTest: underTest, home: FileManager.default.homeDirectoryForCurrentUser, temp: NSTemporaryDirectory())
+    }
+
+    /// The pure rule, with the inputs given. A test can call it with `underTest: false` and see the path of the real app.
+    /// The private folder `trashpanda-tests` (mode 0700, made by `openHandle`) holds the temp log, so the shared temp folder is
+    /// never changed.
+    static func chooseDefault(underTest: Bool, home: URL, temp: String) -> URL {
         if underTest {
-            return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).appendingPathComponent("trashpanda-tests.log")
+            return URL(fileURLWithPath: temp, isDirectory: true)
+                .appendingPathComponent("trashpanda-tests", isDirectory: true).appendingPathComponent("trashpanda-tests.log")
         }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+        return home.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
     }
 
     static var isRunningUnderXCTest: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-            || Bundle.allBundles.contains { $0.bundlePath.hasSuffix(".xctest") }
+        Bundle.allBundles.contains { $0.bundlePath.hasSuffix(".xctest") }
     }
 
     private static let queue = DispatchQueue(label: "dev.trashpanda.log")
