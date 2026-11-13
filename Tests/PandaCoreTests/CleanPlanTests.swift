@@ -173,7 +173,7 @@ final class CleanPlanTests: XCTestCase {
     }
 
     func testSafetyNetReasonCannotBeReachedByAnyItem() throws {
-        // The last step of the plan repeats the rule of steps 1 to 3 and 8. A test cannot make an item that fails only it.
+        // The last step of the plan repeats the rule of steps 1 to 3 and 10. A test cannot make an item that fails only it.
         // So we check that every combination of those inputs is already skipped with another reason.
         let box = try fixtureBox()
         let guardian = PathGuard(home: box.home)

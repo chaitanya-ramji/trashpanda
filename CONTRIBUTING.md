@@ -64,7 +64,7 @@ fake=$(mktemp -d)
 HOME="$fake" CFFIXED_USER_HOME="$fake" swift run trashpanda --scan
 ```
 
-In a test, build the environment with `FakeHomeEnvironment.environment(for: home)` and pass it to `Process.environment`. A source test fails when a test file starts a program without this helper. Tests must never write the real home folder, the real Trash, or the real log. `Log.fileURL` uses a temp file when the code runs under XCTest, and a test checks that the real log file did not change. The product has no `--home` option and no override of its own, and it must not get one.
+In a test, build the environment with `FakeHomeEnvironment.environment(for: home)` and pass it to `Process.environment`. A source test fails when a test file starts a program DIRECTLY (`Process(`, `posix_spawn`) without this helper. It does not cover an indirect start through product code. Known indirect cases: `Shell.run` in `ShellTimeoutTests`, `DiskScanner(dockerPath:)` in the FakeDocker tests, and the real `/usr/bin/git` in `WorktreeTests`. They inherit the real `HOME` because `Shell` copies `ProcessInfo.environment`. None of them writes the home folder, and the OS-level sandbox of issue #249 is the real check for them. Tests must never write the real home folder, the real Trash, or the real log. `Log.fileURL` uses a temp file when a `.xctest` bundle is loaded, and a test checks that the real log file did not change. The product has no `--home` option and no override of its own, and it must not get one.
 
 ## How the code is organized
 

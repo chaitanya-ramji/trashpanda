@@ -58,40 +58,30 @@ final class ShellHardeningTests: XCTestCase {
     static let openMark = "\u{1}"
     static let closeMark = "\u{2}"
 
-    /// With `keepStrings`, the text of each string stays in the result, between the two marks. Comments and regex literals are still removed.
+    /// With `keepStrings`, the text of each string stays in the result, between the two marks. Comments and `#/.../#` regex literals are still removed.
     static func codeOnly(_ text: String, keepStrings: Bool = false) -> String {
         var i = 0
-        return code(Array(text), &i, nested: false, keep: keepStrings)
+        let result = code(Array(text), &i, nested: false, keep: keepStrings)
+        // A name in backticks (`remove`(p)) is the same name. The marks of strings do not contain a backtick that matters here.
+        return result.replacingOccurrences(of: #"`([A-Za-z_][A-Za-z0-9_]*)`"#, with: "$1", options: .regularExpression)
     }
 
-    /// The index after a regex literal that starts at `i`, or nil when there is none.
-    /// A bare `/.../` is only a regex where a value can start, and it stays on one line. A wrong guess is safe:
-    /// when nothing closes the literal, the text is scanned as normal code.
-    private static func regexEnd(_ s: [Character], _ i: Int, previous: Character?) -> Int? {
+    /// The index after an extended regex literal `#/.../#` (or `##/.../##`) that starts at `i`, or nil when there is none.
+    /// A bare `/.../` is NOT handled on purpose. This package uses Swift language mode 5 without the bare-slash regex feature
+    /// (see `Package.swift`), so a bare slash is always a division or an operator there (for example `reduce(64, /)`).
+    /// If the scan guessed that a slash starts a regex, it could hide real code after it. When nothing closes the literal,
+    /// the text is scanned as normal code.
+    private static func regexEnd(_ s: [Character], _ i: Int) -> Int? {
         func at(_ k: Int) -> Character? { k < s.count ? s[k] : nil }
         var hashes = 0
         while at(i + hashes) == "#" { hashes += 1 }
-        guard at(i + hashes) == "/" else { return nil }
+        guard hashes > 0, at(i + hashes) == "/" else { return nil }
         if at(i + hashes + 1) == "/" || at(i + hashes + 1) == "*" { return nil }   // a comment, not a regex
+        // It may span lines. It ends at a slash with the same number of hashes.
         var j = i + hashes + 1
-        if hashes > 0 {
-            // Extended literal. It may span lines. It ends at a slash with the same number of hashes.
-            while j < s.count {
-                if s[j] == "\\" { j += 2; continue }
-                if s[j] == "/", (0..<hashes).allSatisfy({ at(j + 1 + $0) == "#" }) { return j + 1 + hashes }
-                j += 1
-            }
-            return nil
-        }
-        // Bare literal. It cannot follow a name, a number or a closing bracket, and it cannot start with a space.
-        // A `!` is not in this list: after a postfix `!`, a slash is a division.
-        if let p = previous, !"(,=:{[;&|?~<>+-*%^".contains(p) { return nil }
-        guard let first = at(j), first != " ", first != "\t", first != "\n" else { return nil }
-        var inClass = false
-        while j < s.count, s[j] != "\n" {
+        while j < s.count {
             if s[j] == "\\" { j += 2; continue }
-            if s[j] == "[" { inClass = true } else if s[j] == "]" { inClass = false }
-            else if s[j] == "/", !inClass { return s[j - 1] != " " ? j + 1 : nil }
+            if s[j] == "/", (0..<hashes).allSatisfy({ at(j + 1 + $0) == "#" }) { return j + 1 + hashes }
             j += 1
         }
         return nil
@@ -118,9 +108,8 @@ final class ShellHardeningTests: XCTestCase {
                 out.append(" ")
                 continue
             }
-            if c == "/" || c == "#" {
-                let previous = out.last(where: { !$0.isWhitespace })
-                if let end = regexEnd(s, i, previous: previous) {
+            if c == "#" {
+                if let end = regexEnd(s, i) {
                     i = end
                     out.append(" ")
                     continue
@@ -257,11 +246,7 @@ final class ShellHardeningTests: XCTestCase {
         let hidden = [
             "let r = #/\"/#; let p = Process()",
             "let r = ##/\"#/##; let p = Process()",
-            "let r = /\"/; let p = Process()",
-            "let r = try Regex(\"a\"); let m = x.firstMatch(of: /\"+/); posix_spawn(&pid, p, nil, nil, a, e)",
             "let r = #/\n  \"\n/#\nlet p = Process()",
-            "let r = /[\"/]\"/; let p = Process()",
-            "foo(a, /\\//, \"x\"); Process()",
         ]
         for text in hidden {
             XCTAssertFalse(Self.spawnProblems(in: text, relativePath: "A.swift").isEmpty, text)
@@ -269,9 +254,7 @@ final class ShellHardeningTests: XCTestCase {
         // A regex literal hides nothing from the scan, and a word in it is not a hit.
         let harmless = [
             "let r = #/Process|posix_spawn/#",
-            "let r = /Process()/",
             "let r = #/a\\/Process/#",
-            "let r = /[/]Process/",
         ]
         for text in harmless {
             XCTAssertEqual(Self.spawnProblems(in: text, relativePath: "A.swift"), [], text)
@@ -346,6 +329,26 @@ final class ShellHardeningTests: XCTestCase {
         for text in ["let x = b!/2; let p = Process(); let y = 4/2", "let x = b!/\"q\"; Process()"] {
             XCTAssertTrue(Self.spawnProblems(in: text, relativePath: "A.swift").contains("A.swift uses Process"), text)
         }
+    }
+
+    func testBareSlashOperatorsNeverHideCode() {
+        // Swift mode 5 has no bare-slash regex, so `/` is an operator or a division. Each text below compiles with `-swift-version 5`.
+        let texts = [
+            "let q = [8.0, 2.0].reduce(64, /); let p = Process(); let r = 1.0/2.0",
+            "let f: (Double, Double) -> Double = (/); let p = Process(); let r2 = 1.0/2.0",
+            "let q = [8.0, 2.0].reduce(64, /); posix_spawn(&pid, p, nil, nil, a, e); let r = 1.0/2.0",
+        ]
+        for text in texts {
+            XCTAssertFalse(Self.spawnProblems(in: text, relativePath: "A.swift").isEmpty, text)
+        }
+        // The extended literal is still removed, and a bare slash pair is not a literal.
+        XCTAssertEqual(Self.spawnProblems(in: "let r = #/Process()/#", relativePath: "A.swift"), [])
+        XCTAssertFalse(Self.spawnProblems(in: "let r = /Process()/", relativePath: "A.swift").isEmpty)
+    }
+
+    func testBackticksDoNotHideAName() {
+        XCTAssertFalse(Self.spawnProblems(in: "let p = `Process`()", relativePath: "A.swift").isEmpty)
+        XCTAssertTrue(Self.codeOnly("_ = `remove`(p)").contains("remove(p)"))
     }
 
     func testTypeAliasesOfProcessAreCaught() {

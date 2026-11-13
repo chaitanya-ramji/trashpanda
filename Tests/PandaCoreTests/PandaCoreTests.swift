@@ -2,7 +2,9 @@ import XCTest
 @testable import PandaCore
 
 enum TestLog {
-    static let url = FileManager.default.temporaryDirectory.appendingPathComponent("trashpanda-tests.log")
+    /// The same private file as the default under a test (`trashpanda-tests/trashpanda-tests.log` in the temp folder). The log makes
+    /// its folder with mode 0700, so the folder must be this private one, never the shared temp folder.
+    static let url = Log.defaultFileURL(underTest: true)
     static let configure: Void = { Log.fileURL = url }()
 }
 

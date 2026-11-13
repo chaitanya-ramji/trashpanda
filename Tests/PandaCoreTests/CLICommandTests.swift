@@ -685,6 +685,27 @@ final class CLICommandTests: XCTestCase {
         XCTAssertEqual(Self.knownSurvivors.count, 4)
     }
 
+    func testBareSlashAndBacktickProbesAreCaught() throws {
+        // Each source compiles with `swiftc -swift-version 5`. They are strings only: nothing runs.
+        let probes: [(word: String, source: String)] = [
+            ("Darwin./Glibc.", "let q = [8.0, 2.0].reduce(64, /); _ = Darwin.remove(p); let r = 1.0/2.0"),
+            ("unlink", "let f: (Double, Double) -> Double = (/); _ = Darwin.unlink(p); let r2 = 1.0/2.0"),
+            ("removeItem", "let q = [8.0, 2.0].reduce(64, /); try FileManager.default.removeItem(atPath: p); let r = 1.0/2.0"),
+            ("remove(", "_ = `remove`(p)"), ("rename", "`rename`(a, b)"), ("truncate", "`truncate`(p, 0)"),
+        ]
+        for (word, source) in probes {
+            XCTAssertTrue(Self.dangerHits(source, words: Self.dangers).contains(word), source)
+            XCTAssertFalse(try readOnlyProblems(source).isEmpty, "read-only check: \(source)")
+        }
+        // The raw scan also sees a selector name in backticks.
+        XCTAssertFalse(Self.rawHits(stripComments("_ = `unlink`(p)")).isEmpty)
+        // A harmless lookalike in backticks passes.
+        let harmless = "func `truncateText`() {}\nlet `value` = 1 + `value`"
+        XCTAssertEqual(Self.dangerHits(harmless, words: Self.dangers), [])
+        XCTAssertEqual(Self.rawHits(stripComments(harmless)), [])
+        XCTAssertEqual(try readOnlyProblems(harmless).filter { !$0.hasPrefix("call not in the allow-list: ") }, [])
+    }
+
     func testRemovingAWordFromTheListLetsItsProbeThrough() throws {
         // Mutation check. Each word has a probe. Without the word, the probe is no longer caught by that word.
         let probes: [(word: String, source: String)] = [
@@ -729,8 +750,9 @@ final class CLICommandTests: XCTestCase {
     /// Ways to get the real home folder or the real Trash, as regular expressions for the code with the text of strings kept
     /// (a string is written between \u{1} and \u{2}). They are built from parts, so that this file does not contain them in one piece.
     private static let realHomePatterns: [String] = [
-        "NSHome" + "Directory", "home" + "Directory", "getpw" + "uid", "expandingTilde" + "InPath",
-        "NSUser" + "Name", "NSFullUser" + "Name", "trash" + "Directory", "NSSearchPathFor" + "DirectoriesInDomains",
+        #"\bNSHome"# + #"Directory\b"#, #"\bhomeDirectory"# + #"ForCurrentUser\b"#, #"\bgetpw"# + #"uid\b"#,
+        #"\bexpandingTilde"# + #"InPath\b"#, #"\bNSUser"# + #"Name\b"#, #"\bNSFullUser"# + #"Name\b"#,
+        #"\.trash"# + #"Directory\b"#, #"\bNSSearchPathFor"# + #"DirectoriesInDomains\b"#, #"\bURL\.home"# + #"Directory\b"#,
         #"\.homeDirectory\b"#,
     ]
     private static let realHomeStringPatterns: [String] = [
@@ -826,6 +848,9 @@ final class CLICommandTests: XCTestCase {
             XCTAssertFalse(Self.homeWriteProblems(source + "\n_ = rename(a, h + \"/x\")").isEmpty, source)
             XCTAssertTrue(Self.homeWriteProblems(source + "\nlet n = h.count").isEmpty, "a read of the home alone is not flagged: \(source)")
         }
+        // A local name that only contains a pattern word is not the real home folder.
+        XCTAssertTrue(Self.homeWriteProblems("let homeDirectory = box.home\ntry fm.removeItem(at: homeDirectory)").isEmpty)
+        XCTAssertTrue(Self.homeWriteProblems("let trashDirectory = box.trash\ntry fm.removeItem(at: trashDirectory)").isEmpty)
         // The default `home:` of a call that writes.
         for call in ["Config.ensureFile(\"keep\")", "Config.setDeleteMode(.trash)", "Config.appendKeep(path)", "FirstStartNote.record()"] {
             XCTAssertFalse(Self.homeWriteProblems("_ = \(call)").isEmpty, call)
@@ -842,8 +867,14 @@ final class CLICommandTests: XCTestCase {
     }
 
     func testEveryTestThatStartsAProgramUsesTheFakeHomeHelper() throws {
-        // A program that starts with only `HOME` can still reach the real home. A test file that starts a program must use
-        // `FakeHomeEnvironment` (it sets HOME and CFFIXED_USER_HOME). Today no test file starts a program.
+        // A program that starts with only `HOME` can still reach the real home. This test covers only a DIRECT start: a test file
+        // that has `Process(`, `Process.init`, `Process.launchedProcess`, or `posix_spawn` must also use `FakeHomeEnvironment`.
+        // It does NOT cover an INDIRECT start. These test files start a program through product code, and that code copies
+        // `ProcessInfo.environment` (so the program inherits the real HOME). They are known cases, and none of them writes the home:
+        //   - `Shell.run` in ShellTimeoutTests (and in the other Shell tests)
+        //   - `DiskScanner(dockerPath:)` in the FakeDocker tests (a fake script, started through Shell)
+        //   - the real `/usr/bin/git` in WorktreeTests (started through Shell, on temp repositories)
+        // The real check for all of them is the OS-level sandbox of issue 249. Product code in Shell.swift is not changed here.
         var bad: [String] = []
         for (file, text) in try testFiles() where file != "FakeHomeEnvironment.swift" {
             let code = self.code(text)
