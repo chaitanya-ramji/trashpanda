@@ -78,7 +78,7 @@ The binary is `.build/debug/trashpanda` (the product name in `Package.swift`, al
 
 There is no test that starts the real binary for `--clean-safe --yes` (owner decision). The real signal behavior (SIGINT and SIGTERM, exit 130 and 143) was checked by hand in a fixture home. Tests cover the signal path (SIGINT, SIGTERM, SIGQUIT) with an injected stop flag.
 
-Never start the binary with `CFFIXED_USER_HOME="~"` to test the home check: the old code crashed and macOS wrote a crash report into your real `~/Library/Logs/DiagnosticReports`. Test a bad home value with a unit test that gives the values to `CLICleanEnvironment.homeValues`.
+Never start the binary with a bad home value to test the home check. A bad value is a relative path, an empty text, `.`, `..`, `~`, or any text that starts with `~`. The log then falls back to the home of the REAL user and writes there, and a value with `~` crashed the old code and made macOS write a crash report into your real `~/Library/Logs/DiagnosticReports`. Test a bad value only with a unit test that gives the values to `CLICleanEnvironment.homeValues` or to `Log.realHome`. Never use the binary for it.
 
 The lock file and the log go to `$fake/Library/Logs/TrashPanda`, so the real log is not touched. Tests of this command run `CLICommand.run(...)` in the test process on a `Sandbox` home, with an injected Trash folder inside the fixture, an injected lock folder, an injected user id (for the root check), and an injected stop flag (for the signal path). A test must not start the binary for the real clean.
 

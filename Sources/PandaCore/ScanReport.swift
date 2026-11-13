@@ -222,6 +222,26 @@ public enum CommandLineCheck {
         return nil
     }
 
+    /// The full home check for every command that scans: the values are plain absolute paths, and the home exists, is a folder, is not
+    /// `/`, and is its own real path (no link, and no other letter case, in the path). It reads and never writes. nil means fine.
+    /// `message` goes to stderr (exit 1). `logLine` is nil when no log line may be written: a missing home must get none.
+    public static func homeProblem(_ values: (cffixedUserHome: String?, home: String?, resolved: String))
+        -> (message: String, logLine: String?)? {
+        if let message = homeError(values) { return (message, "cli: home folder is not a plain absolute path, exit 1") }
+        let home = URL(fileURLWithPath: values.resolved).standardizedFileURL
+        var isFolder: ObjCBool = false
+        guard home.path != "/", FileManager.default.fileExists(atPath: home.path, isDirectory: &isFolder), isFolder.boolValue else {
+            return ("The home folder could not be found. Nothing was cleaned.", nil)
+        }
+        guard UpdateDownloads.isPlainPath(home) else {
+            return (homeNotRealPathMessage, "cli: home folder path is not its real path, exit 1")
+        }
+        return nil
+    }
+
+    public static let homeNotRealPathMessage =
+        "The home folder path is not the same as its real path (a link in the path, or another letter case). Use the real path of the home folder. Nothing was cleaned."
+
     /// The options for the log. It names only the known options that are present, and counts the others.
     /// It never holds the text of another argument (it could be a secret).
     public static func logOptions(_ arguments: [String]) -> String {

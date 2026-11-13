@@ -97,7 +97,7 @@ public enum Log {
         if let handle, openedURL == url, fm.fileExists(atPath: url.path), written <= maxBytes { return handle }
         closeHandle()
         let folder = url.deletingLastPathComponent()
-        try? fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        guard prepareFolder(folder) else { return nil }
         try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
         if let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int, size > maxBytes {
             let old = url.appendingPathExtension("1")
@@ -113,6 +113,31 @@ public enum Log {
         handle = opened
         openedURL = url
         return opened
+    }
+
+    /// Makes the log folder, and never makes the home folder. The real log is `<home>/Library/Logs/TrashPanda/trashpanda.log`. For that
+    /// path the log owns only the last 3 parts (`Library/Logs/TrashPanda`). The folder before them (the home) must already exist and
+    /// be a folder. If it does not, nothing is made and the log writes nothing. A missing home must stay missing, so that a run with
+    /// a wrong home never makes a new home with a log in it. Any other path is for a test and is made as a whole.
+    static func prepareFolder(_ folder: URL) -> Bool {
+        let fm = FileManager.default
+        var isFolder: ObjCBool = false
+        guard folder.path.hasSuffix("/Library/Logs/TrashPanda") else {
+            try? fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            return fm.fileExists(atPath: folder.path, isDirectory: &isFolder) && isFolder.boolValue
+        }
+        var current = folder
+        for _ in 0..<3 { current.deleteLastPathComponent() }
+        guard fm.fileExists(atPath: current.path, isDirectory: &isFolder), isFolder.boolValue else { return false }
+        for name in folder.pathComponents.suffix(3) {
+            current.appendPathComponent(name, isDirectory: true)
+            if !fm.fileExists(atPath: current.path) {
+                // One level at a time, never with intermediate folders.
+                try? fm.createDirectory(at: current, withIntermediateDirectories: false,
+                                        attributes: current.path == folder.path ? [.posixPermissions: 0o700] : nil)
+            }
+        }
+        return fm.fileExists(atPath: folder.path, isDirectory: &isFolder) && isFolder.boolValue
     }
 
     private static func closeHandle() {
@@ -139,28 +164,12 @@ public enum Log {
 
     // MARK: Privacy helpers
 
-    /// Replaces the home folder with `~`. It replaces the home only where a path starts: not in the middle of a longer path
-    /// (the home `/tmp/x` is not replaced in `/private/tmp/x`), and not when the home is the start of a longer name (`/tmp/xyz`).
+    /// Replaces the home folder with `~`.
     public static func redact(_ text: String, home: String) -> String {
         guard !home.isEmpty, home != "/" else { return text }
         let base = home.hasSuffix("/") ? String(home.dropLast()) : home
-        guard !base.isEmpty else { return text }
-        func isNameCharacter(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "-" }
-        var out = ""
-        var rest = text[...]
-        var before: Character?   // the character just before `rest`
-        while let hit = rest.range(of: base) {
-            out += rest[rest.startIndex..<hit.lowerBound]
-            let last = hit.lowerBound > rest.startIndex ? rest[rest.index(before: hit.lowerBound)] : before
-            let next = hit.upperBound < rest.endIndex ? rest[hit.upperBound] : nil
-            let afterNext = next.flatMap { _ in rest.index(after: hit.upperBound) < rest.endIndex ? rest[rest.index(after: hit.upperBound)] : nil }
-            let startsPath = last.map { !isNameCharacter($0) && !"/.~".contains($0) } ?? true
-            let endsPath = next.map { $0 == "/" || !(isNameCharacter($0) || ($0 == "." && afterNext.map(isNameCharacter) == true)) } ?? true
-            out += startsPath && endsPath ? "~" : String(rest[hit])
-            before = rest[hit].last
-            rest = rest[hit.upperBound...]
-        }
-        return out + rest
+        return text.replacingOccurrences(of: base + "/", with: "~/")
+            .replacingOccurrences(of: base, with: "~")
     }
 
     /// The last 200 lines of the log, for a person to read before sharing.
