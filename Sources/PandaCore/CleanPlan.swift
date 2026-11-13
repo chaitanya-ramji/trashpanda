@@ -10,12 +10,15 @@ import Foundation
 /// 4. the path guard accepts each path now (`on the keep list`, `refused by the path guard: ...`). The guard also catches
 ///    a link in the path itself, a path outside the home folder, and a protected folder,
 /// 5. the path is still there, and the places that the Cleaner finds again are not empty (`not there now`, `nothing to clean now`),
-/// 6. no link is in any part of the path, and the path has the shape that the Cleaner accepts for this action. These are the
+/// 6. for an item that empties a folder: each target is a folder that can be listed now (`not a readable folder`). The check runs
+///    right after step 5, before the shape checks. A folder with children that cannot be deleted (for example mode 0o555) passes
+///    this step, so the real clean can still report a partial result for it,
+/// 7. no link is in any part of the path, and the path has the shape that the Cleaner accepts for this action. These are the
 ///    same functions that the Cleaner calls (`CleanRules`). The link check is made only for the actions where the Cleaner makes it
 ///    (`a folder in the path is a link`, `not the kind of path that the clean takes`),
-/// 7. for a build folder: no program runs in its project (`project is in use`), when the list of working folders is known,
-/// 8. its owner app is not open (`owner app is open (name)`). The command line cannot ask an app to quit, the menu can,
-/// 9. and the one-click clean of the menu would take it (`isOneClickSafe`). Step 9 is a safety net: steps 1 to 3 and 8 already
+/// 8. for a build folder: no program runs in its project (`project is in use`), when the list of working folders is known,
+/// 9. its owner app is not open (`owner app is open (name)`). The command line cannot ask an app to quit, the menu can,
+/// 10. and the one-click clean of the menu would take it (`isOneClickSafe`). Step 10 is a safety net: steps 1 to 3 and 9 already
 ///    cover its rule, so no item can fail it alone.
 ///
 /// The Cleaner ALWAYS runs the path guard and the shape checks again right before it deletes, for every item. That is not

@@ -4,8 +4,23 @@ import os
 /// A plain text log at ~/Library/Logs/TrashPanda/trashpanda.log, plus the system log.
 /// Every scan, every command, and every delete is written here, so each result can be checked later.
 public enum Log {
-    public static var fileURL: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+    /// The real app writes to `~/Library/Logs/TrashPanda/trashpanda.log`. When a test run loads this code (XCTest is present),
+    /// the default is a file in the temp folder instead, so that no test can write or rotate the real log, however the test is
+    /// started (for example `swift test --filter SomeTests`, where no test makes a `Sandbox`). The real app never loads XCTest,
+    /// so its default does not change.
+    public static var fileURL: URL = defaultFileURL()
+
+    static func defaultFileURL(underTest: Bool = isRunningUnderXCTest) -> URL {
+        if underTest {
+            return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).appendingPathComponent("trashpanda-tests.log")
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/TrashPanda/trashpanda.log")
+    }
+
+    static var isRunningUnderXCTest: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || Bundle.allBundles.contains { $0.bundlePath.hasSuffix(".xctest") }
+    }
 
     private static let queue = DispatchQueue(label: "dev.trashpanda.log")
     private static let system = Logger(subsystem: "dev.trashpanda.app", category: "app")
