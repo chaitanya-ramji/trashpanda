@@ -32,6 +32,22 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertFalse(menu.items.contains { $0.isAlternate })
         XCTAssertEqual(menu.items[4].image?.size, NSSize(width: 16, height: 16), "The group row has its color dot")
     }
+    /// The header of a trash-mode menu gets the mode through the builder. Without it, the header says "Free" again (#226).
+    func testTheHeaderOfATrashModeMenuSaysCleanNotFree() throws {
+        let disk = DiskUsage(total: 500_000_000_000, free: 120_000_000_000)
+        let finding = Finding(id: "1", ecosystem: .javascript, title: "node_modules · app-a", location: "~/Projects",
+                              bytes: 1_300_000_000, tier: .safe, rebuild: .minutes,
+                              action: .removeArtifact(URL(fileURLWithPath: "/tmp/none")))
+        var input = MenuInput(result: ScanResult(findings: [finding], disk: disk), disk: disk, scanning: false,
+                              cleaning: false, running: RunningSnapshot(apps: []), staleDays: 90)
+        input.deleteMode = .trash
+        let model = MenuModel.make(input)
+        let menu = NSMenu()
+        let header = try XCTUnwrap(MenuBuilder { _ in }.rebuild(menu, model: model, onSelect: { _ in }))
+        XCTAssertTrue(header.detailText.contains("lean"), header.detailText)
+        XCTAssertFalse(header.detailText.contains("free"), header.detailText)
+    }
+
     func testTheSecondLineIsNeverLost() {
         let row = MenuModel.Row(title: "Item", enabled: false, tooltip: "Tip", subtitle: "Second line")
         let menu = NSMenu()

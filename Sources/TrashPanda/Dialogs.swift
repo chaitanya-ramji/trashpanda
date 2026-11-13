@@ -16,8 +16,11 @@ final class FindingBox: NSObject {
     let cancelTitle: String?
     /// The folder that a "Show in Finder" button shows. When nil, the dialog has no such button.
     let revealURL: URL?
+    /// The delete mode of the words in this box. The clean uses the same value, so the text and the delete agree.
+    let deleteMode: DeleteMode
     init(_ findings: [Finding], title: String, body: String, footer: String? = nil, confirmTitle: String? = nil,
-         cancelIsDefault: Bool = false, cancelTitle: String? = nil, revealURL: URL? = nil) {
+         cancelIsDefault: Bool = false, cancelTitle: String? = nil, revealURL: URL? = nil, deleteMode: DeleteMode = .permanent) {
+        self.deleteMode = deleteMode
         self.revealURL = revealURL
         self.cancelTitle = cancelTitle
         self.findings = findings
@@ -32,7 +35,7 @@ final class FindingBox: NSObject {
     convenience init(_ prompt: MenuModel.Prompt) {
         self.init(prompt.findings, title: prompt.title, body: prompt.body, footer: prompt.footer,
                   confirmTitle: prompt.confirmTitle, cancelIsDefault: prompt.cancelIsDefault, cancelTitle: prompt.cancelTitle,
-                  revealURL: prompt.revealURL)
+                  revealURL: prompt.revealURL, deleteMode: prompt.deleteMode)
     }
 }
 

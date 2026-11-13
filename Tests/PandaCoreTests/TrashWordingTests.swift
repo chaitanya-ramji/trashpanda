@@ -26,9 +26,9 @@ final class TrashWordingTests: XCTestCase {
         item("v", .docker, .docker(.removeVolume(name: "data")), .review, .never, bytes: 40_000_000)
     }
 
-    private func model(_ findings: [Finding], mode: DeleteMode) -> MenuModel {
+    private func model(_ findings: [Finding], mode: DeleteMode, running: RunningSnapshot = RunningSnapshot(apps: [])) -> MenuModel {
         var input = MenuInput(result: ScanResult(findings: findings, disk: disk, date: now), disk: disk, scanning: false, cleaning: false,
-                              running: RunningSnapshot(apps: []), staleDays: 90, now: now)
+                              running: running, staleDays: 90, now: now)
         input.deleteMode = mode
         return MenuModel.make(input)
     }
@@ -56,7 +56,8 @@ final class TrashWordingTests: XCTestCase {
     }
 
     /// Words that claim the space is free, or that the file is gone for good.
-    private let banned = ["Cannot be recovered", "You can free", "Free up", "Freed", "for good", "can't be undone"]
+    private let banned = ["Cannot be recovered", "You can free", "Free up", "Freed", "for good", "can't be undone",
+                          "deleted", "Delete ", "can no longer resume"]
     private func isFreeClaim(_ text: String) -> Bool {
         banned.contains { text.contains($0) } || text.range(of: #"(?i)\bfree \d"#, options: .regularExpression) != nil
     }
@@ -137,6 +138,88 @@ final class TrashWordingTests: XCTestCase {
         XCTAssertTrue(all.contains { $0.hasPrefix("Free up ") && $0.hasSuffix("…") })
         XCTAssertTrue(all.contains { $0.hasPrefix("Free up ") && $0.hasSuffix("?") })
         XCTAssertFalse(all.contains { $0.contains("Goes to the Trash") })
+    }
+
+    /// Every prompt of the menu, in the rows and in their submenus.
+    private func allPrompts(_ rows: [MenuModel.Row]) -> [MenuModel.Prompt] {
+        rows.flatMap { row -> [MenuModel.Prompt] in
+            (prompt(row.action).map { [$0] } ?? []) + (row.submenu.map { allPrompts($0.rows) } ?? [])
+        }
+    }
+
+    /// The text and the clean of a prompt share one delete mode (#226). The mode is the one the menu was built with.
+    func testEveryPromptKeepsTheDeleteModeOfItsWords() {
+        let editor = AppOwner(name: "Example Editor", bundleIDs: ["com.example.editor"])
+        let open = Finding(id: "open", ecosystem: .javascript, title: "Thing open", location: "/Users/example/open", bytes: 900_000_000,
+                           tier: .safe, rebuild: .minutes, action: .removeArtifact(url), owner: editor)
+        let running = RunningSnapshot(apps: [RunningApp(bundleID: "com.example.editor", name: "Example Editor")])
+        let findings = fileItems + [toolItem(), open]
+
+        let trash = allPrompts(model(findings, mode: .trash, running: running).rows)
+        XCTAssertGreaterThan(trash.count, 3)
+        XCTAssertTrue(trash.contains { $0.body.contains("is open. Trash Panda will ask it to quit first") }, "the open app prompt is checked too")
+        for p in trash { XCTAssertEqual(p.deleteMode, .trash, "a trash-mode prompt: \(p.title)") }
+
+        let permanent = allPrompts(model(findings, mode: .permanent, running: running).rows)
+        XCTAssertGreaterThan(permanent.count, 3)
+        for p in permanent { XCTAssertEqual(p.deleteMode, .permanent, "a permanent-mode prompt: \(p.title)") }
+    }
+
+    /// One-item dialogs of a file. In trash mode they say "Move ... to the Trash", never "deleted" or "Delete ".
+    private var oneFileDialogs: [(name: String, finding: Finding)] {
+        [("archive", item("ar", .swift, .removeArchive(url), .review, .never)),
+         ("installer", item("in", .installers, .removeInstaller(url), .review, .never)),
+         ("sessions", item("se", .aiAgents, .agent(.removeOldSessions(kind: .codex, olderThan: now, minimumAgeDays: 30)), .review, .never)),
+         ("old logs", item("ol", .logs, .removeOldLogs(.crashReports), .review, .never)),
+         ("cache folder", item("cf", .cacheExplorer, .removeCacheFolderContents(name: "example-cache"), .review, .never))]
+    }
+
+    /// The permanent words of the five dialogs above. They must not change, so each text is a copy of the old one.
+    func testThePermanentOneFileDialogsKeepTheirOldWords() {
+        let expected: [String: (title: String, footer: String, confirm: String)] = [
+            "archive": ("Delete this archive?",
+                        "An archive holds the symbol files (dSYMs) that you need to read crash reports of a build that you shipped. This can't be undone.",
+                        "Delete archive"),
+            "installer": ("Delete this installer?",
+                          "The file is deleted for good. It does not go to the Trash. If you need it again, download it again. This can't be undone.",
+                          "Delete installer"),
+            "sessions": ("Delete old sessions?",
+                         "You can no longer resume these conversations, and the tool may still list them. Only sessions older than the limit are deleted. This can't be undone.",
+                         "Delete sessions"),
+            "old logs": ("Delete these old log files?",
+                         "Only files older than 30 days are deleted. Newer files stay, and so does the log of Trash Panda. Keep crash reports if you are looking for a crash. This can't be undone.",
+                         "Delete files"),
+            "cache folder": ("Empty this cache folder?",
+                             "Apps can download the files in a cache folder again. Trash Panda does not know what this one holds: an app may sign you out, lose offline files, or be slow the first time. Quit the app first. The folder stays, and its contents are deleted. This can't be undone.",
+                             "Empty folder"),
+        ]
+        for (name, f) in oneFileDialogs {
+            let c = Confirmation.forOne(f, staleDays: 90, now: now, mode: .permanent)
+            let old = expected[name]!
+            XCTAssertEqual(c.title, old.title, name)
+            XCTAssertEqual(c.footer, old.footer, name)
+            XCTAssertEqual(c.confirmTitle, old.confirm, name)
+            XCTAssertEqual(c, Confirmation.forOne(f, staleDays: 90, now: now), "the default mode is permanent: \(name)")
+        }
+    }
+
+    func testTheTrashOneFileDialogsSayMoveNotDelete() {
+        for (name, f) in oneFileDialogs {
+            let c = Confirmation.forOne(f, staleDays: 90, now: now, mode: .trash)
+            let texts = [c.title, c.body, c.footer ?? "", c.confirmTitle ?? ""]
+            for text in texts { XCTAssertFalse(isFreeClaim(text), "\(name) in trash mode says: \(text)") }
+            XCTAssertTrue(c.title.hasPrefix("Move ") && c.title.hasSuffix("to the Trash?") || name == "cache folder", "\(name): \(c.title)")
+            XCTAssertTrue(c.footer?.contains("Trash") ?? false, "\(name) says where the file goes")
+            XCTAssertTrue(c.cancelIsDefault, "\(name) keeps the default button")
+        }
+        XCTAssertEqual(Confirmation.forOne(oneFileDialogs[0].finding, staleDays: 90, now: now, mode: .trash).title, "Move this archive to the Trash?")
+        XCTAssertEqual(Confirmation.forOne(oneFileDialogs[1].finding, staleDays: 90, now: now, mode: .trash).confirmTitle, "Move to the Trash")
+    }
+
+    /// A tool item keeps its permanent words in trash mode, so the file wording does not reach it.
+    func testAToolDialogKeepsItsPermanentWordsInTrashMode() {
+        let c = Confirmation.forOne(toolItem(), staleDays: 90, now: now, mode: .trash)
+        XCTAssertEqual(c, Confirmation.forOne(toolItem(), staleDays: 90, now: now, mode: .permanent))
     }
 
     /// The claim check itself: a permanent-mode text in a trash-mode list must be caught.

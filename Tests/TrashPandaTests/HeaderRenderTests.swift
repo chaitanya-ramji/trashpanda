@@ -345,7 +345,8 @@ final class HeaderRenderTests: XCTestCase {
     }
 
     private func feed(_ view: StorageHeaderView, _ model: MenuModel) {
-        view.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content, segments: model.header.segments)
+        view.update(disk: model.header.disk, totals: model.header.totals, content: model.header.content, segments: model.header.segments,
+                    deleteMode: model.header.deleteMode)
     }
 
     /// The cause of the empty header: `populate` built a new menu item around the SAME header view, and the old item kept the view too.

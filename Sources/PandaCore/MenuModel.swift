@@ -8,6 +8,8 @@ public struct MenuModel: Equatable, Sendable {
     /// The words of one confirm dialog, and the items that it would clean.
     public struct Prompt: Equatable, Sendable {
         public let findings: [Finding]
+        /// The delete mode that the words of this prompt were built with. The clean uses the same value.
+        public let deleteMode: DeleteMode
         public let title: String
         public let body: String
         /// Text under the body. nil: the dialog says that tools rebuild what they need.
@@ -21,10 +23,11 @@ public struct MenuModel: Equatable, Sendable {
         /// The folder that the dialog can show in Finder. nil: the dialog has no such button.
         public let revealURL: URL?
 
-        public init(findings: [Finding], title: String, body: String, footer: String? = nil, confirmTitle: String? = nil,
+        public init(findings: [Finding], deleteMode: DeleteMode, title: String, body: String, footer: String? = nil, confirmTitle: String? = nil,
                     cancelIsDefault: Bool = false, cancelTitle: String? = nil, revealURL: URL? = nil) {
             self.revealURL = revealURL
             self.findings = findings
+            self.deleteMode = deleteMode
             self.title = title
             self.body = body
             self.footer = footer
@@ -35,7 +38,7 @@ public struct MenuModel: Equatable, Sendable {
 
         /// A finding has no equality of its own, so two prompts are equal when they name the same items.
         public static func == (a: Prompt, b: Prompt) -> Bool {
-            a.findings.map(\.id) == b.findings.map(\.id) && a.title == b.title && a.body == b.body && a.footer == b.footer
+            a.findings.map(\.id) == b.findings.map(\.id) && a.deleteMode == b.deleteMode && a.title == b.title && a.body == b.body && a.footer == b.footer
                 && a.confirmTitle == b.confirmTitle && a.cancelIsDefault == b.cancelIsDefault && a.cancelTitle == b.cancelTitle
                 && a.revealURL == b.revealURL
         }
@@ -214,7 +217,7 @@ public struct MenuModel: Equatable, Sendable {
                     rows.append(.note(main.title))
                 } else {
                     rows.append(Row(title: main.title, action: .clean(Prompt(
-                        findings: usableSafe,
+                        findings: usableSafe, deleteMode: input.deleteMode,
                         title: DeleteModeText.title("Free up \(ByteText.string(safeBytes))?", mode: input.deleteMode, findings: usableSafe),
                         body: "Trash Panda will clear old build files and caches from \(names(of: usableSafe)).")),
                         subtitle: main.subtitle))
@@ -320,7 +323,7 @@ public struct MenuModel: Equatable, Sendable {
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
             rows.append(Row(title: DeleteModeText.bulkRow(ByteText.string(total), mode: input.deleteMode), action: .clean(Prompt(
-                findings: safe,
+                findings: safe, deleteMode: input.deleteMode,
                 title: DeleteModeText.title("Free up \(ByteText.string(total)) of AI agents files?", mode: input.deleteMode, findings: safe),
                 body: "Trash Panda will clear old build files and caches."))))
             rows.append(.separator)
@@ -346,7 +349,7 @@ public struct MenuModel: Equatable, Sendable {
         if !safe.isEmpty {
             let total = safe.reduce(Int64(0)) { $0 + $1.countedBytes }
             rows.append(Row(title: DeleteModeText.bulkRow(ByteText.string(total), mode: input.deleteMode), action: .clean(Prompt(
-                findings: safe,
+                findings: safe, deleteMode: input.deleteMode,
                 title: DeleteModeText.title("Free up \(ByteText.string(total)) of \(ecosystem.name) files?", mode: input.deleteMode, findings: safe),
                 body: "Trash Panda will clear old build files and caches."))))
         }
@@ -465,14 +468,14 @@ public struct MenuModel: Equatable, Sendable {
         let open = input.blockers(f)
         let c = Confirmation.forOne(f, staleDays: input.staleDays, now: input.now, mode: input.deleteMode)
         if open.isEmpty {
-            row.action = .clean(Prompt(findings: [f], title: c.title, body: c.body, footer: c.footer,
+            row.action = .clean(Prompt(findings: [f], deleteMode: input.deleteMode, title: c.title, body: c.body, footer: c.footer,
                                        confirmTitle: c.confirmTitle, cancelIsDefault: c.cancelIsDefault,
                                        revealURL: f.revealURL))
         } else {
             // The app is open. The row looks like any other. The click asks, then quits the app politely, then cleans.
             let names = open.joined(separator: " and ")
             row.action = .quitAndClean(Prompt(
-                findings: [f], title: c.title,
+                findings: [f], deleteMode: input.deleteMode, title: c.title,
                 body: c.body + "\n\n\(names) is open. Trash Panda will ask it to quit first. If it asks to save your work, answer it.",
                 footer: c.footer, confirmTitle: DeleteModeText.quitAndClean(apps: names, bytes: f.bytes, finding: f, mode: input.deleteMode),
                 cancelIsDefault: true, cancelTitle: "Not now", revealURL: f.revealURL))
