@@ -111,6 +111,25 @@ enum Catalog {
         CacheSpec(id: "torch.cache", title: "PyTorch downloads", ecosystem: .python,
                   paths: [".cache/torch"], tier: .review, rebuild: .download),
 
+        // conda and mamba. Only `pkgs` (downloaded packages). Never `envs`: an environment is the work of the user.
+        // The folders are the default places. They are not checked on a real install.
+        CacheSpec(id: "conda.pkgs", title: "conda package cache", ecosystem: .python,
+                  paths: ["miniconda3/pkgs", "anaconda3/pkgs", "miniforge3/pkgs", "mambaforge/pkgs", ".conda/pkgs"],
+                  tier: .review, rebuild: .download,
+                  note: "Environments are not touched. conda downloads the packages again when you need them."),
+
+        // Deno. Only the folders that Deno builds again: `deps`, `npm`, and `gen`. `location_data` holds the localStorage
+        // data of your scripts, so the folder `deno` itself is not cleaned. Not checked on a real install.
+        CacheSpec(id: "deno.cache", title: "Deno module cache", ecosystem: .javascript,
+                  paths: ["Library/Caches/deno/deps", "Library/Caches/deno/npm", "Library/Caches/deno/gen"],
+                  tier: .safe, rebuild: .download),
+
+        // Terraform. The shared provider cache exists only when the user made it. A project `.terraform` folder is left out:
+        // it can hold state. Never touch ~/.terraform.d/credentials.tfrc.json (see PathGuard). Not checked on a real install.
+        CacheSpec(id: "terraform.plugincache", title: "Terraform provider cache", ecosystem: .terraform,
+                  paths: [".terraform.d/plugin-cache"], tier: .review, rebuild: .download,
+                  note: "Terraform downloads the providers again. A project that works offline needs them."),
+
         // Java and Kotlin
         CacheSpec(id: "gradle.caches", title: "Gradle cache", ecosystem: .jvm,
                   paths: [".gradle/caches"], tier: .review, rebuild: .download),
