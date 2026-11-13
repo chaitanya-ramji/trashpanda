@@ -85,9 +85,43 @@ public struct Confirmation: Equatable, Sendable {
     public static func forOne(_ f: Finding, staleDays: Int, now: Date = Date(), mode: DeleteMode = .permanent) -> Confirmation {
         let c = forOneInMode(f, staleDays: staleDays, now: now, mode: mode)
         guard mode == .trash else { return c }
+        if DeleteMode.movesFiles(f.action), let w = trashFileWording(f) {
+            return Confirmation(title: w.title ?? c.title, body: c.body,
+                                footer: (w.footer ?? c.footer).map { DeleteModeText.footer($0, mode: mode, findings: [f]) },
+                                confirmTitle: w.confirmTitle ?? c.confirmTitle, cancelIsDefault: c.cancelIsDefault)
+        }
         return Confirmation(title: DeleteModeText.title(c.title, mode: mode, findings: [f]), body: c.body,
                             footer: c.footer.map { DeleteModeText.footer($0, mode: mode, findings: [f]) },
                             confirmTitle: c.confirmTitle, cancelIsDefault: c.cancelIsDefault)
+    }
+
+    /// The trash-mode words of a one-item dialog for a file, where the permanent words say "deleted" or "Delete".
+    /// nil: the dialog keeps its words. A nil field keeps the permanent text of that field.
+    private static func trashFileWording(_ f: Finding) -> (title: String?, footer: String?, confirmTitle: String?)? {
+        switch kind(of: f) {
+        case .archive:
+            return ("Move this archive to the Trash?",
+                    "An archive holds the symbol files (dSYMs) that you need to read crash reports of a build that you shipped. It goes to the Trash, so you can put it back.",
+                    "Move to the Trash")
+        case .installer:
+            return ("Move this installer to the Trash?",
+                    "The file goes to the Trash. If you need it again, put it back from the Trash or download it again.",
+                    "Move to the Trash")
+        case .agentSessions:
+            return ("Move old sessions to the Trash?",
+                    "Only sessions older than the limit go to the Trash. The tool may still list them.",
+                    "Move sessions to the Trash")
+        case .oldLogs:
+            return ("Move these old log files to the Trash?",
+                    "Only files older than \(OldLogs.minimumAgeDays) days go to the Trash. Newer files stay, and so does the log of Trash Panda. Keep crash reports if you are looking for a crash.",
+                    "Move files to the Trash")
+        case .cacheFolder where !isSystemCache(f):
+            return (nil,
+                    "Apps can download the files in a cache folder again. Trash Panda does not know what this one holds: an app may sign you out, lose offline files, or be slow the first time. Quit the app first. The folder stays, and its contents go to the Trash, so you can put them back.",
+                    nil)
+        default:
+            return nil
+        }
     }
 
     private static func forOneInMode(_ f: Finding, staleDays: Int, now: Date, mode: DeleteMode) -> Confirmation {

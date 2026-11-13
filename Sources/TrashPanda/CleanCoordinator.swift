@@ -32,8 +32,8 @@ final class CleanCoordinator {
     func confirmAndClean(_ box: FindingBox) {
         guard !isCleaning else { return }
         let total = box.findings.reduce(Int64(0)) { $0 + $1.bytes }
-        // The mode is read once. The dialog and the clean use the same value.
-        let mode = Config.readDeleteMode()
+        // The mode is read once, when the menu was built. The dialog and the clean use the same value.
+        let mode = box.deleteMode
         guard Dialogs.confirm(box, mode: mode) else {
             Log.info("user: cancelled clean of \(box.findings.count) items")
             return
@@ -46,7 +46,8 @@ final class CleanCoordinator {
     /// Asks the owner app to quit, politely, and cleans when it has. An app that stays open is left alone.
     func confirmQuitAndClean(_ box: FindingBox) {
         guard let finding = box.findings.first, let owner = finding.owner, !isCleaning else { return }
-        let mode = Config.readDeleteMode()
+        // The mode is read once, when the menu was built. The dialog and the clean use the same value.
+        let mode = box.deleteMode
         guard Dialogs.confirm(box, mode: mode) else {
             Log.info("user: cancelled quit and clean of \(finding.id)")
             return
